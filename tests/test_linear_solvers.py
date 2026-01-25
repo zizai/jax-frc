@@ -144,3 +144,98 @@ class TestConjugateGradient:
         result = conjugate_gradient(diag_op, b, max_iter=2, tol=1e-15)
 
         assert result.iterations <= 2
+
+
+class TestCGDiffusion:
+    """Tests for CG on diffusion-like operators."""
+
+    def test_cg_solves_2d_laplacian(self):
+        """CG should solve 2D Laplacian on small grid."""
+        nr, nz = 8, 8
+
+        # 2D Laplacian with Dirichlet BC (zeros at boundary)
+        # Standard 5-point stencil: center coefficient 4, neighbors -1
+        # This is SPD for interior points with zero boundary conditions
+        def laplacian_2d(x):
+            # Create output array
+            result = jnp.zeros_like(x)
+            # Interior: standard 5-point stencil
+            result = result.at[1:-1, 1:-1].set(
+                4.0 * x[1:-1, 1:-1]
+                - x[:-2, 1:-1]
+                - x[2:, 1:-1]
+                - x[1:-1, :-2]
+                - x[1:-1, 2:]
+            )
+            return result
+
+        # Create a smooth RHS (zero at boundaries as required by Dirichlet BC)
+        r = jnp.linspace(0, 1, nr)[:, None]
+        z = jnp.linspace(0, 1, nz)[None, :]
+        b = jnp.sin(jnp.pi * r) * jnp.sin(jnp.pi * z)
+        # Ensure boundary is exactly zero
+        b = b.at[0, :].set(0.0)
+        b = b.at[-1, :].set(0.0)
+        b = b.at[:, 0].set(0.0)
+        b = b.at[:, -1].set(0.0)
+
+        result = conjugate_gradient(laplacian_2d, b, tol=1e-6, max_iter=200)
+
+        # Verify Ax ≈ b for interior points
+        Ax = laplacian_2d(result.x)
+        # Check interior convergence (boundary is always zero for this operator)
+        interior_close = jnp.allclose(
+            Ax[1:-1, 1:-1], b[1:-1, 1:-1], rtol=1e-4, atol=1e-6
+        )
+        assert interior_close
+        assert result.converged
+
+    def test_cg_solves_implicit_diffusion_operator(self):
+        """CG should solve (I - dt*D*lap)x = b for implicit diffusion.
+
+        Note: The discrete Laplacian lap = (u[i+1] - 2*u[i] + u[i-1])/dx^2
+        is negative semi-definite. So (I - dt*D*lap) has diagonal
+        1 + 2*dt*D/dx^2 which is > 1, making it SPD.
+        """
+        nr, nz = 8, 8
+        dr, dz = 1.0, 1.0  # Unit spacing for simplicity
+        dt = 0.1
+        D = 0.5  # Diffusion coefficient
+
+        # Implicit diffusion operator: (I - dt*D*lap) on interior, identity on boundary
+        def implicit_diffusion(x):
+            result = x.copy()
+            # Standard discrete Laplacian on interior only
+            lap_interior = (
+                (x[2:, 1:-1] - 2*x[1:-1, 1:-1] + x[:-2, 1:-1]) / dr**2 +
+                (x[1:-1, 2:] - 2*x[1:-1, 1:-1] + x[1:-1, :-2]) / dz**2
+            )
+            # Apply (I - dt*D*lap) only to interior
+            result = result.at[1:-1, 1:-1].set(
+                x[1:-1, 1:-1] - dt * D * lap_interior
+            )
+            # Boundary stays as identity: result[boundary] = x[boundary]
+            return result
+
+        # RHS: construct b from a known x_true so A*x_true = b
+        r = jnp.linspace(0, 1, nr)[:, None]
+        z = jnp.linspace(0, 1, nz)[None, :]
+        x_true = jnp.exp(-(r-0.5)**2 - (z-0.5)**2)
+        b = implicit_diffusion(x_true)
+
+        # Jacobi preconditioner: diagonal of (I - dt*D*lap)
+        # Interior: 1 + dt*D*(2/dr^2 + 2/dz^2), Boundary: 1
+        diag = jnp.ones((nr, nz))
+        interior_diag = 1.0 + dt * D * (2.0/dr**2 + 2.0/dz**2)
+        diag = diag.at[1:-1, 1:-1].set(interior_diag)
+        precond = jacobi_preconditioner(diag)
+
+        result = conjugate_gradient(
+            implicit_diffusion, b,
+            preconditioner=precond,
+            tol=1e-6, max_iter=100
+        )
+
+        # Verify solution matches known x_true
+        assert jnp.allclose(result.x, x_true, rtol=1e-4, atol=1e-5)
+        assert result.converged
