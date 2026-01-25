@@ -76,9 +76,9 @@ class MergingPhase(Phase):
         nz = psi.shape[1]
         dz = geometry.dz
 
-        # Compute shift in grid points
+        # Compute shift in grid points (at least 1)
         shift_points = int(separation / (2 * dz))
-        shift_points = min(shift_points, nz // 4)  # Don't shift too far
+        shift_points = max(1, min(shift_points, nz // 4))  # At least 1, no more than nz//4
 
         # Create shifted versions
         psi_left = jnp.roll(psi, -shift_points, axis=1)

@@ -79,3 +79,28 @@ class TestMergingPhase:
         # Should have opposite signs
         assert jnp.mean(vz_left) > 0
         assert jnp.mean(vz_right) < 0
+
+    def test_step_hook_applies_compression_bc(self, single_frc_state, geometry):
+        """MergingPhase.step_hook applies compression BC when configured."""
+        phase = MergingPhase(
+            name="merge",
+            transition=timeout(10.0),
+            separation=2.0,
+            initial_velocity=0.1,
+            compression={
+                "base_field": 1.0,
+                "mirror_ratio": 1.5,
+                "ramp_time": 10.0,
+                "profile": "cosine",
+            },
+        )
+
+        # Setup creates the compression BC
+        state = phase.setup(single_frc_state, geometry, {})
+        assert phase._compression_bc is not None
+
+        # step_hook should apply BC (no error means success)
+        # Set time > 0 so compression has effect
+        state_with_time = state.replace(time=5.0)
+        result = phase.step_hook(state_with_time, geometry, t=5.0)
+        assert result is not None
