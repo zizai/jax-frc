@@ -30,6 +30,10 @@ class SemiImplicitSolver(Solver):
 
     def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state using semi-implicit Hall damping and STS for temperature."""
+        # Apply constraints first to ensure state is well-formed for RHS computation
+        # This is critical for roll-based derivatives at boundaries
+        state = model.apply_constraints(state, geometry)
+
         # Get explicit RHS
         rhs = model.compute_rhs(state, geometry)
 
