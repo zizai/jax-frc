@@ -1,0 +1,107 @@
+"""Invariant tests for Resistive MHD simulation."""
+import pytest
+import jax
+import jax.numpy as jnp
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from resistive_mhd import step, laplace_star, compute_j_phi, chodura_resistivity
+from tests.invariants import format_failures
+from tests.invariants.boundedness import FiniteValues, NoExponentialGrowth, BoundedRange
+from tests.invariants.conservation import FluxConservation
+from tests.invariants.consistency import ResistivityBounds
+
+@pytest.fixture
+def resistive_mhd_state():
+    """Initialize resistive MHD state for testing."""
+    nr, nz = 32, 64
+    dr, dz = 1.0/nr, 2.0/nz
+    dt = 1e-4
+
+    r = jnp.linspace(0.01, 1.0, nr)[:, None]
+    z = jnp.linspace(-1.0, 1.0, nz)[None, :]
+
+    psi_init = (1 - r**2) * jnp.exp(-z**2)
+    I_coil_init = 0.0
+
+    V_bank = 1000.0
+    L_coil = 1e-6
+    M_plasma_coil = 1e-7
+
+    state = (psi_init, I_coil_init, 0.0, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil)
+    step_fn = jax.jit(step)
+
+    return state, step_fn, dr, dz, r
+
+class TestResistiveMHDBoundedness:
+    """Boundedness tests for Resistive MHD."""
+
+    def test_flux_stays_finite(self, resistive_mhd_state, invariant_checker):
+        """Flux function psi should never contain NaN or Inf."""
+        state, step_fn, dr, dz, r = resistive_mhd_state
+        invariants = [FiniteValues("psi")]
+
+        all_failures = []
+        for i in range(100):
+            new_state, _ = step_fn(state, None)
+            psi_before, psi_after = state[0], new_state[0]
+            _, failures = invariant_checker(invariants, psi_before, psi_after, i)
+            all_failures.extend(failures)
+            state = new_state
+
+        assert not all_failures, format_failures(all_failures)
+
+    def test_no_exponential_growth(self, resistive_mhd_state, invariant_checker):
+        """Flux should not grow exponentially (indicates instability)."""
+        state, step_fn, dr, dz, r = resistive_mhd_state
+        invariants = [NoExponentialGrowth("psi", growth_factor=1.5)]
+
+        all_failures = []
+        for i in range(100):
+            new_state, _ = step_fn(state, None)
+            psi_before, psi_after = state[0], new_state[0]
+            _, failures = invariant_checker(invariants, psi_before, psi_after, i)
+            all_failures.extend(failures)
+            state = new_state
+
+        assert not all_failures, format_failures(all_failures)
+
+class TestResistiveMHDConsistency:
+    """Consistency tests for Resistive MHD."""
+
+    def test_resistivity_bounds(self, resistive_mhd_state):
+        """Chodura resistivity should stay within physical bounds."""
+        state, step_fn, dr, dz, r = resistive_mhd_state
+        psi = state[0]
+
+        j_phi = compute_j_phi(psi, dr, dz, r)
+        eta = chodura_resistivity(psi, j_phi)
+
+        # Default Chodura: eta_0=1e-4, eta_anom=1e-2
+        invariant = ResistivityBounds(eta_min=0.0, eta_max=0.02)
+        result = invariant.check(None, eta)
+
+        assert result.passed, result.message
+
+class TestResistiveMHDIntegration:
+    """Full simulation integration tests."""
+
+    def test_100_steps_stable(self, resistive_mhd_state, invariant_checker):
+        """Simulation should remain stable for 100 steps."""
+        state, step_fn, dr, dz, r = resistive_mhd_state
+        invariants = [
+            FiniteValues("psi"),
+            NoExponentialGrowth("psi", growth_factor=2.0),
+        ]
+
+        all_failures = []
+        for i in range(100):
+            new_state, _ = step_fn(state, None)
+            psi_before, psi_after = state[0], new_state[0]
+            _, failures = invariant_checker(invariants, psi_before, psi_after, i)
+            all_failures.extend(failures)
+            state = new_state
+
+        assert not all_failures, format_failures(all_failures)
