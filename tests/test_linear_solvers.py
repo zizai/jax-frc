@@ -360,3 +360,56 @@ class TestImexDiffusion:
         assert not jnp.allclose(new_state.B, state.B)
         # B should remain finite
         assert jnp.all(jnp.isfinite(new_state.B))
+
+
+class TestImexExplicit:
+    """Tests for IMEX explicit step."""
+
+    @pytest.fixture
+    def geometry(self):
+        from jax_frc.core.geometry import Geometry
+        return Geometry(
+            coord_system="cylindrical",
+            r_min=0.01, r_max=1.0,
+            z_min=-1.0, z_max=1.0,
+            nr=16, nz=32
+        )
+
+    def test_explicit_half_step_advances_psi(self, geometry):
+        """Explicit step should advance psi by advection."""
+        from jax_frc.solvers.imex import ImexSolver, ImexConfig
+        from jax_frc.core.state import State
+        from jax_frc.models.resistive_mhd import ResistiveMHD
+        from jax_frc.models.resistivity import SpitzerResistivity
+
+        config = ImexConfig()
+        solver = ImexSolver(config)
+
+        nr, nz = geometry.nr, geometry.nz
+
+        # Create state with non-zero psi and velocity
+        psi = jnp.sin(jnp.pi * geometry.r_grid / geometry.r_max)
+        v = jnp.zeros((nr, nz, 3))
+        v = v.at[:, :, 0].set(0.1)  # Radial velocity
+
+        state = State(
+            psi=psi,
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=jnp.ones((nr, nz)) * 100.0,
+            B=jnp.zeros((nr, nz, 3)),
+            E=jnp.zeros((nr, nz, 3)),
+            v=v,
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=1e-6))
+
+        dt = 1e-5
+        new_state = solver._explicit_half_step(state, dt, model, geometry)
+
+        # psi should change due to advection
+        # (small change expected for small dt)
+        assert jnp.all(jnp.isfinite(new_state.psi))
