@@ -6,6 +6,8 @@ from jax_frc.core.state import State
 from jax_frc.scenarios import Scenario, timeout
 from jax_frc.scenarios.phases.merging import MergingPhase
 from jax_frc.scenarios.transitions import separation_below, any_of
+from jax_frc.models.base import PhysicsModel
+from jax_frc.solvers.base import Solver
 import jax.numpy as jnp
 
 
@@ -74,7 +76,7 @@ def create_initial_frc(geometry: Geometry,
     return state.replace(psi=psi, p=p, n=n)
 
 
-def belova_case1() -> Scenario:
+def belova_case1(model_type: str = "resistive_mhd") -> Scenario:
     """Large FRC merging without compression (paper Fig. 1-2).
 
     Parameters:
@@ -83,6 +85,9 @@ def belova_case1() -> Scenario:
         Initial velocity: Vz = 0.2 vA
 
     Expected outcome: Partial merge, doublet configuration
+
+    Args:
+        model_type: "resistive_mhd" or "hybrid_kinetic"
     """
     geometry = create_default_geometry(rc=1.0, zc=5.0, nr=64, nz=512)
     initial_state = create_initial_frc(
@@ -92,6 +97,13 @@ def belova_case1() -> Scenario:
         xs=0.69,
         beta_s=0.2
     )
+
+    model_config = {
+        "type": model_type,
+        "resistivity": {"type": "chodura", "eta_0": 1e-6, "eta_anom": 1e-3}
+    }
+    physics_model = PhysicsModel.create(model_config)
+    solver = Solver.create({"type": "rk4"})
 
     # Merge phase with velocity drive only (no compression)
     merge_phase = MergingPhase(
@@ -110,11 +122,13 @@ def belova_case1() -> Scenario:
         phases=[merge_phase],
         geometry=geometry,
         initial_state=initial_state,
-        dt=0.01,
+        physics_model=physics_model,
+        solver=solver,
+        dt=0.001,
     )
 
 
-def belova_case2() -> Scenario:
+def belova_case2(model_type: str = "resistive_mhd") -> Scenario:
     """Small FRC merging without compression (paper Fig. 3-4).
 
     Parameters:
@@ -123,6 +137,9 @@ def belova_case2() -> Scenario:
         Initial velocity: Vz = 0.1 vA
 
     Expected outcome: Complete merge by ~5-7 tA
+
+    Args:
+        model_type: "resistive_mhd" or "hybrid_kinetic"
     """
     geometry = create_default_geometry(rc=1.0, zc=3.0, nr=64, nz=256)
     initial_state = create_initial_frc(
@@ -132,6 +149,13 @@ def belova_case2() -> Scenario:
         xs=0.53,
         beta_s=0.2
     )
+
+    model_config = {
+        "type": model_type,
+        "resistivity": {"type": "chodura", "eta_0": 1e-6, "eta_anom": 1e-3}
+    }
+    physics_model = PhysicsModel.create(model_config)
+    solver = Solver.create({"type": "rk4"})
 
     merge_phase = MergingPhase(
         name="merge_small_frc",
@@ -149,11 +173,49 @@ def belova_case2() -> Scenario:
         phases=[merge_phase],
         geometry=geometry,
         initial_state=initial_state,
-        dt=0.01,
+        physics_model=physics_model,
+        solver=solver,
+        dt=0.001,
     )
 
 
-def belova_case4() -> Scenario:
+def belova_case3(separation: float = 1.5, model_type: str = "resistive_mhd") -> Scenario:
+    """Small FRC with variable separation (paper Section 2.3).
+
+    Args:
+        separation: Initial separation (1.5~dZ=75, 2.2~dZ=110, 2.5~dZ=125, 3.7~dZ=185)
+        model_type: "resistive_mhd" or "hybrid_kinetic"
+    """
+    zc = max(3.0, separation * 1.5)
+    geometry = create_default_geometry(rc=1.0, zc=zc, nr=64, nz=256)
+    initial_state = create_initial_frc(geometry, s_star=20.0, elongation=1.5, xs=0.53, beta_s=0.2)
+
+    model_config = {"type": model_type, "resistivity": {"type": "chodura", "eta_0": 1e-6, "eta_anom": 1e-3}}
+    physics_model = PhysicsModel.create(model_config)
+    solver = Solver.create({"type": "rk4"})
+
+    max_time = 50.0 if separation > 2.5 else 25.0
+
+    merge_phase = MergingPhase(
+        name="merge_separation_test",
+        transition=any_of(separation_below(0.3, geometry), timeout(max_time)),
+        separation=separation,
+        initial_velocity=0.1,
+        compression=None,
+    )
+
+    return Scenario(
+        name=f"belova_case3_sep{separation}",
+        phases=[merge_phase],
+        geometry=geometry,
+        initial_state=initial_state,
+        physics_model=physics_model,
+        solver=solver,
+        dt=0.001,
+    )
+
+
+def belova_case4(model_type: str = "resistive_mhd") -> Scenario:
     """Large FRC with compression (paper Fig. 6-7).
 
     Parameters: Same as case1 but with compression
@@ -161,6 +223,9 @@ def belova_case4() -> Scenario:
         Ramp time: 19 tA
 
     Expected outcome: Complete merge by ~20-25 tA
+
+    Args:
+        model_type: "resistive_mhd" or "hybrid_kinetic"
     """
     geometry = create_default_geometry(rc=1.0, zc=5.0, nr=64, nz=512)
     initial_state = create_initial_frc(
@@ -170,6 +235,13 @@ def belova_case4() -> Scenario:
         xs=0.69,
         beta_s=0.2
     )
+
+    model_config = {
+        "type": model_type,
+        "resistivity": {"type": "chodura", "eta_0": 1e-6, "eta_anom": 1e-3}
+    }
+    physics_model = PhysicsModel.create(model_config)
+    solver = Solver.create({"type": "rk4"})
 
     merge_phase = MergingPhase(
         name="merge_with_compression",
@@ -192,7 +264,9 @@ def belova_case4() -> Scenario:
         phases=[merge_phase],
         geometry=geometry,
         initial_state=initial_state,
-        dt=0.01,
+        physics_model=physics_model,
+        solver=solver,
+        dt=0.001,
     )
 
 
