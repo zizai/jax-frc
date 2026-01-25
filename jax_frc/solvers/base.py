@@ -22,5 +22,11 @@ class Solver(ABC):
         elif solver_type == "rk4":
             from jax_frc.solvers.explicit import RK4Solver
             return RK4Solver()
+        elif solver_type == "semi_implicit":
+            from jax_frc.solvers.semi_implicit import SemiImplicitSolver
+            return SemiImplicitSolver.from_config(config)
+        elif solver_type == "hybrid":
+            from jax_frc.solvers.semi_implicit import HybridSolver
+            return HybridSolver()
         else:
             raise ValueError(f"Unknown solver type: {solver_type}")
