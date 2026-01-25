@@ -28,5 +28,14 @@ class Solver(ABC):
         elif solver_type == "hybrid":
             from jax_frc.solvers.semi_implicit import HybridSolver
             return HybridSolver()
+        elif solver_type == "imex":
+            from jax_frc.solvers.imex import ImexSolver, ImexConfig
+            imex_config = ImexConfig(
+                theta=float(config.get("theta", 1.0)),
+                cg_tol=float(config.get("cg_tol", 1e-6)),
+                cg_max_iter=int(config.get("cg_max_iter", 500)),
+                cfl_factor=float(config.get("cfl_factor", 0.4))
+            )
+            return ImexSolver(config=imex_config)
         else:
             raise ValueError(f"Unknown solver type: {solver_type}")

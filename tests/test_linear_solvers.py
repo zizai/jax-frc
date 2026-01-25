@@ -239,3 +239,27 @@ class TestCGDiffusion:
         # Verify solution matches known x_true
         assert jnp.allclose(result.x, x_true, rtol=1e-4, atol=1e-5)
         assert result.converged
+
+
+class TestImexSolver:
+    """Tests for IMEX time integrator."""
+
+    def test_imex_config_defaults(self):
+        """ImexConfig should have sensible defaults."""
+        from jax_frc.solvers.imex import ImexConfig
+
+        config = ImexConfig()
+
+        assert config.theta == 1.0  # Backward Euler
+        assert config.cg_tol == 1e-6
+        assert config.cg_max_iter == 500
+        assert config.cfl_factor == 0.4
+
+    def test_imex_solver_creates(self):
+        """ImexSolver should instantiate."""
+        from jax_frc.solvers.imex import ImexSolver, ImexConfig
+
+        config = ImexConfig()
+        solver = ImexSolver(config)
+
+        assert solver.config.theta == 1.0
