@@ -102,9 +102,11 @@ def interpolate_field_to_particles(field, x, geometry_params):
     return result
 
 
-@jit
 def deposit_particles_to_grid(values, weights, x, geometry_params):
     """Deposit particle quantities to grid using CIC (Cloud-In-Cell).
+
+    Note: Not JIT-compiled because grid shape depends on runtime parameters.
+    For performance, wrap the calling function with jax.jit and use static_argnums.
 
     Args:
         values: Values to deposit (n_particles,) or (n_particles, 3)

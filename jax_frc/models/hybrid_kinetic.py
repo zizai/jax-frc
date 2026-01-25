@@ -70,20 +70,57 @@ class HybridKinetic(PhysicsModel):
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
         """Compute time derivatives for hybrid model.
 
-        This computes the RHS for the electromagnetic fields.
-        Particle pushing is handled separately in step().
+        This computes the RHS for the electromagnetic fields using Faraday's law
+        with E from the electron fluid equation (generalized Ohm's law).
         """
-        # For hybrid model, field evolution comes from Faraday's law
-        # with E from generalized Ohm's law
         dr, dz = geometry.dr, geometry.dz
 
-        # Compute current from particle moments (stored in state)
-        # J_i is deposited from particles, J_e = J_i for quasi-neutrality
-        # E = -v_e x B + eta*J - grad(p_e)/(ne)
+        # Compute ion current from particles
+        J_i = self.deposit_current(state, geometry)
 
-        # Simplified: return zero RHS for B (fields updated via particles)
-        dB = jnp.zeros_like(state.B)
-        return state.replace(B=dB)
+        # For quasi-neutrality, J_total = J_i (electrons carry return current)
+        J_total = J_i
+
+        # Compute E from electron fluid equation per plasma_physics.md:
+        # E = (J_total×B - J_i×B)/(ne) - ∇p_e/(ne) + η*J
+        # Since J_total = J_i for quasi-neutrality, first term vanishes
+        # E = -∇p_e/(ne) + η*J
+        n = jnp.maximum(state.n, 1e16)  # Avoid division by zero
+        ne = n * QE
+
+        # Electron pressure gradient term: -∇p_e/(ne)
+        dp_dr = (jnp.roll(state.p, -1, axis=0) - jnp.roll(state.p, 1, axis=0)) / (2*dr)
+        dp_dz = (jnp.roll(state.p, -1, axis=1) - jnp.roll(state.p, 1, axis=1)) / (2*dz)
+
+        E_r = -dp_dr / ne + self.eta * J_total[:, :, 0]
+        E_phi = self.eta * J_total[:, :, 1]
+        E_z = -dp_dz / ne + self.eta * J_total[:, :, 2]
+
+        E = jnp.stack([E_r, E_phi, E_z], axis=-1)
+
+        # Faraday's law: dB/dt = -curl(E)
+        dB_r, dB_phi, dB_z = self._compute_curl_E(E_r, E_phi, E_z, dr, dz)
+        dB = jnp.stack([-dB_r, -dB_phi, -dB_z], axis=-1)
+
+        # Store E in state for particle pushing
+        return state.replace(B=dB, E=E)
+
+    def _compute_curl_E(self, E_r, E_phi, E_z, dr, dz):
+        """Compute curl(E) for Faraday's law in cylindrical coordinates."""
+        # curl_r = (1/r)*dE_z/dphi - dE_phi/dz ~ -dE_phi/dz (axisymmetric)
+        dE_phi_dz = (jnp.roll(E_phi, -1, axis=1) - jnp.roll(E_phi, 1, axis=1)) / (2*dz)
+        curl_r = -dE_phi_dz
+
+        # curl_phi = dE_r/dz - dE_z/dr
+        dE_r_dz = (jnp.roll(E_r, -1, axis=1) - jnp.roll(E_r, 1, axis=1)) / (2*dz)
+        dE_z_dr = (jnp.roll(E_z, -1, axis=0) - jnp.roll(E_z, 1, axis=0)) / (2*dr)
+        curl_phi = dE_r_dz - dE_z_dr
+
+        # curl_z = (1/r)*d(r*E_phi)/dr ~ dE_phi/dr (simplified)
+        dE_phi_dr = (jnp.roll(E_phi, -1, axis=0) - jnp.roll(E_phi, 1, axis=0)) / (2*dr)
+        curl_z = dE_phi_dr
+
+        return curl_r, curl_phi, curl_z
 
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
         """Ion cyclotron CFL constraint: dt < 0.1 / omega_ci."""
