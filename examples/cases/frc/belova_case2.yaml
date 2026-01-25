@@ -1,0 +1,27 @@
+# examples/cases/frc/belova_case2.yaml
+# Small FRC merging without compression (Belova et al. Fig. 3-4)
+
+name: belova_case2
+description: |
+  Small FRC merging without compression.
+
+  Parameters:
+    S* = 20, E = 1.5, xs = 0.53, beta_s = 0.2
+    Initial separation: dZ = 75 (normalized)
+    Initial velocity: Vz = 0.1 vA
+
+  Expected outcome: Complete merge by ~5-7 tA
+
+configuration:
+  class: BelovaCase2Configuration
+  overrides:
+    model_type: resistive_mhd
+
+runtime:
+  t_end: 15.0
+  dt: 0.001
+
+output:
+  save_history: true
+  print_summary: true
+  log_level: INFO
