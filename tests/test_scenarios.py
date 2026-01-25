@@ -318,3 +318,15 @@ def test_scenario_calls_solver_step():
 
     # Solver should have been called multiple times
     assert mock_solver.step.call_count >= 5
+
+
+def test_scenario_has_diagnostics_fields():
+    """Scenario should have diagnostics list and output_interval."""
+    import inspect
+    from jax_frc.scenarios.scenario import Scenario
+
+    sig = inspect.signature(Scenario)
+    params = list(sig.parameters.keys())
+
+    assert "diagnostics" in params
+    assert "output_interval" in params

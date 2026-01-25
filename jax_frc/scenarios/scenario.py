@@ -10,6 +10,7 @@ from jax_frc.core.geometry import Geometry
 from jax_frc.scenarios.phase import Phase, PhaseResult
 from jax_frc.models.base import PhysicsModel
 from jax_frc.solvers.base import Solver
+from jax_frc.diagnostics.probes import Probe
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,8 @@ class Scenario:
     solver: Solver
     dt: float
     config: Dict[str, dict] = field(default_factory=dict)
+    diagnostics: List[Probe] = field(default_factory=list)
+    output_interval: int = 100
 
     def run(self) -> ScenarioResult:
         """Run all phases in sequence.
