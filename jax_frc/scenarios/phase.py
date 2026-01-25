@@ -1,7 +1,7 @@
 """Phase base class for simulation stages."""
 
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import Dict, Any, List
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
 from jax_frc.scenarios.transitions import Transition
@@ -18,6 +18,7 @@ class PhaseResult:
     end_time: float
     termination: str  # "condition_met", "timeout", "error"
     diagnostics: Dict[str, Any] = field(default_factory=dict)
+    history: Dict[str, List[float]] = field(default_factory=dict)
 
 
 @dataclass

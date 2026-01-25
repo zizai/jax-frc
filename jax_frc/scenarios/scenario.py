@@ -8,6 +8,9 @@ import logging
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
 from jax_frc.scenarios.phase import Phase, PhaseResult
+from jax_frc.models.base import PhysicsModel
+from jax_frc.solvers.base import Solver
+from jax_frc.diagnostics.probes import Probe
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +42,8 @@ class Scenario:
         phases: Ordered list of phases to run
         geometry: Computational geometry
         initial_state: Starting state (or None if first phase creates it)
+        physics_model: Physics model for evolution equations
+        solver: Time integrator
         dt: Timestep for simulation
         config: Optional per-phase configuration overrides
     """
@@ -47,8 +52,12 @@ class Scenario:
     phases: List[Phase]
     geometry: Geometry
     initial_state: Optional[State]
+    physics_model: PhysicsModel
+    solver: Solver
     dt: float
     config: Dict[str, dict] = field(default_factory=dict)
+    diagnostics: List[Probe] = field(default_factory=list)
+    output_interval: int = 100
 
     def run(self) -> ScenarioResult:
         """Run all phases in sequence.
@@ -107,6 +116,11 @@ class Scenario:
         t = start_time
         termination = "condition_met"
 
+        # Initialize history tracking
+        history: Dict[str, List[float]] = {"time": []}
+        for probe in self.diagnostics:
+            history[probe.name] = []
+
         # Run until transition triggers
         while True:
             # Check for completion
@@ -115,12 +129,18 @@ class Scenario:
                 termination = reason
                 break
 
+            # Record diagnostics at intervals
+            if state.step % self.output_interval == 0:
+                history["time"].append(t)
+                for probe in self.diagnostics:
+                    history[probe.name].append(probe.measure(state, self.geometry))
+
             # Apply step hook (time-varying BCs, etc.)
             state = phase.step_hook(state, self.geometry, t)
 
-            # Advance time (actual physics stepping would go here)
-            t += self.dt
-            state = state.replace(time=t, step=state.step + 1)
+            # Advance physics via solver
+            state = self.solver.step(state, self.dt, self.physics_model, self.geometry)
+            t = float(state.time)
 
         # Cleanup
         state = phase.on_complete(state, self.geometry)
@@ -132,4 +152,5 @@ class Scenario:
             start_time=start_time,
             end_time=t,
             termination=termination,
+            history=history,
         )

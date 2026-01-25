@@ -106,7 +106,7 @@ class TestScenario:
     def initial_state(self):
         return State.zeros(nr=10, nz=20)
 
-    def test_scenario_runs_single_phase(self, simple_geometry, initial_state):
+    def test_scenario_runs_single_phase(self, simple_geometry, initial_state, mock_physics_model, mock_solver):
         """Scenario runs a single phase to completion."""
         from jax_frc.scenarios.scenario import Scenario, ScenarioResult
 
@@ -117,6 +117,8 @@ class TestScenario:
             phases=[phase],
             geometry=simple_geometry,
             initial_state=initial_state,
+            physics_model=mock_physics_model,
+            solver=mock_solver,
             dt=0.1,
         )
 
@@ -127,7 +129,7 @@ class TestScenario:
         assert result.phase_results[0].name == "test"
         assert result.phase_results[0].termination == "timeout"
 
-    def test_scenario_chains_phases(self, simple_geometry, initial_state):
+    def test_scenario_chains_phases(self, simple_geometry, initial_state, mock_physics_model, mock_solver):
         """Scenario passes state between phases."""
         from jax_frc.scenarios.scenario import Scenario, ScenarioResult
 
@@ -139,6 +141,8 @@ class TestScenario:
             phases=[phase1, phase2],
             geometry=simple_geometry,
             initial_state=initial_state,
+            physics_model=mock_physics_model,
+            solver=mock_solver,
             dt=0.1,
         )
 
@@ -237,3 +241,135 @@ class TestPhysicsConditions:
         trans = velocity_below(3.0)  # Should not trigger (5.0 > 3.0)
         triggered, _ = trans.evaluate(state, t=0.0)
         assert not triggered
+
+
+def test_phase_result_has_history():
+    """PhaseResult should have a history dict."""
+    from jax_frc.scenarios.phase import PhaseResult
+    from jax_frc.core.state import State
+
+    state = State.zeros(nr=8, nz=16)
+    result = PhaseResult(
+        name="test",
+        initial_state=state,
+        final_state=state,
+        start_time=0.0,
+        end_time=1.0,
+        termination="condition_met",
+        history={"time": [0.0, 0.5, 1.0], "metric": [1.0, 0.5, 0.2]}
+    )
+
+    assert result.history["time"] == [0.0, 0.5, 1.0]
+    assert result.history["metric"] == [1.0, 0.5, 0.2]
+
+
+def test_scenario_requires_physics_model_and_solver():
+    """Scenario should require physics_model and solver fields."""
+    from jax_frc.scenarios.scenario import Scenario
+    from jax_frc.models.base import PhysicsModel
+    from jax_frc.solvers.base import Solver
+
+    # Check that Scenario has these attributes in its signature
+    import inspect
+    sig = inspect.signature(Scenario)
+    params = list(sig.parameters.keys())
+
+    assert "physics_model" in params
+    assert "solver" in params
+
+
+def test_scenario_calls_solver_step():
+    """Scenario._run_phase should call solver.step() for physics evolution."""
+    from unittest.mock import MagicMock, patch
+    from jax_frc.core.geometry import Geometry
+    from jax_frc.core.state import State
+    from jax_frc.scenarios import Scenario
+    from jax_frc.scenarios.phase import Phase
+    from jax_frc.scenarios.transitions import timeout
+
+    geometry = Geometry(
+        coord_system="cylindrical", nr=8, nz=16,
+        r_min=0.01, r_max=1.0, z_min=-1.0, z_max=1.0
+    )
+    state = State.zeros(nr=8, nz=16)
+
+    # Mock physics model and solver
+    mock_model = MagicMock()
+    mock_solver = MagicMock()
+
+    # Solver.step returns updated state with incremented time
+    def fake_step(s, dt, model, geom):
+        return s.replace(time=s.time + dt, step=s.step + 1)
+    mock_solver.step.side_effect = fake_step
+
+    phase = Phase(name="test", transition=timeout(0.05))
+
+    scenario = Scenario(
+        name="test",
+        phases=[phase],
+        geometry=geometry,
+        initial_state=state,
+        physics_model=mock_model,
+        solver=mock_solver,
+        dt=0.01,
+    )
+
+    result = scenario.run()
+
+    # Solver should have been called multiple times
+    assert mock_solver.step.call_count >= 5
+
+
+def test_scenario_has_diagnostics_fields():
+    """Scenario should have diagnostics list and output_interval."""
+    import inspect
+    from jax_frc.scenarios.scenario import Scenario
+
+    sig = inspect.signature(Scenario)
+    params = list(sig.parameters.keys())
+
+    assert "diagnostics" in params
+    assert "output_interval" in params
+
+
+def test_scenario_records_diagnostics_history(mock_physics_model, mock_solver):
+    """Scenario should record diagnostics at output_interval."""
+    from jax_frc.diagnostics.probes import Probe
+    from jax_frc.scenarios.scenario import Scenario
+    from dataclasses import dataclass
+
+    @dataclass
+    class CountingProbe(Probe):
+        @property
+        def name(self) -> str:
+            return "counter"
+
+        def measure(self, state, geometry) -> float:
+            return float(state.step)
+
+    geometry = Geometry(
+        coord_system="cylindrical", nr=8, nz=16,
+        r_min=0.01, r_max=1.0, z_min=-1.0, z_max=1.0
+    )
+    state = State.zeros(nr=8, nz=16)
+    phase = Phase(name="test", transition=timeout(0.1))
+
+    scenario = Scenario(
+        name="test",
+        phases=[phase],
+        geometry=geometry,
+        initial_state=state,
+        physics_model=mock_physics_model,
+        solver=mock_solver,
+        dt=0.01,
+        diagnostics=[CountingProbe()],
+        output_interval=2,  # Record every 2 steps
+    )
+
+    result = scenario.run()
+
+    # Should have recorded history
+    history = result.phase_results[0].history
+    assert "time" in history
+    assert "counter" in history
+    assert len(history["time"]) > 0
