@@ -317,3 +317,46 @@ class TestImexDiffusion:
         result = operator(B_test)
 
         assert jnp.allclose(result, B_test)
+
+    def test_implicit_diffusion_step(self, geometry):
+        """Implicit diffusion should solve and update B field."""
+        from jax_frc.solvers.imex import ImexSolver, ImexConfig
+        from jax_frc.core.state import State
+        from jax_frc.models.resistive_mhd import ResistiveMHD
+        from jax_frc.models.resistivity import SpitzerResistivity
+
+        config = ImexConfig(theta=1.0, cg_tol=1e-8)
+        solver = ImexSolver(config)
+
+        nr, nz = geometry.nr, geometry.nz
+
+        # Create state with non-zero B_z
+        B = jnp.zeros((nr, nz, 3))
+        B = B.at[:, :, 2].set(
+            jnp.sin(jnp.pi * geometry.r_grid / geometry.r_max) *
+            jnp.cos(jnp.pi * geometry.z_grid / (2 * geometry.z_max))
+        )
+
+        state = State(
+            psi=jnp.zeros((nr, nz)),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=jnp.ones((nr, nz)) * 100.0,
+            B=B,
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        # Create model with uniform resistivity
+        model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=1e-4))
+
+        dt = 1e-3
+        new_state = solver._implicit_diffusion(state, dt, model, geometry)
+
+        # B should have changed (diffusion smooths it)
+        assert not jnp.allclose(new_state.B, state.B)
+        # B should remain finite
+        assert jnp.all(jnp.isfinite(new_state.B))

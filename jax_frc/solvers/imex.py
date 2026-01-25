@@ -51,8 +51,72 @@ class ImexSolver(Solver):
 
     def _implicit_diffusion(self, state: State, dt: float,
                             model: PhysicsModel, geometry: Geometry) -> State:
-        """Solve implicit diffusion step."""
-        raise NotImplementedError("Implicit diffusion not yet implemented")
+        """Solve implicit diffusion step for B field.
+
+        Solves: (I - theta*dt*D)·B^{n+1} = B^n + (1-theta)*dt*D·B^n
+
+        For backward Euler (theta=1): (I - dt*D)·B^{n+1} = B^n
+        For Crank-Nicolson (theta=0.5): (I - 0.5*dt*D)·B^{n+1} = (I + 0.5*dt*D)·B^n
+        """
+        # Get resistivity from model
+        if hasattr(model, 'resistivity'):
+            # For resistive MHD, compute J to get eta
+            j_phi = model._compute_j_phi(state.psi, geometry)
+            eta = model.resistivity.compute(j_phi)
+        else:
+            # Default uniform resistivity
+            eta = jnp.ones((geometry.nr, geometry.nz)) * 1e-6
+
+        theta = self.config.theta
+
+        # Solve for each B component
+        B_new = jnp.zeros_like(state.B)
+
+        for i, comp in enumerate(['r', 'theta', 'z']):
+            B_comp = state.B[:, :, i]
+
+            # Build operator and preconditioner
+            operator, diag = self._build_diffusion_operator(geometry, dt, eta, comp)
+            precond = jacobi_preconditioner(diag)
+
+            # Build RHS: B^n + (1-theta)*dt*D·B^n
+            if theta < 1.0:
+                # Compute explicit diffusion term
+                D = eta / MU0
+                lap = self._laplacian(B_comp, geometry.dr, geometry.dz)
+                rhs = B_comp + (1 - theta) * dt * D * lap
+            else:
+                # Backward Euler: RHS is just B^n
+                rhs = B_comp
+
+            # Solve with CG
+            result = conjugate_gradient(
+                operator, rhs,
+                x0=B_comp,  # Use current B as initial guess
+                preconditioner=precond,
+                tol=self.config.cg_tol,
+                max_iter=self.config.cg_max_iter
+            )
+
+            B_new = B_new.at[:, :, i].set(result.x)
+
+        return state.replace(B=B_new)
+
+    def _laplacian(self, f: Array, dr: float, dz: float) -> Array:
+        """Compute 2D Laplacian nabla^2 f = d^2f/dr^2 + d^2f/dz^2."""
+        lap = jnp.zeros_like(f)
+
+        # d^2f/dr^2 (interior)
+        lap = lap.at[1:-1, :].add(
+            (f[2:, :] - 2*f[1:-1, :] + f[:-2, :]) / dr**2
+        )
+
+        # d^2f/dz^2 (interior)
+        lap = lap.at[:, 1:-1].add(
+            (f[:, 2:] - 2*f[:, 1:-1] + f[:, :-2]) / dz**2
+        )
+
+        return lap
 
     def _build_diffusion_operator(
         self, geometry: Geometry, dt: float, eta: Array, component: str
