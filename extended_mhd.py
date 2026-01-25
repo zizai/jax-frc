@@ -2,6 +2,13 @@ import jax
 import jax.numpy as jnp
 from jax import jit, lax, grad, vmap
 
+from jax_frc.operators import (
+    gradient_r,
+    gradient_z,
+    curl_cylindrical_axisymmetric,
+    divergence_cylindrical,
+)
+
 MU0 = 1.2566e-6
 QE = 1.602e-19
 ME = 9.109e-31
@@ -9,20 +16,21 @@ ME = 9.109e-31
 @jit
 def curl_2d(f_x, f_y, dx, dy):
     """
-    Computes 2D curl: (d_fy/dx - d_fx/dy)
+    Computes 2D curl in Cartesian: (d_fy/dx - d_fx/dy)
+    DEPRECATED: Use curl_cylindrical_axisymmetric for cylindrical coordinates.
     """
     dfy_dx = (jnp.roll(f_y, -1, axis=0) - jnp.roll(f_y, 1, axis=0)) / (2 * dx)
     dfx_dy = (jnp.roll(f_x, -1, axis=1) - jnp.roll(f_x, 1, axis=1)) / (2 * dy)
     return dfy_dx - dfx_dy
 
 @jit
-def grad_2d(f, dx, dy):
+def grad_2d(f, dr, dz):
     """
-    Computes 2D gradient: (df/dx, df/dy)
+    Computes 2D gradient in cylindrical (r,z) using non-periodic boundaries.
     """
-    df_dx = (jnp.roll(f, -1, axis=0) - jnp.roll(f, 1, axis=0)) / (2 * dx)
-    df_dy = (jnp.roll(f, -1, axis=1) - jnp.roll(f, 1, axis=1)) / (2 * dy)
-    return df_dx, df_dy
+    df_dr = gradient_r(f, dr)
+    df_dz = gradient_z(f, dz)
+    return df_dr, df_dz
 
 @jit
 def cross_product_2d(a_x, a_y, b_x, b_y, a_z, b_z):
@@ -35,51 +43,76 @@ def cross_product_2d(a_x, a_y, b_x, b_y, a_z, b_z):
     return c_x, c_y, c_z
 
 @jit
-def extended_ohm_law(v_x, v_y, v_z, b_x, b_y, b_z, j_x, j_y, j_z, n, eta, p_e, dx, dy):
+def extended_ohm_law(v_r, v_theta, v_z, b_r, b_theta, b_z, j_r, j_theta, j_z, n, eta, p_e, dr, dz, r):
     """
+    Extended Ohm's law in cylindrical coordinates:
     E = -v x B + eta * J + (J x B) / (ne) - grad(p_e) / (ne)
+
+    Note: This function uses cylindrical (r, theta, z) velocity and field components.
     """
-    v_cross_b_x, v_cross_b_y, v_cross_b_z = cross_product_2d(v_x, v_y, b_x, b_y, v_z, b_z)
-    term1_x, term1_y, term1_z = -v_cross_b_x, -v_cross_b_y, -v_cross_b_z
-    
-    term2_x, term2_y, term2_z = eta * j_x, eta * j_y, eta * j_z
-    
-    j_cross_b_x, j_cross_b_y, j_cross_b_z = cross_product_2d(j_x, j_y, b_x, b_y, j_z, b_z)
-    term3_x, term3_y, term3_z = j_cross_b_x / (n * QE), j_cross_b_y / (n * QE), j_cross_b_z / (n * QE)
-    
-    dp_e_dx, dp_e_dy = grad_2d(p_e, dx, dy)
-    term4_x, term4_y = -dp_e_dx / (n * QE), -dp_e_dy / (n * QE)
-    term4_z = jnp.zeros_like(p_e)
-    
-    E_x = term1_x + term2_x + term3_x + term4_x
-    E_y = term1_y + term2_y + term3_y + term4_y
+    # v x B in cylindrical (r, theta, z)
+    v_cross_b_r = v_theta * b_z - v_z * b_theta
+    v_cross_b_theta = v_z * b_r - v_r * b_z
+    v_cross_b_z = v_r * b_theta - v_theta * b_r
+    term1_r, term1_theta, term1_z = -v_cross_b_r, -v_cross_b_theta, -v_cross_b_z
+
+    # Resistive term: eta * J
+    term2_r, term2_theta, term2_z = eta * j_r, eta * j_theta, eta * j_z
+
+    # Hall term: (J x B) / (ne)
+    j_cross_b_r = j_theta * b_z - j_z * b_theta
+    j_cross_b_theta = j_z * b_r - j_r * b_z
+    j_cross_b_z = j_r * b_theta - j_theta * b_r
+    n_safe = jnp.maximum(n, 1e16)  # Avoid division by zero
+    term3_r = j_cross_b_r / (n_safe * QE)
+    term3_theta = j_cross_b_theta / (n_safe * QE)
+    term3_z = j_cross_b_z / (n_safe * QE)
+
+    # Electron pressure gradient: -grad(p_e) / (ne)
+    dp_e_dr, dp_e_dz = grad_2d(p_e, dr, dz)
+    term4_r = -dp_e_dr / (n_safe * QE)
+    term4_theta = jnp.zeros_like(p_e)  # No theta gradient in axisymmetric
+    term4_z = -dp_e_dz / (n_safe * QE)
+
+    E_r = term1_r + term2_r + term3_r + term4_r
+    E_theta = term1_theta + term2_theta + term3_theta + term4_theta
     E_z = term1_z + term2_z + term3_z + term4_z
-    
-    return E_x, E_y, E_z
+
+    return E_r, E_theta, E_z
 
 @jit
-def hall_operator(b_x, b_y, b_z, n, dx, dy):
+def hall_operator(b_r, b_theta, b_z, n, dr, dz, r):
     """
     Constructs the Hall differential operator for semi-implicit stepping.
     L_Hall ~ curl((J x B) / (ne))
-    """
-    j_x = (1.0 / MU0) * curl_2d(b_z, b_y, dx, dy)
-    j_y = (1.0 / MU0) * curl_2d(b_x, b_z, dx, dy)
-    j_z = (1.0 / MU0) * curl_2d(b_y, b_x, dx, dy)
-    
-    j_cross_b_x, j_cross_b_y, j_cross_b_z = cross_product_2d(j_x, j_y, b_x, b_y, j_z, b_z)
-    
-    hall_x = j_cross_b_x / (n * QE)
-    hall_y = j_cross_b_y / (n * QE)
-    hall_z = j_cross_b_z / (n * QE)
-    
-    curl_hall_x = curl_2d(hall_z, hall_y, dx, dy)
-    curl_hall_y = curl_2d(hall_x, hall_z, dx, dy)
-    curl_hall_z = curl_2d(hall_y, hall_x, dx, dy)
-    
-    return curl_hall_x, curl_hall_y, curl_hall_z
 
-def compute_whistler_stable_dt(B_max, n, dx, dy):
+    Uses correct cylindrical curl with L'Hopital at axis.
+    """
+    # Compute J = curl(B) / mu0 in cylindrical coordinates
+    j_r, j_theta, j_z = curl_cylindrical_axisymmetric(b_r, b_theta, b_z, dr, dz, r)
+    j_r = j_r / MU0
+    j_theta = j_theta / MU0
+    j_z = j_z / MU0
+
+    # J x B in cylindrical
+    j_cross_b_r = j_theta * b_z - j_z * b_theta
+    j_cross_b_theta = j_z * b_r - j_r * b_z
+    j_cross_b_z = j_r * b_theta - j_theta * b_r
+
+    # Hall term: (J x B) / (ne)
+    n_safe = jnp.maximum(n, 1e16)
+    hall_r = j_cross_b_r / (n_safe * QE)
+    hall_theta = j_cross_b_theta / (n_safe * QE)
+    hall_z = j_cross_b_z / (n_safe * QE)
+
+    # curl(Hall) in cylindrical coordinates
+    curl_hall_r, curl_hall_theta, curl_hall_z = curl_cylindrical_axisymmetric(
+        hall_r, hall_theta, hall_z, dr, dz, r
+    )
+
+    return curl_hall_r, curl_hall_theta, curl_hall_z
+
+def compute_whistler_stable_dt(B_max, n, dr, dz):
     """
     Compute CFL-stable timestep for Whistler waves.
     Whistler speed: v_w = k * B / (mu0 * n * e) where k = pi/dx
@@ -88,65 +121,66 @@ def compute_whistler_stable_dt(B_max, n, dx, dy):
     Args:
         B_max: Maximum magnetic field strength [T]
         n: Minimum density [m^-3] (must be > 0)
-        dx, dy: Grid spacings
+        dr, dz: Grid spacings
 
     Returns:
         Stable timestep with 25% safety margin
     """
-    # Note: Validation happens at runtime via JAX tracing
-    # For production, add explicit checks in run_simulation
-    k = jnp.pi / jnp.minimum(dx, dy)
+    dx_min = jnp.minimum(dr, dz)
+    k = jnp.pi / dx_min
     v_whistler = k * B_max / (MU0 * n * QE)
-    dt_cfl = jnp.minimum(dx, dy) / v_whistler
+    dt_cfl = dx_min / v_whistler
     return 0.25 * dt_cfl  # 25% safety margin
 
 
 @jit
-def compute_div_b(b_x, b_y, b_z, dx, dy):
+def compute_div_b(b_r, b_theta, b_z, dr, dz, r):
     """
-    Compute divergence of magnetic field: div(B) = dBx/dx + dBy/dy + dBz/dz.
-    For 2D simulations, we compute dBx/dx + dBy/dy (Bz varies only in x,y).
+    Compute divergence of magnetic field in cylindrical coordinates.
+    div(B) = (1/r)*d(r*B_r)/dr + dB_z/dz
+           = B_r/r + dB_r/dr + dB_z/dz
+
+    For 2D axisymmetric: B_theta doesn't contribute to divergence.
     """
-    db_x_dx = (jnp.roll(b_x, -1, axis=0) - jnp.roll(b_x, 1, axis=0)) / (2 * dx)
-    db_y_dy = (jnp.roll(b_y, -1, axis=1) - jnp.roll(b_y, 1, axis=1)) / (2 * dy)
-    return db_x_dx + db_y_dy
+    return divergence_cylindrical(b_r, b_z, dr, dz, r)
 
 
 @jit
-def divergence_cleaning_step(b_x, b_y, b_z, dx, dy):
+def divergence_cleaning_step(b_r, b_theta, b_z, dr, dz, r):
     """
-    Apply divergence cleaning using projection method.
+    Apply divergence cleaning using projection method in cylindrical coordinates.
 
     Solves div(B - grad(phi)) = 0 iteratively using Jacobi relaxation.
     This enforces the div(B) = 0 constraint numerically.
 
-    Uses 5 Jacobi iterations (fixed for JIT compatibility).
+    Uses 50 Jacobi iterations with tolerance-based early exit via while_loop.
 
     Args:
-        b_x, b_y, b_z: Magnetic field components
-        dx, dy: Grid spacings
+        b_r, b_theta, b_z: Magnetic field components
+        dr, dz: Grid spacings
+        r: Radial coordinate array
 
     Returns:
-        Cleaned magnetic field components (b_x_clean, b_y_clean, b_z_clean)
+        Cleaned magnetic field components (b_r_clean, b_theta_clean, b_z_clean)
     """
     # Compute current divergence error
-    div_b = compute_div_b(b_x, b_y, b_z, dx, dy)
+    div_b = compute_div_b(b_r, b_theta, b_z, dr, dz, r)
 
     # Solve Laplacian(phi) = div(B) using Jacobi iteration
-    # This is a simplified approach - full projection would use FFT or multigrid
-    phi = jnp.zeros_like(b_x)
+    phi = jnp.zeros_like(b_r)
 
-    # Laplacian stencil coefficient
-    coeff = 2.0 / dx**2 + 2.0 / dy**2
+    # Laplacian stencil coefficient (Cartesian approximation for simplicity)
+    coeff = 2.0 / dr**2 + 2.0 / dz**2
 
-    def jacobi_step(i, phi):
-        # Jacobi update: phi_new = (1/coeff) * (neighbors/dx^2 - div_b)
-        phi_xp = jnp.roll(phi, -1, axis=0)
-        phi_xm = jnp.roll(phi, 1, axis=0)
-        phi_yp = jnp.roll(phi, -1, axis=1)
-        phi_ym = jnp.roll(phi, 1, axis=1)
+    def jacobi_step(carry):
+        i, phi, converged = carry
+        # Jacobi update
+        phi_rp = jnp.roll(phi, -1, axis=0)
+        phi_rm = jnp.roll(phi, 1, axis=0)
+        phi_zp = jnp.roll(phi, -1, axis=1)
+        phi_zm = jnp.roll(phi, 1, axis=1)
 
-        phi_new = ((phi_xp + phi_xm) / dx**2 + (phi_yp + phi_ym) / dy**2 - div_b) / coeff
+        phi_new = ((phi_rp + phi_rm) / dr**2 + (phi_zp + phi_zm) / dz**2 - div_b) / coeff
 
         # Apply zero boundary conditions for phi
         phi_new = phi_new.at[0, :].set(0)
@@ -154,47 +188,53 @@ def divergence_cleaning_step(b_x, b_y, b_z, dx, dy):
         phi_new = phi_new.at[:, 0].set(0)
         phi_new = phi_new.at[:, -1].set(0)
 
-        return phi_new
+        # Check convergence (max change in phi)
+        max_change = jnp.max(jnp.abs(phi_new - phi))
+        converged = max_change < 1e-8
 
-    # Use fori_loop with fixed iteration count for JIT compatibility
-    phi = lax.fori_loop(0, 5, jacobi_step, phi)
+        return (i + 1, phi_new, converged)
+
+    def cond_fn(carry):
+        i, _, converged = carry
+        return (i < 50) & (~converged)
+
+    _, phi, _ = lax.while_loop(cond_fn, jacobi_step, (0, phi, False))
 
     # Compute gradient of phi and subtract from B
-    grad_phi_x, grad_phi_y = grad_2d(phi, dx, dy)
+    grad_phi_r, grad_phi_z = grad_2d(phi, dr, dz)
 
-    b_x_clean = b_x - grad_phi_x
-    b_y_clean = b_y - grad_phi_y
-    b_z_clean = b_z  # z-component unchanged in 2D
+    b_r_clean = b_r - grad_phi_r
+    b_theta_clean = b_theta  # theta-component unchanged in 2D axisymmetric
+    b_z_clean = b_z - grad_phi_z
 
-    return b_x_clean, b_y_clean, b_z_clean
+    return b_r_clean, b_theta_clean, b_z_clean
 
 @jit
-def hall_substep(b_x, b_y, b_z, v_x, v_y, v_z, n, p_e, dt_sub, dx, dy, eta):
-    """Single Hall MHD substep with stable timestep."""
-    # Compute current density J = curl(B) / mu0
-    j_x = (1.0 / MU0) * curl_2d(b_z, b_y, dx, dy)
-    j_y = (1.0 / MU0) * curl_2d(b_x, b_z, dx, dy)
-    j_z = (1.0 / MU0) * curl_2d(b_y, b_x, dx, dy)
+def hall_substep(b_r, b_theta, b_z, v_r, v_theta, v_z, n, p_e, dt_sub, dr, dz, r, eta):
+    """Single Hall MHD substep with stable timestep using cylindrical coordinates."""
+    # Compute current density J = curl(B) / mu0 in cylindrical
+    j_r, j_theta, j_z = curl_cylindrical_axisymmetric(b_r, b_theta, b_z, dr, dz, r)
+    j_r = j_r / MU0
+    j_theta = j_theta / MU0
+    j_z = j_z / MU0
 
     # Compute electric field from extended Ohm's law
-    E_x, E_y, E_z = extended_ohm_law(v_x, v_y, v_z, b_x, b_y, b_z,
-                                      j_x, j_y, j_z, n, eta, p_e, dx, dy)
+    E_r, E_theta, E_z = extended_ohm_law(v_r, v_theta, v_z, b_r, b_theta, b_z,
+                                          j_r, j_theta, j_z, n, eta, p_e, dr, dz, r)
 
-    # Faraday's law: dB/dt = -curl(E)
-    curl_E_x = curl_2d(E_z, E_y, dx, dy)
-    curl_E_y = curl_2d(E_x, E_z, dx, dy)
-    curl_E_z = curl_2d(E_y, E_x, dx, dy)
+    # Faraday's law: dB/dt = -curl(E) in cylindrical
+    curl_E_r, curl_E_theta, curl_E_z = curl_cylindrical_axisymmetric(E_r, E_theta, E_z, dr, dz, r)
 
-    b_x_new = b_x - dt_sub * curl_E_x
-    b_y_new = b_y - dt_sub * curl_E_y
+    b_r_new = b_r - dt_sub * curl_E_r
+    b_theta_new = b_theta - dt_sub * curl_E_theta
     b_z_new = b_z - dt_sub * curl_E_z
 
-    return b_x_new, b_y_new, b_z_new
+    return b_r_new, b_theta_new, b_z_new
 
 @jit
-def semi_implicit_hall_step(b_x, b_y, b_z, v_x, v_y, v_z, n, p_e, dt, dx, dy, eta):
+def semi_implicit_hall_step(b_r, b_theta, b_z, v_r, v_theta, v_z, n, p_e, dt, dr, dz, r, eta):
     """
-    Subcycled time stepping to handle Whistler waves stably.
+    Subcycled time stepping to handle Whistler waves stably in cylindrical coordinates.
     Uses automatic subcycling based on Whistler CFL condition.
 
     For numerical stability, limits maximum substeps to 50.
@@ -203,7 +243,7 @@ def semi_implicit_hall_step(b_x, b_y, b_z, v_x, v_y, v_z, n, p_e, dt, dx, dy, et
     B_max = jnp.maximum(jnp.max(jnp.abs(b_z)), 1e-10)
     # Use minimum density from the actual field for worst-case Whistler speed
     n_min = jnp.maximum(jnp.min(n), 1e18)
-    dt_stable = compute_whistler_stable_dt(B_max, n_min, dx, dy)
+    dt_stable = compute_whistler_stable_dt(B_max, n_min, dr, dz)
 
     # Number of substeps needed, capped at 50 for practicality
     n_substeps = jnp.minimum(50, jnp.maximum(1, jnp.ceil(dt / dt_stable))).astype(jnp.int32)
@@ -211,16 +251,16 @@ def semi_implicit_hall_step(b_x, b_y, b_z, v_x, v_y, v_z, n, p_e, dt, dx, dy, et
 
     # Subcycle using fori_loop (more efficient than while_loop for fixed iterations)
     def substep_body(i, carry):
-        bx, by, bz = carry
-        bx_new, by_new, bz_new = hall_substep(bx, by, bz, v_x, v_y, v_z,
-                                               n, p_e, dt_sub, dx, dy, eta)
-        return (bx_new, by_new, bz_new)
+        br, btheta, bz = carry
+        br_new, btheta_new, bz_new = hall_substep(br, btheta, bz, v_r, v_theta, v_z,
+                                                   n, p_e, dt_sub, dr, dz, r, eta)
+        return (br_new, btheta_new, bz_new)
 
-    b_x_new, b_y_new, b_z_new = lax.fori_loop(
-        0, n_substeps, substep_body, (b_x, b_y, b_z)
+    b_r_new, b_theta_new, b_z_new = lax.fori_loop(
+        0, n_substeps, substep_body, (b_r, b_theta, b_z)
     )
 
-    return b_x_new, b_y_new, b_z_new
+    return b_r_new, b_theta_new, b_z_new
 
 @jit
 def apply_halo_density(n, halo_density=1e18, core_density=1e19, r_cutoff=0.8):
@@ -246,63 +286,63 @@ def apply_halo_density(n, halo_density=1e18, core_density=1e19, r_cutoff=0.8):
 
 @jit
 def step(state, _):
-    """Single timestep of extended MHD evolution.
+    """Single timestep of extended MHD evolution in cylindrical coordinates.
 
     Warning: The Hall term introduces Whistler waves with CFL constraint:
-        dt < (dx * mu0 * n * e) / (pi * B)
+        dt < (dr * mu0 * n * e) / (pi * B)
     For typical plasma parameters, this can require thousands of substeps.
     The simulation uses subcycling with a maximum of 50 substeps per timestep.
     For stability with larger timesteps, use coarser grids or smaller dt.
     """
-    b_x, b_y, b_z, v_x, v_y, v_z, n, p_e, t, dt, dx, dy, eta = state
+    b_r, b_theta, b_z, v_r, v_theta, v_z, n, p_e, t, dt, dr, dz, r, eta = state
 
     n_with_halo = apply_halo_density(n)
 
-    b_x_new, b_y_new, b_z_new = semi_implicit_hall_step(
-        b_x, b_y, b_z, v_x, v_y, v_z, n_with_halo, p_e, dt, dx, dy, eta
+    b_r_new, b_theta_new, b_z_new = semi_implicit_hall_step(
+        b_r, b_theta, b_z, v_r, v_theta, v_z, n_with_halo, p_e, dt, dr, dz, r, eta
     )
 
-    # Note: Divergence cleaning is disabled by default because the projection
-    # method requires solving a Poisson equation iteratively. For production
-    # use, consider using constrained transport or vector potential formulation.
-    # Uncomment the following to enable divergence cleaning:
-    # b_x_new, b_y_new, b_z_new = divergence_cleaning_step(
-    #     b_x_new, b_y_new, b_z_new, dx, dy
-    # )
+    # Apply divergence cleaning to reduce numerical div(B) errors
+    b_r_new, b_theta_new, b_z_new = divergence_cleaning_step(
+        b_r_new, b_theta_new, b_z_new, dr, dz, r
+    )
 
-    # Apply boundary conditions (conducting wall: B_tangential = 0)
-    b_x_new = b_x_new.at[0, :].set(0)
-    b_x_new = b_x_new.at[-1, :].set(0)
-    b_x_new = b_x_new.at[:, 0].set(0)
-    b_x_new = b_x_new.at[:, -1].set(0)
+    # Apply boundary conditions
+    # Inner boundary (r=0): B_r = 0 (symmetry), B_theta = 0, B_z Neumann
+    b_r_new = b_r_new.at[0, :].set(0)
+    b_theta_new = b_theta_new.at[0, :].set(0)
+    b_z_new = b_z_new.at[0, :].set(b_z_new[1, :])
 
-    b_y_new = b_y_new.at[0, :].set(0)
-    b_y_new = b_y_new.at[-1, :].set(0)
-    b_y_new = b_y_new.at[:, 0].set(0)
-    b_y_new = b_y_new.at[:, -1].set(0)
-
-    b_z_new = b_z_new.at[0, :].set(0)
+    # Outer boundary (r=R): conducting wall, B_tangential = 0
+    b_r_new = b_r_new.at[-1, :].set(0)
+    b_theta_new = b_theta_new.at[-1, :].set(0)
     b_z_new = b_z_new.at[-1, :].set(0)
+
+    # Axial boundaries (z = +/- L): conducting wall
+    b_r_new = b_r_new.at[:, 0].set(0)
+    b_r_new = b_r_new.at[:, -1].set(0)
+    b_theta_new = b_theta_new.at[:, 0].set(0)
+    b_theta_new = b_theta_new.at[:, -1].set(0)
     b_z_new = b_z_new.at[:, 0].set(0)
     b_z_new = b_z_new.at[:, -1].set(0)
 
-    return (b_x_new, b_y_new, b_z_new, v_x, v_y, v_z, n, p_e, t + dt, dt, dx, dy, eta), (b_x, b_y, b_z)
+    return (b_r_new, b_theta_new, b_z_new, v_r, v_theta, v_z, n, p_e, t + dt, dt, dr, dz, r, eta), (b_r, b_theta, b_z)
 
-def run_simulation(steps=100, nx=32, ny=32, dt=1e-6, eta=1e-4):
-    """Run extended MHD simulation with Hall effect.
+def run_simulation(steps=100, nr=16, nz=16, dt=1e-8, eta=1e-4):
+    """Run extended MHD simulation with Hall effect in cylindrical coordinates.
 
     Warning: The Hall term introduces Whistler wave CFL constraint:
-        dt_whistler < (dx * mu0 * n * e) / (pi * B)
-    For typical parameters (B~1T, n~1e18 m^-3, dx~0.03), this gives
-    dt_whistler ~ 2.5e-11 s. The simulation uses subcycling (up to 50
+        dt_whistler < (dr * mu0 * n * e) / (pi * B)
+    For typical parameters (B~0.1T, n~1e18 m^-3, dr~0.06), this gives
+    dt_whistler ~ 2.5e-10 s. The simulation uses subcycling (up to 50
     substeps per main timestep) but may still become unstable if
-    dt >> dt_whistler. For stability, use dt < 1e-8 s for fine grids.
+    dt >> dt_whistler. For stability, use dt <= 1e-8 s.
 
     Args:
         steps: Number of timesteps to run
-        nx: Number of grid points in x direction (must be >= 4)
-        ny: Number of grid points in y direction (must be >= 4)
-        dt: Timestep [s] (must be > 0). Recommend 1e-9 to 1e-8 for stability.
+        nr: Number of radial grid points (must be >= 4)
+        nz: Number of axial grid points (must be >= 4)
+        dt: Timestep [s] (must be > 0). Default 1e-8 for stability.
         eta: Resistivity [Ohm*m] (must be >= 0)
 
     Returns:
@@ -314,33 +354,40 @@ def run_simulation(steps=100, nx=32, ny=32, dt=1e-6, eta=1e-4):
     # Validate inputs
     if steps < 1:
         raise ValueError(f"steps must be at least 1, got {steps}")
-    if nx < 4:
-        raise ValueError(f"nx must be at least 4 for finite differences, got {nx}")
-    if ny < 4:
-        raise ValueError(f"ny must be at least 4 for finite differences, got {ny}")
+    if nr < 4:
+        raise ValueError(f"nr must be at least 4 for finite differences, got {nr}")
+    if nz < 4:
+        raise ValueError(f"nz must be at least 4 for finite differences, got {nz}")
     if dt <= 0:
         raise ValueError(f"dt must be positive, got {dt}")
     if eta < 0:
         raise ValueError(f"eta must be non-negative, got {eta}")
 
-    dx, dy = 1.0/nx, 1.0/ny
-    
-    r = jnp.linspace(0, 1, nx)[:, None]
-    z = jnp.linspace(-1, 1, ny)[None, :]
-    
-    b_x_init = jnp.zeros((nx, ny))
-    b_y_init = jnp.zeros((nx, ny))
-    b_z_init = 1.0 * jnp.exp(-r**2 - z**2)
-    
-    v_x_init = jnp.zeros((nx, ny))
-    v_y_init = jnp.zeros((nx, ny))
-    v_z_init = jnp.zeros((nx, ny))
-    
-    n_init = jnp.ones((nx, ny)) * 1e19
-    p_e_init = jnp.ones((nx, ny)) * 1e3
-    
-    state = (b_x_init, b_y_init, b_z_init, v_x_init, v_y_init, v_z_init, n_init, p_e_init, 0.0, dt, dx, dy, eta)
-    
+    dr, dz = 1.0/nr, 1.0/nz
+
+    # Create coordinate arrays
+    r = jnp.linspace(0.01, 1, nr)[:, None]  # Avoid r=0 for numerical stability
+    z = jnp.linspace(-1, 1, nz)[None, :]
+
+    # Initial magnetic field: B_r, B_theta, B_z in cylindrical
+    # Using smaller B field to reduce Whistler wave speed for stability
+    b_r_init = jnp.zeros((nr, nz))
+    b_theta_init = jnp.zeros((nr, nz))
+    b_z_init = 0.1 * jnp.exp(-r**2 - z**2)  # Reduced from 1.0 for stability
+
+    # Initial velocity: v_r, v_theta, v_z in cylindrical
+    v_r_init = jnp.zeros((nr, nz))
+    v_theta_init = jnp.zeros((nr, nz))
+    v_z_init = jnp.zeros((nr, nz))
+
+    # Initial density and electron pressure
+    n_init = jnp.ones((nr, nz)) * 1e19
+    p_e_init = jnp.ones((nr, nz)) * 1e3
+
+    # State: (b_r, b_theta, b_z, v_r, v_theta, v_z, n, p_e, t, dt, dr, dz, r, eta)
+    state = (b_r_init, b_theta_init, b_z_init, v_r_init, v_theta_init, v_z_init,
+             n_init, p_e_init, 0.0, dt, dr, dz, r, eta)
+
     final_state, history = lax.scan(step, state, jnp.arange(steps))
     return final_state[:3], history
 

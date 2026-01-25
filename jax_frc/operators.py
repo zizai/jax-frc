@@ -1,7 +1,8 @@
 """Numerical differential operators for plasma simulations.
 
 All operators use central finite differences on regular grids.
-Boundary conditions are handled by the calling code (these operators use periodic rollover).
+Includes both Cartesian (periodic) and cylindrical (non-periodic) operators.
+Cylindrical operators handle the 1/r singularity at the axis using L'Hopital's rule.
 """
 
 from typing import Tuple
@@ -9,6 +10,207 @@ import jax.numpy as jnp
 from jax import jit
 
 Array = jnp.ndarray
+
+
+# ============================================================================
+# Non-periodic gradient operators (for cylindrical coordinates)
+# ============================================================================
+
+def gradient_1d_nonperiodic(f: Array, dh: float, axis: int) -> Array:
+    """Compute 1D gradient with non-periodic boundaries.
+
+    Uses central differences in the interior and 2nd-order one-sided
+    differences at boundaries.
+
+    Note: Not JIT-decorated because axis must be static. Caller should
+    use specific axis versions or call from within a JIT-compiled function.
+
+    Args:
+        f: N-dimensional array
+        dh: Grid spacing
+        axis: Axis along which to differentiate (must be 0 or 1 for 2D)
+
+    Returns:
+        Gradient with same shape as f
+    """
+    # Central difference for interior
+    df_central = (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * dh)
+
+    # One-sided differences at boundaries (2nd order)
+    # Forward: (-3f_0 + 4f_1 - f_2) / (2*dh)
+    # Backward: (3f_n - 4f_{n-1} + f_{n-2}) / (2*dh)
+
+    if axis == 0:
+        # Radial direction
+        forward_diff = (-3 * f[0, :] + 4 * f[1, :] - f[2, :]) / (2 * dh)
+        backward_diff = (3 * f[-1, :] - 4 * f[-2, :] + f[-3, :]) / (2 * dh)
+        df = df_central.at[0, :].set(forward_diff)
+        df = df.at[-1, :].set(backward_diff)
+    elif axis == 1:
+        # Axial direction
+        forward_diff = (-3 * f[:, 0] + 4 * f[:, 1] - f[:, 2]) / (2 * dh)
+        backward_diff = (3 * f[:, -1] - 4 * f[:, -2] + f[:, -3]) / (2 * dh)
+        df = df_central.at[:, 0].set(forward_diff)
+        df = df.at[:, -1].set(backward_diff)
+    else:
+        raise ValueError(f"axis must be 0 or 1 for 2D arrays, got {axis}")
+
+    return df
+
+
+@jit
+def gradient_r(f: Array, dr: float) -> Array:
+    """Compute gradient in radial direction with non-periodic boundaries."""
+    return gradient_1d_nonperiodic(f, dr, axis=0)
+
+
+@jit
+def gradient_z(f: Array, dz: float) -> Array:
+    """Compute gradient in axial direction with non-periodic boundaries."""
+    return gradient_1d_nonperiodic(f, dz, axis=1)
+
+
+# ============================================================================
+# Cylindrical coordinate operators (with axis singularity handling)
+# ============================================================================
+
+@jit
+def curl_cylindrical_axisymmetric(
+    B_r: Array, B_theta: Array, B_z: Array, dr: float, dz: float, r: Array
+) -> Tuple[Array, Array, Array]:
+    """Compute curl(B)/mu0 = J in cylindrical (r,theta,z) with axisymmetry.
+
+    Curl in cylindrical coordinates (axisymmetric, d/dtheta = 0):
+        J_r = -dB_theta/dz
+        J_theta = dB_r/dz - dB_z/dr
+        J_z = (1/r)*d(r*B_theta)/dr = B_theta/r + dB_theta/dr
+
+    At r=0, uses L'Hopital's rule:
+        lim(r->0) (1/r)*d(r*B_theta)/dr = 2*dB_theta/dr
+
+    Args:
+        B_r, B_theta, B_z: Magnetic field components, shape (nr, nz)
+        dr, dz: Grid spacings
+        r: Radial coordinate array, shape (nr, 1) or broadcastable
+
+    Returns:
+        Tuple of (J_r, J_theta, J_z) current density components (not divided by mu0)
+    """
+    # J_r = -dB_theta/dz
+    dB_theta_dz = gradient_z(B_theta, dz)
+    J_r = -dB_theta_dz
+
+    # J_theta = dB_r/dz - dB_z/dr
+    dB_r_dz = gradient_z(B_r, dz)
+    dB_z_dr = gradient_r(B_z, dr)
+    J_theta = dB_r_dz - dB_z_dr
+
+    # J_z = (1/r)*d(r*B_theta)/dr = B_theta/r + dB_theta/dr
+    dB_theta_dr = gradient_r(B_theta, dr)
+
+    # Regular formula away from axis
+    # Avoid division by zero with safe divide
+    r_safe = jnp.where(r > 1e-10, r, 1.0)
+    J_z = jnp.where(r > 1e-10, B_theta / r_safe + dB_theta_dr, 0.0)
+
+    # L'Hopital at r=0: J_z[0,:] = 2*dB_theta/dr[0,:]
+    J_z = J_z.at[0, :].set(2.0 * dB_theta_dr[0, :])
+
+    return J_r, J_theta, J_z
+
+
+@jit
+def divergence_cylindrical(f_r: Array, f_z: Array, dr: float, dz: float, r: Array) -> Array:
+    """Compute divergence in cylindrical coordinates (axisymmetric).
+
+    div(f) = (1/r)*d(r*f_r)/dr + df_z/dz
+           = f_r/r + df_r/dr + df_z/dz
+
+    At r=0, uses L'Hopital's rule:
+        lim(r->0) (1/r)*d(r*f_r)/dr = 2*df_r/dr
+
+    Args:
+        f_r, f_z: Vector field components, shape (nr, nz)
+        dr, dz: Grid spacings
+        r: Radial coordinate array, shape (nr, 1) or broadcastable
+
+    Returns:
+        Divergence field with same shape as inputs
+    """
+    df_r_dr = gradient_r(f_r, dr)
+    df_z_dz = gradient_z(f_z, dz)
+
+    # Regular formula away from axis
+    r_safe = jnp.where(r > 1e-10, r, 1.0)
+    div_f = jnp.where(r > 1e-10, f_r / r_safe + df_r_dr + df_z_dz, 0.0)
+
+    # L'Hopital at r=0: div[0,:] = 2*df_r/dr[0,:] + df_z/dz[0,:]
+    div_f = div_f.at[0, :].set(2.0 * df_r_dr[0, :] + df_z_dz[0, :])
+
+    return div_f
+
+
+@jit
+def laplace_star_safe(psi: Array, dr: float, dz: float, r: Array) -> Array:
+    """Compute Grad-Shafranov operator Delta* with axis singularity handling.
+
+    Delta* psi = d^2 psi / dr^2 - (1/r) * d psi / dr + d^2 psi / dz^2
+
+    At r=0, uses L'Hopital's rule:
+        lim(r->0) (1/r)*dpsi/dr = d^2psi/dr^2
+        So Delta*[0,:] = 2*psi_rr[0,:] + psi_zz[0,:]
+
+    Args:
+        psi: Poloidal flux function of shape (nr, nz)
+        dr: Grid spacing in radial direction
+        dz: Grid spacing in axial direction
+        r: Radial coordinate array, shape (nr, 1) or broadcastable
+
+    Returns:
+        Delta* psi with same shape as psi
+    """
+    # Second derivatives using non-periodic stencils at boundaries
+    # Interior: standard 3-point stencil
+    psi_rr_interior = (jnp.roll(psi, -1, axis=0) - 2 * psi + jnp.roll(psi, 1, axis=0)) / (dr**2)
+    psi_zz_interior = (jnp.roll(psi, -1, axis=1) - 2 * psi + jnp.roll(psi, 1, axis=1)) / (dz**2)
+
+    # Fix boundary values for second derivatives using one-sided stencils
+    # For d2f/dx2 at x=0: (2f_0 - 5f_1 + 4f_2 - f_3) / dx^2
+    # For d2f/dx2 at x=n: (2f_n - 5f_{n-1} + 4f_{n-2} - f_{n-3}) / dx^2
+
+    # Radial boundaries
+    psi_rr = psi_rr_interior
+    psi_rr = psi_rr.at[0, :].set(
+        (2*psi[0,:] - 5*psi[1,:] + 4*psi[2,:] - psi[3,:]) / (dr**2)
+    )
+    psi_rr = psi_rr.at[-1, :].set(
+        (2*psi[-1,:] - 5*psi[-2,:] + 4*psi[-3,:] - psi[-4,:]) / (dr**2)
+    )
+
+    # Axial boundaries
+    psi_zz = psi_zz_interior
+    psi_zz = psi_zz.at[:, 0].set(
+        (2*psi[:,0] - 5*psi[:,1] + 4*psi[:,2] - psi[:,3]) / (dz**2)
+    )
+    psi_zz = psi_zz.at[:, -1].set(
+        (2*psi[:,-1] - 5*psi[:,-2] + 4*psi[:,-3] - psi[:,-4]) / (dz**2)
+    )
+
+    # First derivative for -(1/r)*dpsi/dr term
+    psi_r = gradient_r(psi, dr)
+
+    # Compute Delta* away from axis
+    r_safe = jnp.where(r > 1e-10, r, 1.0)
+    delta_star = jnp.where(
+        r > 1e-10,
+        psi_rr - (1.0 / r_safe) * psi_r + psi_zz,
+        0.0
+    )
+
+    # L'Hopital at r=0: Delta*[0,:] = 2*psi_rr[0,:] + psi_zz[0,:]
+    delta_star = delta_star.at[0, :].set(2.0 * psi_rr[0, :] + psi_zz[0, :])
+
+    return delta_star
 
 
 @jit

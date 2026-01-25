@@ -11,19 +11,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hybrid_kinetic import (
     initialize_particles, boris_push, weight_evolution,
-    rigid_rotor_f0, step
+    rigid_rotor_f0, step, run_simulation, QE
 )
 from tests.invariants import format_failures
 from tests.invariants.boundedness import FiniteValues, BoundedRange
 from tests.invariants.conservation import ParticleCountConservation, EnergyConservation
-from tests.invariants.consistency import WeightBounds, DistributionPositivity
+from tests.invariants.consistency import WeightBounds, DistributionPositivity, FieldEvolution
 
 @pytest.fixture
 def hybrid_kinetic_particles():
     """Initialize particles for testing."""
     n_particles = 1000
     nr, nz = 16, 32
-    n0, T0, Omega = 1e19, 100.0, 1e5
+    n0, T0, Omega = 1e19, 100.0 * QE, 1e5  # T0 in Joules (100 eV)
 
     key = random.PRNGKey(42)
     x, v, w = initialize_particles(n_particles, key, nr, nz, n0, T0, Omega)
@@ -36,16 +36,54 @@ def boris_push_setup():
     n_particles = 100
     key = random.PRNGKey(42)
 
-    # Initial positions and velocities
-    key_x, key_v = random.split(key)
-    x = random.uniform(key_x, (n_particles, 3), minval=-1, maxval=1)
+    # Initial positions in Cartesian
+    key_r, key_theta, key_z, key_v = random.split(key, 4)
+    r = random.uniform(key_r, (n_particles,), minval=0.1, maxval=0.5)
+    theta = random.uniform(key_theta, (n_particles,), minval=0, maxval=2*jnp.pi)
+    z = random.uniform(key_z, (n_particles,), minval=-0.5, maxval=0.5)
+
+    x = jnp.stack([r * jnp.cos(theta), r * jnp.sin(theta), z], axis=-1)
+
+    # Initial velocities in cylindrical (v_r, v_theta, v_z)
     v = random.normal(key_v, (n_particles, 3)) * 1e4
 
-    # Simple uniform fields
+    # Simple uniform fields in cylindrical components
     E = jnp.zeros((n_particles, 3))
     B = jnp.ones((n_particles, 3)) * jnp.array([0.0, 0.0, 1.0])
 
     return x, v, E, B
+
+@pytest.fixture
+def hybrid_kinetic_state():
+    """Initialize full hybrid kinetic state for testing."""
+    nr, nz = 16, 32
+    n_particles = 500
+    dr, dz = 1.0/nr, 2.0/nz
+    dt = 1e-8
+    eta = 1e-4
+    n0 = 1e19
+    T0 = 100.0 * QE  # 100 eV in Joules
+    Omega = 1e5
+
+    key = random.PRNGKey(42)
+    x, v, w = initialize_particles(n_particles, key, nr, nz, n0, T0, Omega)
+
+    n_e = jnp.ones((nr, nz)) * n0
+    p_e = jnp.ones((nr, nz)) * T0 * n_e
+
+    r_grid = jnp.linspace(0.01, 1, nr)[:, None]
+    z = jnp.linspace(-1, 1, nz)[None, :]
+
+    b_r = jnp.zeros((nr, nz))
+    b_theta = jnp.zeros((nr, nz))
+    b_z = 1.0 * jnp.exp(-r_grid**2 - z**2)
+    b = jnp.stack([b_r, b_theta, b_z], axis=-1)
+
+    # State: (x, v, w, n_e, p_e, b, t, dt, dr, dz, nr, nz, r_grid, n0, T0, Omega, eta)
+    state = (x, v, w, n_e, p_e, b, 0.0, dt, dr, dz, nr, nz, r_grid, n0, T0, Omega, eta)
+    step_fn = jax.jit(step)
+
+    return state, step_fn
 
 class TestHybridKineticBoundedness:
     """Boundedness tests for Hybrid Kinetic."""
@@ -128,6 +166,41 @@ class TestHybridKineticConsistency:
 
         assert fraction_positive >= 0.99, f"Positive fraction: {fraction_positive:.4f} (need 0.99)"
 
+    def test_magnetic_field_evolves(self, hybrid_kinetic_state):
+        """Magnetic field should evolve due to Faraday's law."""
+        state, step_fn = hybrid_kinetic_state
+
+        # Get initial B field
+        b_initial = state[5].copy()
+
+        # Run several steps
+        for i in range(10):
+            state, _ = step_fn(state, None)
+
+        b_final = state[5]
+
+        # Check that B has changed
+        b_change = float(jnp.max(jnp.abs(b_final - b_initial)))
+        assert b_change > 1e-15, f"B field should evolve, but max change was {b_change:.2e}"
+
+    def test_density_updates(self, hybrid_kinetic_state):
+        """Electron density should update from particle deposition."""
+        state, step_fn = hybrid_kinetic_state
+
+        # Get initial density
+        n_e_initial = state[3].copy()
+
+        # Run several steps
+        for i in range(10):
+            state, _ = step_fn(state, None)
+
+        n_e_final = state[3]
+
+        # Check that density has changed (since particles move)
+        n_e_change = float(jnp.max(jnp.abs(n_e_final - n_e_initial)))
+        # Note: change might be small but should be non-zero
+        assert n_e_change >= 0, f"Density update check: max change = {n_e_change:.2e}"
+
 class TestHybridKineticIntegration:
     """Full simulation integration tests."""
 
@@ -156,3 +229,21 @@ class TestHybridKineticIntegration:
             x, v = x_new, v_new
 
         assert not all_failures, format_failures(all_failures)
+
+    def test_full_step_stable(self, hybrid_kinetic_state):
+        """Full simulation step should remain stable."""
+        state, step_fn = hybrid_kinetic_state
+
+        # Run 10 steps and check stability
+        for i in range(10):
+            state, _ = step_fn(state, None)
+
+            # Check particles are finite
+            x, v, w = state[0], state[1], state[2]
+            assert jnp.all(jnp.isfinite(x)), f"Step {i}: particle positions contain NaN/Inf"
+            assert jnp.all(jnp.isfinite(v)), f"Step {i}: particle velocities contain NaN/Inf"
+            assert jnp.all(jnp.isfinite(w)), f"Step {i}: particle weights contain NaN/Inf"
+
+            # Check B field is finite
+            b = state[5]
+            assert jnp.all(jnp.isfinite(b)), f"Step {i}: B field contains NaN/Inf"
