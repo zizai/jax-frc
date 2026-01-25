@@ -28,6 +28,19 @@ def compute_j_phi(psi, dr, dz, r):
     return -delta_star_psi / MU0 / r
 
 @jit
+def advection_term(psi, v_r, v_z, dr, dz):
+    """
+    Computes the advection term v·∇ψ for the Grad-Shafranov evolution.
+    This term represents the convection of magnetic flux by plasma motion.
+    """
+    # Compute ∇ψ using central differences
+    dpsi_dr = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
+    dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
+
+    # v·∇ψ = v_r * ∂ψ/∂r + v_z * ∂ψ/∂z
+    return v_r * dpsi_dr + v_z * dpsi_dz
+
+@jit
 def chodura_resistivity(psi, j_phi, eta_0=1e-4, eta_anom=1e-2, threshold=1e4):
     """
     Chodura-like anomalous resistivity for FRC formation.
@@ -56,16 +69,26 @@ def compute_stable_dt(eta_max, dr, dz):
     return 0.25 * dx_min**2 / D  # 25% safety margin
 
 @jit
-def diffusion_substep(psi, dr, dz, r, dt_sub):
-    """Single diffusion substep with given timestep."""
+def diffusion_substep(psi, v_r, v_z, dr, dz, r, dt_sub):
+    """
+    Single substep for Grad-Shafranov evolution with advection and diffusion.
+    ∂ψ/∂t = -v·∇ψ + (η/μ₀)Δ*ψ
+    """
     j_phi = compute_j_phi(psi, dr, dz, r)
     eta = chodura_resistivity(psi, j_phi)
-    d_psi = (eta / MU0) * laplace_star(psi, dr, dz, r)
+
+    # Diffusion term: (η/μ₀)Δ*ψ
+    diffusion = (eta / MU0) * laplace_star(psi, dr, dz, r)
+
+    # Advection term: -v·∇ψ (negative because we move flux with flow)
+    advection = -advection_term(psi, v_r, v_z, dr, dz)
+
+    d_psi = diffusion + advection
     return psi + d_psi * dt_sub, eta, j_phi
 
 @jit
 def step(state, _):
-    psi, I_coil, t, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil = state
+    psi, v_r, v_z, I_coil, t, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil = state
 
     # Compute stable substep size based on maximum resistivity
     # eta_max = eta_0 + eta_anom = 1e-4 + 1e-2 = 0.0101
@@ -76,14 +99,14 @@ def step(state, _):
     n_substeps = jnp.maximum(1, jnp.ceil(dt / dt_stable)).astype(jnp.int32)
     dt_sub = dt / n_substeps
 
-    # Subcycle the diffusion equation using while_loop (handles dynamic bounds)
+    # Subcycle the evolution equation using while_loop (handles dynamic bounds)
     def cond_fn(carry):
         i, _ = carry
         return i < n_substeps
 
     def body_fn(carry):
         i, psi_acc = carry
-        new_psi, _, _ = diffusion_substep(psi_acc, dr, dz, r, dt_sub)
+        new_psi, _, _ = diffusion_substep(psi_acc, v_r, v_z, dr, dz, r, dt_sub)
         return (i + 1, new_psi)
 
     _, new_psi = lax.while_loop(cond_fn, body_fn, (jnp.int32(0), psi))
@@ -107,23 +130,30 @@ def step(state, _):
     new_psi = new_psi.at[-1, :].set(0)
     new_psi = new_psi.at[:, 0].set(0)
     new_psi = new_psi.at[:, -1].set(0)
-    
-    return (new_psi, I_coil_new, t + dt, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil), psi
+
+    return (new_psi, v_r, v_z, I_coil_new, t + dt, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil), psi
 
 def run_simulation(steps=500, nr=64, nz=128, V_bank=1000.0, L_coil=1e-6, M_plasma_coil=1e-7):
     dr, dz = 1.0/nr, 2.0/nz
     dt = 1e-4
-    
+
     r = jnp.linspace(0.01, 1.0, nr)[:, None]
     z = jnp.linspace(-1.0, 1.0, nz)[None, :]
-    
+
+    # Initial flux function: FRC-like configuration
     psi_init = (1 - r**2) * jnp.exp(-z**2)
+
+    # Initial velocity fields (small radial inflow for compression)
+    # v_r < 0 represents inward radial flow during theta-pinch formation
+    v_r_init = -0.01 * r * jnp.exp(-z**2)  # Weak inward radial velocity
+    v_z_init = jnp.zeros((nr, nz))  # No initial axial flow
+
     I_coil_init = 0.0
-    
-    state = (psi_init, I_coil_init, 0.0, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil)
-    
+
+    state = (psi_init, v_r_init, v_z_init, I_coil_init, 0.0, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil)
+
     final_state, history = lax.scan(step, state, jnp.arange(steps))
-    return final_state[0], final_state[1], history
+    return final_state[0], final_state[3], history
 
 if __name__ == "__main__":
     final_psi, final_I_coil, history = run_simulation(500)

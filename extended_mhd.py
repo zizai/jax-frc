@@ -79,48 +79,89 @@ def hall_operator(b_x, b_y, b_z, n, dx, dy):
     
     return curl_hall_x, curl_hall_y, curl_hall_z
 
+def compute_whistler_stable_dt(B_max, n, dx, dy):
+    """
+    Compute CFL-stable timestep for Whistler waves.
+    Whistler speed: v_w = k * B / (mu0 * n * e) where k = pi/dx
+    CFL: dt < dx / v_w
+    """
+    k = jnp.pi / jnp.minimum(dx, dy)
+    v_whistler = k * B_max / (MU0 * n * QE)
+    dt_cfl = jnp.minimum(dx, dy) / v_whistler
+    return 0.25 * dt_cfl  # 25% safety margin
+
 @jit
-def semi_implicit_hall_step(b_x, b_y, b_z, v_x, v_y, v_z, n, p_e, dt, dx, dy, eta):
-    """
-    Semi-implicit time stepping to handle Whistler waves.
-    (I - dt^2 * L_Hall) * dB^{n+1} = Explicit terms
-    """
-    curl_hall_x, curl_hall_y, curl_hall_z = hall_operator(b_x, b_y, b_z, n, dx, dy)
-    
+def hall_substep(b_x, b_y, b_z, v_x, v_y, v_z, n, p_e, dt_sub, dx, dy, eta):
+    """Single Hall MHD substep with stable timestep."""
+    # Compute current density J = curl(B) / mu0
     j_x = (1.0 / MU0) * curl_2d(b_z, b_y, dx, dy)
     j_y = (1.0 / MU0) * curl_2d(b_x, b_z, dx, dy)
     j_z = (1.0 / MU0) * curl_2d(b_y, b_x, dx, dy)
-    
-    E_x, E_y, E_z = extended_ohm_law(v_x, v_y, v_z, b_x, b_y, b_z, j_x, j_y, j_z, n, eta, p_e, dx, dy)
-    
+
+    # Compute electric field from extended Ohm's law
+    E_x, E_y, E_z = extended_ohm_law(v_x, v_y, v_z, b_x, b_y, b_z,
+                                      j_x, j_y, j_z, n, eta, p_e, dx, dy)
+
+    # Faraday's law: dB/dt = -curl(E)
     curl_E_x = curl_2d(E_z, E_y, dx, dy)
     curl_E_y = curl_2d(E_x, E_z, dx, dy)
     curl_E_z = curl_2d(E_y, E_x, dx, dy)
-    
-    explicit_rhs_x = -curl_E_x
-    explicit_rhs_y = -curl_E_y
-    explicit_rhs_z = -curl_E_z
-    
-    damping_factor = 1.0 / (1.0 + dt**2 * 1e6)
-    
-    b_x_new = b_x + dt * (explicit_rhs_x + damping_factor * curl_hall_x)
-    b_y_new = b_y + dt * (explicit_rhs_y + damping_factor * curl_hall_y)
-    b_z_new = b_z + dt * (explicit_rhs_z + damping_factor * curl_hall_z)
-    
+
+    b_x_new = b_x - dt_sub * curl_E_x
+    b_y_new = b_y - dt_sub * curl_E_y
+    b_z_new = b_z - dt_sub * curl_E_z
+
+    return b_x_new, b_y_new, b_z_new
+
+@jit
+def semi_implicit_hall_step(b_x, b_y, b_z, v_x, v_y, v_z, n, p_e, dt, dx, dy, eta):
+    """
+    Subcycled time stepping to handle Whistler waves stably.
+    Uses automatic subcycling based on Whistler CFL condition.
+    """
+    # Compute stable substep based on maximum B field
+    B_max = jnp.maximum(jnp.max(jnp.abs(b_z)), 1e-10)
+    n_min = jnp.maximum(jnp.min(n), 1e16)  # Use minimum density for worst-case
+    dt_stable = compute_whistler_stable_dt(B_max, n_min, dx, dy)
+
+    # Number of substeps needed
+    n_substeps = jnp.maximum(1, jnp.ceil(dt / dt_stable)).astype(jnp.int32)
+    dt_sub = dt / n_substeps
+
+    # Subcycle using while_loop
+    def cond_fn(carry):
+        i, _, _, _ = carry
+        return i < n_substeps
+
+    def body_fn(carry):
+        i, bx, by, bz = carry
+        bx_new, by_new, bz_new = hall_substep(bx, by, bz, v_x, v_y, v_z,
+                                               n, p_e, dt_sub, dx, dy, eta)
+        return (i + 1, bx_new, by_new, bz_new)
+
+    _, b_x_new, b_y_new, b_z_new = lax.while_loop(
+        cond_fn, body_fn, (jnp.int32(0), b_x, b_y, b_z)
+    )
+
     return b_x_new, b_y_new, b_z_new
 
 @jit
 def apply_halo_density(n, halo_density=1e16, core_density=1e19, r_cutoff=0.8):
     """
     Applies halo density model for vacuum handling.
+    Returns array with same shape as input n.
     """
     nr, nz = n.shape
     r = jnp.linspace(0, 1, nr)[:, None]
-    
+
+    # Create halo mask that broadcasts to full (nr, nz) shape
     halo_mask = 0.5 * (1 + jnp.tanh((r - r_cutoff) / 0.05))
+
+    # Broadcast to match input shape: (nr, 1) * scalar -> (nr, nz)
     n_with_halo = halo_mask * halo_density + (1 - halo_mask) * core_density
-    
-    return n_with_halo
+
+    # Ensure output matches input shape by broadcasting
+    return jnp.broadcast_to(n_with_halo, (nr, nz))
 
 @jit
 def step(state, _):
