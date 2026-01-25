@@ -93,3 +93,29 @@ class Phase:
             State to pass to next phase
         """
         return state
+
+
+# Registry mapping phase class names to Phase subclasses.
+# Additional phases are registered by importing their modules.
+PHASE_REGISTRY: dict[str, type[Phase]] = {
+    "Phase": Phase,
+}
+
+
+def register_phase(cls: type[Phase]) -> type[Phase]:
+    """Decorator to register a Phase subclass in PHASE_REGISTRY.
+
+    Usage::
+
+        @register_phase
+        class MyPhase(Phase):
+            ...
+
+    Args:
+        cls: Phase subclass to register
+
+    Returns:
+        The same class (allows use as decorator)
+    """
+    PHASE_REGISTRY[cls.__name__] = cls
+    return cls

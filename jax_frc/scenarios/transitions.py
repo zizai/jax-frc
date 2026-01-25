@@ -194,3 +194,82 @@ def velocity_below(threshold: float) -> Transition:
         return float(jnp.max(v_mag)) < threshold
 
     return condition(check)
+
+
+def transition_from_spec(spec: "TransitionSpec", geometry: "Geometry" = None) -> Transition:
+    """Create Transition from declarative TransitionSpec.
+
+    Factory function that converts a TransitionSpec dataclass into a
+    concrete Transition object. Enables declarative/serializable phase
+    definitions.
+
+    Args:
+        spec: TransitionSpec with type, value, and optional children
+        geometry: Geometry for transitions that need spatial info
+                 (e.g., separation_below)
+
+    Returns:
+        Transition object ready for evaluation
+
+    Raises:
+        ValueError: If spec.type is unknown
+
+    Example::
+
+        spec = TransitionSpec(type="timeout", value=1e-3)
+        trans = transition_from_spec(spec)
+
+        # Composite transition
+        spec = TransitionSpec(
+            type="any_of",
+            children=[
+                TransitionSpec(type="timeout", value=1e-3),
+                TransitionSpec(type="separation_below", value=0.1),
+            ]
+        )
+        trans = transition_from_spec(spec, geometry)
+    """
+    # Import here to avoid circular import
+    from jax_frc.configurations.linear_configuration import TransitionSpec
+
+    trans_type = spec.type
+
+    if trans_type == "timeout":
+        return timeout(spec.value)
+
+    elif trans_type == "separation_below":
+        if geometry is None:
+            raise ValueError("separation_below requires geometry")
+        return separation_below(spec.value, geometry)
+
+    elif trans_type == "temperature_above":
+        return temperature_above(spec.value)
+
+    elif trans_type == "flux_below":
+        return flux_below(spec.value)
+
+    elif trans_type == "velocity_below":
+        return velocity_below(spec.value)
+
+    elif trans_type == "any_of":
+        if spec.children is None:
+            raise ValueError("any_of requires children")
+        child_transitions = [transition_from_spec(c, geometry) for c in spec.children]
+        return any_of(*child_transitions)
+
+    elif trans_type == "all_of":
+        if spec.children is None:
+            raise ValueError("all_of requires children")
+        child_transitions = [transition_from_spec(c, geometry) for c in spec.children]
+        return all_of(*child_transitions)
+
+    elif trans_type == "condition":
+        # For condition type, spec.value should be a callable
+        if spec.value is None or not callable(spec.value):
+            raise ValueError("condition requires a callable value")
+        return condition(spec.value)
+
+    else:
+        raise ValueError(f"Unknown transition type: {trans_type}. "
+                        f"Valid types: timeout, separation_below, temperature_above, "
+                        f"flux_below, velocity_below, any_of, all_of, condition")
