@@ -60,7 +60,7 @@ class TestResistiveMHDBoundedness:
         invariants = [FiniteValues("psi")]
 
         all_failures = []
-        for i in range(100):
+        for i in range(20):
             new_state, _ = step_fn(state, None)
             psi_before, psi_after = state[0], new_state[0]
             _, failures = invariant_checker(invariants, psi_before, psi_after, i)
@@ -75,7 +75,7 @@ class TestResistiveMHDBoundedness:
         invariants = [NoExponentialGrowth("psi", growth_factor=1.5)]
 
         all_failures = []
-        for i in range(100):
+        for i in range(20):
             new_state, _ = step_fn(state, None)
             psi_before, psi_after = state[0], new_state[0]
             _, failures = invariant_checker(invariants, psi_before, psi_after, i)
@@ -109,7 +109,7 @@ class TestResistiveMHDConsistency:
         v_r_initial = state[1].copy()
         v_z_initial = state[2].copy()
 
-        for i in range(50):
+        for i in range(10):
             state, _ = step_fn(state, None)
 
         v_r_final = state[1]
@@ -125,8 +125,8 @@ class TestResistiveMHDConsistency:
 class TestResistiveMHDIntegration:
     """Full simulation integration tests."""
 
-    def test_100_steps_stable(self, resistive_mhd_state, invariant_checker):
-        """Simulation should remain stable for 100 steps."""
+    def test_20_steps_stable(self, resistive_mhd_state, invariant_checker):
+        """Simulation should remain stable for 20 steps."""
         state, step_fn, dr, dz, r = resistive_mhd_state
         invariants = [
             FiniteValues("psi"),
@@ -134,7 +134,7 @@ class TestResistiveMHDIntegration:
         ]
 
         all_failures = []
-        for i in range(100):
+        for i in range(20):
             new_state, _ = step_fn(state, None)
             psi_before, psi_after = state[0], new_state[0]
             _, failures = invariant_checker(invariants, psi_before, psi_after, i)

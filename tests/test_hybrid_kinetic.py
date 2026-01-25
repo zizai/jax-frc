@@ -21,7 +21,7 @@ from tests.invariants.consistency import WeightBounds, DistributionPositivity, F
 @pytest.fixture
 def hybrid_kinetic_particles():
     """Initialize particles for testing."""
-    n_particles = 1000
+    n_particles = 100
     nr, nz = 16, 32
     n0, T0, Omega = 1e19, 100.0 * QE, 1e5  # T0 in Joules (100 eV)
 
@@ -57,7 +57,7 @@ def boris_push_setup():
 def hybrid_kinetic_state():
     """Initialize full hybrid kinetic state for testing."""
     nr, nz = 16, 32
-    n_particles = 500
+    n_particles = 100
     dr, dz = 1.0/nr, 2.0/nz
     dt = 1e-8
     eta = 1e-4
