@@ -1,4 +1,14 @@
-This is a comprehensive technical breakdown of the three primary plasma physics models used in Field-Reversed Configuration (FRC) research, specifically aligned with the codes you mentioned: **Lamy Ridge** (Resistive MHD), **NIMROD** (Extended MHD), and **HYM** (Hybrid Kinetic).
+Below is a **code-aligned** derivation + numerical-solver “cookbook” for three model families as they’re commonly used for **FRC formation/translation/merging, pulsed compression, and sustainment**:
+
+* **Resistive MHD + neutrals (Lamy Ridge–style)** (2-D, formation→merge, neutrals + ionization + radiation, wall geometry handling) ([jspf.or.jp][1])
+* **Extended MHD / two-fluid (NIMROD–style)** (3-D, Hall + electron pressure + optional electron inertia; FE×Fourier; semi-implicit/implicit; atomic rates time-split) ([NIMROD团队][2])
+* **Hybrid kinetic–fluid (HYM–style)** (full-orbit kinetic ions + fluid electrons; used to compare kinetic vs MHD for FRC merging/compression; boundary-driven compression) ([arXiv][3])
+
+I’ll do:
+
+1. **equations + step-by-step derivation** (what’s retained/dropped and why),
+2. **numerical methods** under realistic FRC constraints,
+3. **analysis/comparison/critiques** (what each model gets wrong in an FRC and how to mitigate).
 
 ---
 
@@ -14,108 +24,351 @@ All three models are derived from the **Two-Fluid Equations**, which treat ions 
 
 ---
 
-## Model 1: Resistive MHD (The "Lamy Ridge" Model)
 
-**Physics Level:** Macroscopic Fluid.
-**Role:** Engineering design, circuit optimization, formation dynamics.
+## 1 Resistive MHD (Lamy Ridge–style): resistive MHD + energy + neutrals + atomic processes
 
-### 1.1 Derivation
+The Lamy Ridge formulation is described publicly as: **2-D resistive MHD**, an **energy equation**, plus **neutral fluid equations**, with **momentum/density/energy exchange through ionization**, and non-adiabatic effects like **thermal conduction, ionization loss, radiation loss** ([jspf.or.jp][1]).
 
-* **Assumption 1 (Single Fluid):** Sum the ion and electron momentum equations. Neglect electron mass ($m_e \to 0$) and assume quasi-neutrality ($n_i \approx n_e$).
-  [ \rho \frac{d\mathbf{v}}{dt} = \mathbf{J} \times \mathbf{B} - \nabla p ]
-* **Assumption 2 (Simple Ohm’s Law):** Take the electron momentum equation. Neglect inertia terms and the Hall term ($\mathbf{J} \times \mathbf{B}$), assuming the macroscopic scale $L \gg d_i$ (ion skin depth).
-  [ \mathbf{E} + \mathbf{v} \times \mathbf{B} = \eta \mathbf{J} ]
+### 1.1 Step-by-step: from two-fluid → single-fluid resistive MHD
 
-### 1.2 Numerical Methods (Practical Implementation)
+#### Step A: start with low-frequency Maxwell
 
-Lamy Ridge is typically a **2D Axisymmetric** code. This simplifies the math significantly.
+[
+\partial_t\mathbf{B}=-\nabla\times\mathbf{E},\quad \nabla\cdot\mathbf{B}=0,\quad
+\mathbf{J}=\frac{1}{\mu_0}\nabla\times\mathbf{B}.
+]
 
-* **Flux Function Formulation:** Instead of solving for vector $\mathbf{B}$, we solve for the poloidal flux $\psi(r,z)$.
-  [ \mathbf{B} = \nabla \psi \times \nabla \phi + I \nabla \phi ]
-* **The Grad-Shafranov Evolution:**
-  [ \frac{\partial \psi}{\partial t} + \mathbf{v} \cdot \nabla \psi = \frac{\eta}{\mu_0} \Delta^* \psi + V_{loop} ]
+#### Step B: quasi-neutral single-fluid reduction
 
-  * **$\Delta^*$ Operator:** $\frac{\partial^2}{\partial r^2} - \frac{1}{r}\frac{\partial}{\partial r} + \frac{\partial^2}{\partial z^2}$.
-* **Circuit Coupling:** The boundary condition for $\psi$ is not fixed. It is determined by the current $I_{coil}(t)$ in the external coils, which is solved simultaneously:
-  [ V_{bank} = L_{coil} \frac{dI}{dt} + \frac{d}{dt} \int M_{plasma-coil} dI_{plasma} ]
+Assume quasi-neutrality and define bulk variables:
+[
+\rho \approx m_i n,\quad \mathbf{u}\approx \mathbf{u}_i,\quad
+\mathbf{J}=en(\mathbf{u}_i-\mathbf{u}_e).
+]
 
-### 1.3 FRC Adaptation & Critique
+#### Step C: continuity (sum mass-weighted species continuity)
 
-* **Adaptation:** **Chodura Resistivity**. Standard Spitzer resistivity is too low to model the rapid magnetic reconnection during FRC formation. A "anomalous" resistivity factor is added at the boundary ($\eta_{anom}$) to mimic micro-turbulence.
-* **Critique:**
+[
+\boxed{\partial_t \rho+\nabla\cdot(\rho\mathbf{u}) = S_\rho}
+]
 
-  * **Pros:** Extremely fast (minutes). Essential for tuning capacitor bank timing.
-  * **Cons:** **Physics Failure.** Standard MHD predicts the FRC is unstable to the tilt mode on Alfvénic timescales. It cannot predict stability.
+#### Step D: momentum (sum ion+electron momentum)
 
----
+Electric forces cancel under quasi-neutrality; Lorentz remains:
+[
+\boxed{
+\partial_t(\rho\mathbf{u})+\nabla\cdot(\rho\mathbf{u}\mathbf{u}+p\mathbf{I})
+=\mathbf{J}\times\mathbf{B}+\nabla\cdot\boldsymbol{\Pi}+\mathbf{S}_m
+}
+]
 
-## Model 2: Extended MHD (The "NIMROD" Model)
+#### Step E: Ohm’s law (resistive closure)
 
-**Physics Level:** Two-Fluid Fluid Dynamics.
-**Role:** Global stability analysis, translation, transport scaling.
+Start from electron momentum, drop electron inertia and electron pressure terms (this is the key resistive-MHD simplification), and model collisional friction as (\eta\mathbf{J}):
+[
+\boxed{\mathbf{E}+\mathbf{u}\times\mathbf{B}=\eta \mathbf{J}}
+]
 
-### 2.1 Derivation
+#### Step F: induction (plug Ohm’s law into Faraday)
 
-* **Assumption:** We retain the single-fluid momentum equation but **keep the 2-fluid terms** in Ohm's Law.
-* **Derivation:** Start with electron momentum ($m_e \to 0$) but do *not* drop the $\mathbf{J}$ terms.
-  [ \mathbf{E} = -\mathbf{v} \times \mathbf{B} + \eta \mathbf{J} + \underbrace{\frac{1}{ne}(\mathbf{J} \times \mathbf{B})}*{\text{Hall Term}} - \underbrace{\frac{1}{ne}\nabla p_e}*{\text{Electron Pressure}} ]
+[
+\boxed{
+\partial_t\mathbf{B}=\nabla\times(\mathbf{u}\times\mathbf{B})-\nabla\times(\eta\mathbf{J})
+}
+]
 
-### 2.2 Numerical Methods (Semi-Implicit FEM)
+#### Step G: energy (numerically robust form)
 
-NIMROD uses **High-Order Finite Elements** in the poloidal plane and **Fourier Decomposition** in the toroidal direction.
+Lamy Ridge is explicitly described as having an energy equation with non-adiabatic effects ([jspf.or.jp][1]), so the numerically stable “core” is conservative total energy:
+[
+E=\frac{p}{\gamma-1}+\frac{1}{2}\rho u^2+\frac{B^2}{2\mu_0}
+]
+[
+\boxed{
+\partial_tE+\nabla\cdot\left[\left(E+p+\frac{B^2}{2\mu_0}\right)\mathbf{u}-\frac{(\mathbf{u}\cdot\mathbf{B})\mathbf{B}}{\mu_0}\right]
+=\eta J^2-\nabla\cdot\mathbf{q}-P_{\rm rad}-P_{\rm ion}+S_E
+}
+]
+where (P_{\rm ion}) represents ionization energy sinks, and (\mathbf{q}) includes thermal conduction.
 
-* **The Stiffness Problem:** The Hall term introduces **Whistler Waves**, where frequency $\omega \propto k^2$. As you refine the grid ($\Delta x \to 0$), the stable time step $\Delta t \to 0$ extremely fast.
-* **The Solution: Semi-Implicit Time Stepping.**
-  We modify the time advance of the magnetic field to "slow down" the fastest waves without affecting the large-scale plasma motion.
-  [ \left( \mathbf{I} - \Delta t^2 L_{Hall} \right) \Delta \mathbf{B}^{n+1} = \text{Explicit Terms} ]
-  Here, $L_{Hall}$ is a differential operator that dampens the high-$k$ whistler modes, allowing $\Delta t$ to be set by the slower Alfvén time.
+### 1.2 Neutral-fluid coupling (the “Lamy Ridge” differentiator)
 
-### 2.3 FRC Adaptation & Critique
+A minimal neutral subsystem consistent with the public description ([jspf.or.jp][1]):
 
-* **Adaptation:** **Vacuum Handling.** Extended MHD codes crash in vacuum ($n \to 0$). FRC simulations use a "Halo" of low-density, high-resistivity cold plasma outside the separatrix to model the vacuum region.
-* **Critique:**
+**Neutral mass**
+[
+\partial_t \rho_n+\nabla\cdot(\rho_n\mathbf{u}*n)= -S*{\rm ion}+S_{\rm rec}
+]
 
-  * **Pros:** Captures the **Hall Stabilization** effect (separates electron/ion fluids), which correctly predicts that kinetic FRCs are tilt-stable.
-  * **Cons:** Still a fluid model. It misses **Betatron Orbit** resonance, meaning it underestimates the stability provided by high-energy neutral beams.
+**Neutral momentum**
+[
+\partial_t(\rho_n\mathbf{u}_n)+\nabla\cdot(\rho_n\mathbf{u}*n\mathbf{u}*n+p_n\mathbf{I})
+= -\mathbf{R}*{\rm ion}-\mathbf{R}*{\rm cx}
+]
 
----
+**Neutral energy**
+[
+\partial_t E_n+\nabla\cdot(\cdots)= -Q_{\rm ion}-Q_{\rm cx}+\cdots
+]
 
-## Model 3: Hybrid Kinetic-Fluid (The "HYM" Model)
+Plasma gets the equal-and-opposite sources:
+[
+S_\rho = +S_{\rm ion}-S_{\rm rec},\quad
+\mathbf{S}*m=+\mathbf{R}*{\rm ion}+\mathbf{R}*{\rm cx},\quad
+S_E=+Q*{\rm ion}+Q_{\rm cx}.
+]
 
-**Physics Level:** Kinetic Ions + Fluid Electrons.
-**Role:** The "Gold Standard" for stability and beam physics.
-
-### 3.1 Derivation
-
-* **Ions (Lagrangian):** Treated as particles to capture Finite Larmor Radius (FLR) effects.
-  [ \frac{d\mathbf{v}_i}{dt} = \frac{q}{m_i} (\mathbf{E} + \mathbf{v}_i \times \mathbf{B}) ]
-* **Electrons (Eulerian):** Treated as a massless fluid.
-* **Coupling:** The Electric field is determined by the electron fluid equation, using the ion current $\mathbf{J}*i$ calculated from particles.
-  [ \mathbf{E} = \frac{1}{en} (\mathbf{J}*{total} \times \mathbf{B} - \mathbf{J}_{i,kinetic} \times \mathbf{B}) - \frac{\nabla p_e}{en} + \eta \mathbf{J} ]
-
-### 3.2 Numerical Methods (Delta-f PIC)
-
-Standard Particle-In-Cell (PIC) is too noisy for macroscopic stability. HYM uses the **Delta-f ($\delta f$) Method**.
-
-* **Concept:** We assume the distribution function is $f = f_0 + \delta f$, where $f_0$ is a known analytical equilibrium (e.g., Rigid Rotor).
-* **Weight Equation:** Instead of creating particles from scratch, we simulate "markers" that carry a weight $w = \delta f / f$.
-  [ \frac{dw}{dt} = -(1-w) \frac{d \ln f_0}{dt} ]
-* **Benefit:** Noise is reduced by a factor of $1/\delta f$, allowing the code to resolve very small growth rates of instabilities.
-
-### 3.3 FRC Adaptation & Critique
-
-* **Adaptation:** **Linearized vs. Non-Linear Runs.**
-
-  * *Linearized:* Used to check stability thresholds (e.g., "Is this FRC tilt stable?"). Very fast.
-  * *Non-Linear:* Used to simulate turbulence and transport. Very slow.
-* **Critique:**
-
-  * **Pros:** The only model that accurately predicts FRC lifetime and beam stabilization.
-  * **Cons:** **Computationally Expensive.** Cannot simulate the full formation-translation-merge-burn cycle. It is usually initialized from a Lamy Ridge or NIMROD snapshot.
+**Why this matters for FRC formation/merge:** at mTorr fills, neutrals and CX can strongly modify momentum balance, shock heating, and radiation—so this model is often a better *formation/translation* predictor than “plasma-only” MHD.
 
 ---
 
-# Summary Comparison for FRC Fusion
+### 1.3 Practical numerics for Lamy Ridge–type FRC runs (2-D)
+
+**Best-fit assumptions:** axisymmetric (r)–(z), strong pulsed sources, complicated vessel geometry, strong non-ideal sources.
+
+**Spatial discretization**
+
+* Finite-volume Godunov (HLLD-like) for the hyperbolic (ideal) part.
+* Axisymmetric source-term handling (geometric terms) must be well-balanced.
+
+**Maintain (\nabla\cdot \mathbf{B}=0)**
+
+* Prefer **constrained transport**. In FRCs, divergence errors near the null/separatrix quickly pollute reconnection and pressure balance.
+
+**Operator splitting (IMEX)**
+
+* Explicit: ideal MHD advection.
+* Implicit: resistive diffusion and thermal conduction (diffusive CFL is brutal).
+* Source ODEs for ionization/radiation: often stiff → integrate with subcycling or implicit/analytic updates.
+
+**Geometry**
+
+* Lamy Ridge is described as handling complex boundaries (e.g., cut-cell style in public descriptions elsewhere), which pairs naturally with FV. ([jspf.or.jp][1])
+
+**Critique**
+
+* Resistive MHD reconnection is “forced” by (\eta), so merging-layer physics and ion heating partition can be wrong (qualitatively, not just quantitatively).
+* No ion-orbit physics at the null (a big deal for FRCs).
+
+---
+
+## 2 Extended MHD (NIMROD–style): Hall + electron pressure + optional electron inertia; FE×Fourier; implicit time advance
+
+NIMROD explicitly states it solves **fully 3-D extended MHD** using **spectral finite elements (2-D)** + **Fourier (3rd dimension)** with **semi-implicit and implicit time discretization**; it also time-splits atomic rates like ionization/radiation, and supports kinetic closures / energetic particle options. ([NIMROD团队][2])
+
+### 2.1 Step-by-step: generalized Ohm’s law (what makes it “extended”)
+
+#### Step A: electron momentum
+
+[
+m_e n(\partial_t\mathbf{u}_e+\mathbf{u}_e\cdot\nabla\mathbf{u}_e)
+=-en(\mathbf{E}+\mathbf{u}_e\times\mathbf{B})-\nabla\cdot\mathbf{P}*e+\mathbf{R}*{ei}.
+]
+
+#### Step B: divide by (-en) and model friction
+
+Let (\mathbf{R}_{ei}/(en)=\eta\mathbf{J}).
+[
+\mathbf{E}+\mathbf{u}_e\times\mathbf{B}
+=-\frac{1}{en}\nabla\cdot\mathbf{P}_e+\eta\mathbf{J}
+-\frac{m_e}{e}(\partial_t\mathbf{u}_e+\mathbf{u}_e\cdot\nabla\mathbf{u}_e).
+]
+
+#### Step C: replace (\mathbf{u}_e) using (\mathbf{J}=en(\mathbf{u}_i-\mathbf{u}_e))
+
+With (\mathbf{u}\approx\mathbf{u}_i), (\mathbf{u}_e=\mathbf{u}-\mathbf{J}/(en)), so
+[
+\mathbf{u}_e\times\mathbf{B}=\mathbf{u}\times\mathbf{B}-\frac{\mathbf{J}\times\mathbf{B}}{en}.
+]
+
+#### Step D: obtain generalized Ohm’s law
+
+[
+\boxed{
+\mathbf{E}+\mathbf{u}\times\mathbf{B}
+=\eta\mathbf{J}
++\frac{\mathbf{J}\times\mathbf{B}}{en}
+-\frac{1}{en}\nabla\cdot\mathbf{P}_e
+-\frac{m_e}{e}(\partial_t\mathbf{u}_e+\mathbf{u}_e\cdot\nabla\mathbf{u}_e)
+}
+]
+
+Common practical reductions (often used in extended-MHD codes):
+
+* (\nabla\cdot\mathbf{P}_e \to \nabla p_e) (isotropic electrons),
+* electron inertia reduced to ((m_e/ne^2)\partial_t\mathbf{J}) if retained.
+
+Then induction is still:
+[
+\partial_t\mathbf{B}=-\nabla\times\mathbf{E},\quad \mathbf{J}=\nabla\times\mathbf{B}/\mu_0.
+]
+
+#### Step E: the rest of the system
+
+The continuity and momentum equations are similar to resistive MHD, but **two-temperature energy** and **anisotropic transport** are typically essential for FRC realism (ends + radiation). NIMROD also time-splits atomic-rate effects like ionization/radiation. ([NIMROD团队][2])
+
+---
+
+### 2.2 Practical numerics for NIMROD-style extended MHD (FRC-relevant)
+
+#### Space: FE in poloidal plane × Fourier in toroidal/3rd dimension
+
+This is explicitly part of NIMROD’s approach. ([NIMROD团队][2])
+Why it works well for FRCs:
+
+* Axisymmetric base equilibrium + low-(n) 3-D modes (tilt/shift) are naturally represented.
+* High-order FE helps with smooth global modes and avoids excessive numerical diffusion.
+
+#### Time: semi-implicit / implicit is not optional
+
+Hall introduces dispersive whistler waves with nasty explicit CFL. NIMROD emphasizes semi-implicit/implicit temporal discretization for fusion time scales. ([NIMROD团队][2])
+
+A realistic IMEX split:
+
+* **Explicit**: ideal advection parts (hyperbolic).
+* **Implicit**: Hall term, resistive diffusion, anisotropic conduction, stiff radiation sinks.
+
+#### Linear/nonlinear solves and preconditioning
+
+Extended MHD implicit steps require good preconditioners for:
+
+* diffusion operators,
+* curl–curl blocks,
+* coupled Hall + pressure terms.
+
+#### FRC boundary conditions (the usual failure point)
+
+To be credible for FRC *fusion* (not just MHD benchmarks), you must model:
+
+* conducting wall and/or resistive wall,
+* open ends + mirror coils (or equivalently, end-loss models).
+  If you don’t, extended MHD will tend to overpredict confinement and stability.
+
+**Critique**
+
+* Extended MHD still misses genuine ion-orbit physics at the null unless augmented with FLR/kinetic closures.
+* Numerical stiffness + closure sensitivity means “pretty plots” can hide large modeling error if boundaries/transport aren’t realistic.
+
+---
+
+## 3 Hybrid kinetic–fluid (HYM–style): kinetic ions, fluid electrons; used for FRC merging/compression comparisons
+
+HYM is described as supporting resistive MHD and hybrid models with **ions as particles and electrons as a fluid** for FRC studies. ([pppl.gov][4])
+Recent work reports **2-D hybrid (fluid electrons + full-orbit kinetic ions)** simulations of **FRC merging and compression** using HYM, comparing kinetic vs MHD results. ([arXiv][3])
+
+### 3.1 Step-by-step derivation: hybrid Ohm’s law (electron-fluid closure)
+
+#### Step A: kinetic ions
+
+[
+\boxed{
+\partial_t f_i+\mathbf{v}\cdot\nabla f_i+\frac{q_i}{m_i}(\mathbf{E}+\mathbf{v}\times\mathbf{B})\cdot\nabla_{\mathbf{v}}f_i
+= C[f_i]+S_i
+}
+]
+Moments:
+[
+n=\int f_i,d^3v,\quad \mathbf{u}_i=\frac{1}{n}\int \mathbf{v} f_i,d^3v.
+]
+
+#### Step B: massless electron momentum (fluid electrons)
+
+[
+0=-en(\mathbf{E}+\mathbf{u}_e\times\mathbf{B})-\nabla p_e+\eta\mathbf{J}.
+]
+So
+[
+\mathbf{E}=-\mathbf{u}_e\times\mathbf{B}-\frac{\nabla p_e}{en}+\eta\mathbf{J}.
+]
+
+#### Step C: eliminate (\mathbf{u}_e) using (\mathbf{J}=en(\mathbf{u}_i-\mathbf{u}_e))
+
+[
+\mathbf{u}_e=\mathbf{u}_i-\frac{\mathbf{J}}{en}
+]
+[
+\boxed{
+\mathbf{E}= -\mathbf{u}_i\times\mathbf{B}
++\frac{\mathbf{J}\times\mathbf{B}}{en}
+-\frac{\nabla p_e}{en}
++\eta\mathbf{J}
+}
+]
+
+#### Step D: field update
+
+[
+\partial_t\mathbf{B}=-\nabla\times\mathbf{E},\qquad \mathbf{J}=\nabla\times\mathbf{B}/\mu_0.
+]
+
+#### Boundary drive for compression (FRC-relevant detail)
+
+The recent HYM FRC paper applies compression through **time-dependent boundary conditions for the toroidal vector potential (A_\phi)**. ([arXiv][3])
+That’s a common hybrid technique: it injects the correct inductive drive without explicitly meshing external coils.
+
+---
+
+### 3.2 Practical numerics for HYM-style hybrid (what actually runs)
+
+A standard, stable loop:
+
+1. **Particle push** (Boris) with (\mathbf{E}^n,\mathbf{B}^n).
+2. **Deposit** (n,\mathbf{u}_i) on grid (use charge-conserving schemes if possible).
+3. Compute (\mathbf{J}=\nabla\times\mathbf{B}/\mu_0).
+4. Compute (\mathbf{E}) from hybrid Ohm’s law.
+5. Update (\mathbf{B}^{n+1}=\mathbf{B}^n-\Delta t,\nabla\times\mathbf{E}) (CT-like update preferred).
+6. Apply collisions/sources + boundary conditions (including (A_\phi(t)) drive). ([arXiv][3])
+
+**FRC practical constraints**
+
+* Compression increases (\Omega_{ci}) and gradients → timestep constraints tighten.
+
+  * Common fix: particle subcycling; semi-implicit field solves.
+* PIC noise can contaminate (\nabla p_e) and hence (\mathbf{E}).
+
+  * Fix: more particles/cell; careful smoothing that preserves Hall physics; quiet starts.
+
+**Critique**
+
+* Hybrid is the best of these three for null-region orbit physics and merging sensitivity, but it’s expensive for full 3-D reactor pulse trains.
+* Electron kinetics (Landau damping, electron FLR) are not captured unless you extend the electron model.
+
+---
+
+# Comparison and “which model is best for which FRC fusion question”
+
+### Predictive capability for FRC fusion-relevant phenomena
+
+**Merging / reconnection / ion heating partition**
+
+* Best: **HYM-style hybrid** (ion orbits + Hall naturally) ([arXiv][3])
+* Risky: resistive MHD (reconnection forced via (\eta))
+
+**3-D stability (tilt/shift) during pulsed compression**
+
+* Best: **NIMROD-style extended MHD** (3-D FE×Fourier + implicit) ([NIMROD团队][2])
+* Hybrid is possible but expensive; resistive MHD can miss key dispersive physics.
+
+**Transport to open ends / mirror effects / wall coupling**
+
+* Extended MHD or resistive MHD can do it *if* boundary models are realistic.
+* Biggest gotcha: “nice confinement” often comes from overly ideal end boundary conditions, not physics.
+
+**Fast-ion confinement (NBI, D–³He protons, alpha heating)**
+
+* Needs hybrid energetic particle capability (either full hybrid or “fluid bulk + kinetic minority”).
+* Pure fluid MHD (even extended) often cannot reliably predict orbit loss fractions.
+
+---
+
+## Bottom-line critiques (what you should be skeptical of)
+
+* **Resistive MHD (Lamy Ridge)**: great for integrated formation + neutrals + radiation, but fundamentally limited for kinetic reconnection and orbit physics; treat it as *engineering/formation* fidelity. ([jspf.or.jp][1])
+* **Extended MHD (NIMROD)**: best “global 3-D workhorse,” but results are only as good as closures (transport, end BCs, resistivity, wall model). Its implicit machinery is essential because the physics is stiff. ([NIMROD团队][2])
+* **Hybrid (HYM)**: strongest for merging/orbit physics, but cost/noise and electron-kinetic omission require careful interpretation; boundary-driven compression via (A_\phi(t)) is powerful but you must validate it against coil-coupled cases. ([arXiv][3])
+
+
+## Summary Comparison for FRC Fusion
 
 | Feature                | **Resistive MHD (Lamy Ridge)**                             | **Extended MHD (NIMROD)**                                                                          | **Hybrid Kinetic (HYM)**                                           |
 | :--------------------- | :--------------------------------------------------------- | :------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------- |
@@ -124,3 +377,12 @@ Standard Particle-In-Cell (PIC) is too noisy for macroscopic stability. HYM uses
 | **Computational Cost** | Low (Minutes)                                              | High (Hours/Days)                                                                                  | Extreme (Days/Weeks)                                               |
 | **FRC Stability**      | **Fails** (Predicts instability)                           | **Good** (Captures Hall effect)                                                                    | **Excellent** (Captures FLR & Beams)                               |
 | **Best Use Case**      | Circuit & Coil Design                                      | Global Dynamics & Thermal Transport                                                                | Stability Limits & NBI Physics                                     |
+
+
+---
+
+
+[1]: https://www.jspf.or.jp/PFR/PDF2020/pfr2020_15-2402020.pdf?utm_source=chatgpt.com "Plasma and Fusion Research,ISSN 1880-6821 - jspf.or.jp"
+[2]: https://nimrodteam.org/?utm_source=chatgpt.com "NIMROD Magnetohydrodynamic Code Team Homepage — nimrodteam.org"
+[3]: https://arxiv.org/html/2501.03425v1?utm_source=chatgpt.com "Hybrid simulations of FRC merging and compression - arXiv.org"
+[4]: https://www.pppl.gov/research/theory/codes?utm_source=chatgpt.com "Codes | Princeton Plasma Physics Laboratory"
