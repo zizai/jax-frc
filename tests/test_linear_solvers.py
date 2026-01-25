@@ -413,3 +413,90 @@ class TestImexExplicit:
         # psi should change due to advection
         # (small change expected for small dt)
         assert jnp.all(jnp.isfinite(new_state.psi))
+
+
+class TestImexFullStep:
+    """Tests for complete IMEX time step."""
+
+    @pytest.fixture
+    def geometry(self):
+        from jax_frc.core.geometry import Geometry
+        return Geometry(
+            coord_system="cylindrical",
+            r_min=0.01, r_max=1.0,
+            z_min=-1.0, z_max=1.0,
+            nr=16, nz=32
+        )
+
+    def test_imex_step_advances_time(self, geometry):
+        """IMEX step should advance time and step count."""
+        from jax_frc.solvers.imex import ImexSolver, ImexConfig
+        from jax_frc.core.state import State
+        from jax_frc.models.resistive_mhd import ResistiveMHD
+        from jax_frc.models.resistivity import SpitzerResistivity
+
+        config = ImexConfig()
+        solver = ImexSolver(config)
+
+        nr, nz = geometry.nr, geometry.nz
+
+        state = State(
+            psi=jnp.sin(jnp.pi * geometry.r_grid / geometry.r_max),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=jnp.ones((nr, nz)) * 100.0,
+            B=jnp.zeros((nr, nz, 3)),
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=1e-4))
+
+        dt = 1e-4
+        new_state = solver.step(state, dt, model, geometry)
+
+        assert new_state.time == dt
+        assert new_state.step == 1
+        assert jnp.all(jnp.isfinite(new_state.psi))
+
+    def test_imex_step_stable_with_large_dt(self, geometry):
+        """IMEX should remain stable with dt >> explicit CFL."""
+        from jax_frc.solvers.imex import ImexSolver, ImexConfig
+        from jax_frc.core.state import State
+        from jax_frc.models.resistive_mhd import ResistiveMHD
+        from jax_frc.models.resistivity import SpitzerResistivity
+
+        config = ImexConfig(theta=1.0)  # Backward Euler for stability
+        solver = ImexSolver(config)
+
+        nr, nz = geometry.nr, geometry.nz
+
+        state = State(
+            psi=jnp.sin(jnp.pi * geometry.r_grid / geometry.r_max),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=jnp.ones((nr, nz)) * 100.0,
+            B=jnp.zeros((nr, nz, 3)),
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=1e-3))
+
+        # Explicit CFL would be ~dr²/(4*D) ~ 0.06²/(4*1e-3/μ₀) ~ very small
+        # Use dt much larger than explicit limit
+        dt = 1e-3
+
+        # Run 10 steps
+        for _ in range(10):
+            state = solver.step(state, dt, model, geometry)
+
+        # Should remain bounded (not blow up)
+        assert jnp.all(jnp.isfinite(state.psi))
+        assert jnp.max(jnp.abs(state.psi)) < 100.0  # Reasonable bound

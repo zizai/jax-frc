@@ -41,47 +41,89 @@ class ImexSolver(Solver):
     config: ImexConfig = field(default_factory=ImexConfig)
 
     def step(self, state: State, dt: float, model: PhysicsModel, geometry: Geometry) -> State:
-        """Advance state by dt using IMEX splitting."""
-        raise NotImplementedError("IMEX step not yet implemented")
+        """Advance state by dt using IMEX Strang splitting.
+
+        Strang splitting for 2nd-order accuracy:
+        1. Half-step explicit (dt/2): advection, ideal terms
+        2. Full implicit step (dt): resistive diffusion
+        3. Half-step explicit (dt/2): advection, ideal terms
+
+        Args:
+            state: Current simulation state
+            dt: Timestep
+            model: Physics model
+            geometry: Grid geometry
+
+        Returns:
+            Updated state at time t + dt
+        """
+        # Step 1: Half-step explicit
+        state = self._explicit_half_step(state, dt / 2, model, geometry)
+
+        # Step 2: Full implicit diffusion
+        state = self._implicit_diffusion(state, dt, model, geometry)
+
+        # Step 3: Half-step explicit
+        state = self._explicit_half_step(state, dt / 2, model, geometry)
+
+        # Update time and step count
+        state = state.replace(
+            time=state.time + dt,
+            step=state.step + 1
+        )
+
+        return state
 
     def _explicit_half_step(self, state: State, dt: float,
                             model: PhysicsModel, geometry: Geometry) -> State:
         """Advance explicit terms (advection, ideal MHD) by dt.
 
         This handles:
-        - Advection: -v·∇ψ for psi
-        - Lorentz force: (J×B)/ρ for velocity (if evolved)
-        - Ideal induction: ∇×(v×B) for B (if B-based model)
+        - Advection: -v*grad(psi) for psi
+        - Lorentz force: (JxB)/rho for velocity (if evolved)
+        - Ideal induction: curl(v x B) for B (if B-based model)
 
         Note: Resistive diffusion is NOT included here (done implicitly).
         """
         # Apply constraints first
         state = model.apply_constraints(state, geometry)
 
-        # Get RHS from model (includes all terms)
-        rhs = model.compute_rhs(state, geometry)
+        # For IMEX, compute only advective RHS (no diffusion)
+        # Advection: -v*grad(psi)
+        psi = state.psi
+        v_r = state.v[:, :, 0]
+        v_z = state.v[:, :, 2]
+        dr, dz = geometry.dr, geometry.dz
 
-        # For IMEX, we only want the non-diffusive parts
-        # The model's RHS includes diffusion, so we need to subtract it
-        # For now, just use forward Euler on the full RHS
-        # (The implicit step will correct the diffusion part)
-
-        # Update psi (advection-diffusion for resistive MHD)
-        # In IMEX, we advance advection explicitly
-        new_psi = state.psi + dt * rhs.psi
-
-        # Update time (partial)
-        new_state = state.replace(
-            psi=new_psi,
+        # Compute gradient of psi (central differences)
+        dpsi_dr = jnp.zeros_like(psi)
+        dpsi_dr = dpsi_dr.at[1:-1, :].set(
+            (psi[2:, :] - psi[:-2, :]) / (2 * dr)
         )
+        dpsi_dz = jnp.zeros_like(psi)
+        dpsi_dz = dpsi_dz.at[:, 1:-1].set(
+            (psi[:, 2:] - psi[:, :-2]) / (2 * dz)
+        )
+
+        # Advection term: -v*grad(psi)
+        advection = -(v_r * dpsi_dr + v_z * dpsi_dz)
+
+        # Update psi with advection only (no diffusion)
+        new_psi = state.psi + dt * advection
+
+        new_state = state.replace(psi=new_psi)
 
         return model.apply_constraints(new_state, geometry)
 
     def _implicit_diffusion(self, state: State, dt: float,
                             model: PhysicsModel, geometry: Geometry) -> State:
-        """Solve implicit diffusion step for B field.
+        """Solve implicit diffusion step for psi and B fields.
 
-        Solves: (I - theta*dt*D)·B^{n+1} = B^n + (1-theta)*dt*D·B^n
+        For psi (resistive MHD):
+            Solves: (I - theta*dt*(eta/mu0)*Delta*) psi^{n+1} = psi^n + ...
+
+        For B components:
+            Solves: (I - theta*dt*D)·B^{n+1} = B^n + (1-theta)*dt*D·B^n
 
         For backward Euler (theta=1): (I - dt*D)·B^{n+1} = B^n
         For Crank-Nicolson (theta=0.5): (I - 0.5*dt*D)·B^{n+1} = (I + 0.5*dt*D)·B^n
@@ -96,6 +138,9 @@ class ImexSolver(Solver):
             eta = jnp.ones((geometry.nr, geometry.nz)) * 1e-6
 
         theta = self.config.theta
+
+        # Solve implicit diffusion for psi (primary equation in resistive MHD)
+        new_psi = self._solve_psi_diffusion(state.psi, dt, eta, geometry)
 
         # Solve for each B component
         B_new = jnp.zeros_like(state.B)
@@ -128,7 +173,72 @@ class ImexSolver(Solver):
 
             B_new = B_new.at[:, :, i].set(result.x)
 
-        return state.replace(B=B_new)
+        return state.replace(psi=new_psi, B=B_new)
+
+    def _solve_psi_diffusion(self, psi: Array, dt: float, eta: Array,
+                             geometry: Geometry) -> Array:
+        """Solve implicit diffusion for psi: (I - theta*dt*(eta/mu0)*nabla^2) psi = rhs.
+
+        Uses Laplacian approximation for the implicit solve with Dirichlet BCs.
+        """
+        theta = self.config.theta
+        dr, dz = geometry.dr, geometry.dz
+
+        # Diffusion coefficient: D = eta/mu_0
+        D = eta / MU0
+
+        # Build operator for psi diffusion with boundary conditions
+        # Boundaries stay fixed (identity), interior gets diffusion operator
+        def psi_operator(psi_in: Array) -> Array:
+            """Apply (I - theta*dt*D*nabla^2) to psi with Dirichlet BCs."""
+            result = psi_in.copy()
+
+            # Interior Laplacian
+            lap_interior = (
+                (psi_in[2:, 1:-1] - 2*psi_in[1:-1, 1:-1] + psi_in[:-2, 1:-1]) / dr**2 +
+                (psi_in[1:-1, 2:] - 2*psi_in[1:-1, 1:-1] + psi_in[1:-1, :-2]) / dz**2
+            )
+
+            # Apply (I - theta*dt*D*nabla^2) only to interior
+            D_interior = D[1:-1, 1:-1]
+            result = result.at[1:-1, 1:-1].set(
+                psi_in[1:-1, 1:-1] - theta * dt * D_interior * lap_interior
+            )
+
+            # Boundaries: identity (result[boundary] = psi_in[boundary])
+            return result
+
+        # Diagonal for preconditioner
+        # Interior: 1 + theta*dt*D*(2/dr^2 + 2/dz^2), Boundary: 1
+        diag = jnp.ones_like(psi)
+        interior_diag = 1.0 + theta * dt * D[1:-1, 1:-1] * (2.0/dr**2 + 2.0/dz**2)
+        diag = diag.at[1:-1, 1:-1].set(interior_diag)
+        precond = jacobi_preconditioner(diag)
+
+        # Build RHS
+        if theta < 1.0:
+            # Crank-Nicolson: RHS = psi^n + (1-theta)*dt*D*lap(psi^n)
+            lap_psi = jnp.zeros_like(psi)
+            lap_interior = (
+                (psi[2:, 1:-1] - 2*psi[1:-1, 1:-1] + psi[:-2, 1:-1]) / dr**2 +
+                (psi[1:-1, 2:] - 2*psi[1:-1, 1:-1] + psi[1:-1, :-2]) / dz**2
+            )
+            lap_psi = lap_psi.at[1:-1, 1:-1].set(lap_interior)
+            rhs = psi + (1 - theta) * dt * D * lap_psi
+        else:
+            # Backward Euler: RHS = psi^n
+            rhs = psi
+
+        # Solve with CG
+        result = conjugate_gradient(
+            psi_operator, rhs,
+            x0=psi,
+            preconditioner=precond,
+            tol=self.config.cg_tol,
+            max_iter=self.config.cg_max_iter
+        )
+
+        return result.x
 
     def _laplacian(self, f: Array, dr: float, dz: float) -> Array:
         """Compute 2D Laplacian nabla^2 f = d^2f/dr^2 + d^2f/dz^2."""
