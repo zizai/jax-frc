@@ -147,3 +147,93 @@ class TestScenario:
         assert len(result.phase_results) == 2
         assert result.phase_results[0].name == "phase1"
         assert result.phase_results[1].name == "phase2"
+
+
+class TestPhysicsConditions:
+    """Tests for physics-based transition conditions."""
+
+    def test_separation_below_threshold(self):
+        """separation_below triggers when dZ < threshold."""
+        from jax_frc.scenarios.transitions import separation_below
+        import jax.numpy as jnp
+
+        # Create state with two magnetic nulls
+        state = State.zeros(nr=10, nz=40)
+        # Set psi with two peaks (simplified)
+        psi = jnp.zeros((10, 40))
+        psi = psi.at[5, 10].set(1.0)  # Null 1 at z_idx=10
+        psi = psi.at[5, 30].set(1.0)  # Null 2 at z_idx=30
+        state = state.replace(psi=psi)
+
+        geometry = Geometry(
+            coord_system="cylindrical",
+            nr=10, nz=40,
+            r_min=0.1, r_max=1.0,
+            z_min=-2.0, z_max=2.0  # dz = 0.1, separation = 20*0.1 = 2.0
+        )
+
+        trans = separation_below(3.0, geometry)  # Should trigger (2.0 < 3.0)
+        triggered, _ = trans.evaluate(state, t=0.0)
+        assert triggered
+
+        trans = separation_below(1.0, geometry)  # Should not trigger (2.0 > 1.0)
+        triggered, _ = trans.evaluate(state, t=0.0)
+        assert not triggered
+
+    def test_temperature_above_threshold(self):
+        """temperature_above triggers when T > threshold."""
+        from jax_frc.scenarios.transitions import temperature_above
+        import jax.numpy as jnp
+
+        state = State.zeros(nr=10, nz=20)
+        # Set pressure and density to give T = p/n
+        state = state.replace(
+            p=jnp.ones((10, 20)) * 100.0,
+            n=jnp.ones((10, 20)) * 10.0  # T = 100/10 = 10
+        )
+
+        trans = temperature_above(5.0)  # Should trigger (10 > 5)
+        triggered, _ = trans.evaluate(state, t=0.0)
+        assert triggered
+
+        trans = temperature_above(15.0)  # Should not trigger (10 < 15)
+        triggered, _ = trans.evaluate(state, t=0.0)
+        assert not triggered
+
+    def test_flux_below_threshold(self):
+        """flux_below triggers when max(psi) < threshold."""
+        from jax_frc.scenarios.transitions import flux_below
+        import jax.numpy as jnp
+
+        state = State.zeros(nr=10, nz=20)
+        psi = jnp.ones((10, 20)) * 0.5
+        psi = psi.at[5, 10].set(2.0)  # Peak at 2.0
+        state = state.replace(psi=psi)
+
+        trans = flux_below(3.0)  # Should trigger (2.0 < 3.0)
+        triggered, _ = trans.evaluate(state, t=0.0)
+        assert triggered
+
+        trans = flux_below(1.0)  # Should not trigger (2.0 > 1.0)
+        triggered, _ = trans.evaluate(state, t=0.0)
+        assert not triggered
+
+    def test_velocity_below_threshold(self):
+        """velocity_below triggers when max(|v|) < threshold."""
+        from jax_frc.scenarios.transitions import velocity_below
+        import jax.numpy as jnp
+
+        state = State.zeros(nr=10, nz=20)
+        # Set velocity field with peak magnitude
+        v = jnp.zeros((10, 20, 3))
+        v = v.at[5, 10, 0].set(3.0)  # vr = 3
+        v = v.at[5, 10, 2].set(4.0)  # vz = 4, |v| = 5
+        state = state.replace(v=v)
+
+        trans = velocity_below(10.0)  # Should trigger (5.0 < 10.0)
+        triggered, _ = trans.evaluate(state, t=0.0)
+        assert triggered
+
+        trans = velocity_below(3.0)  # Should not trigger (5.0 > 3.0)
+        triggered, _ = trans.evaluate(state, t=0.0)
+        assert not triggered
