@@ -60,7 +60,11 @@ class Simulation:
         geometry = Geometry.from_config(config["geometry"])
         model = PhysicsModel.create(config.get("model", {"type": "resistive_mhd"}))
         solver = Solver.create(config.get("solver", {"type": "euler"}))
-        time_controller = TimeController(**config.get("time", {}))
+
+        # Convert time config values to floats (YAML may load them as strings)
+        time_config = config.get("time", {})
+        time_kwargs = {k: float(v) for k, v in time_config.items()}
+        time_controller = TimeController(**time_kwargs)
 
         return cls(
             geometry=geometry,

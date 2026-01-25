@@ -1,0 +1,26 @@
+# Example FRC simulation configuration
+
+geometry:
+  coord_system: cylindrical
+  nr: 64
+  nz: 128
+  r_min: 0.01
+  r_max: 0.4
+  z_min: -1.0
+  z_max: 1.0
+
+model:
+  type: resistive_mhd
+  resistivity:
+    type: chodura
+    eta_0: 1.0e-6
+    eta_anom: 1.0e-3
+    threshold: 1.0e4
+
+solver:
+  type: rk4
+
+time:
+  cfl_safety: 0.25
+  dt_min: 1.0e-12
+  dt_max: 1.0e-4

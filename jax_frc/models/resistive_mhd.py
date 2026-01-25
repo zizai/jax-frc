@@ -93,12 +93,12 @@ class ResistiveMHD(PhysicsModel):
         res_type = res_config.get("type", "spitzer")
 
         if res_type == "spitzer":
-            resistivity = SpitzerResistivity(eta_0=res_config.get("eta_0", 1e-6))
+            resistivity = SpitzerResistivity(eta_0=float(res_config.get("eta_0", 1e-6)))
         elif res_type == "chodura":
             resistivity = ChoduraResistivity(
-                eta_0=res_config.get("eta_0", 1e-6),
-                eta_anom=res_config.get("eta_anom", 1e-3),
-                threshold=res_config.get("threshold", 1e4)
+                eta_0=float(res_config.get("eta_0", 1e-6)),
+                eta_anom=float(res_config.get("eta_anom", 1e-3)),
+                threshold=float(res_config.get("threshold", 1e4))
             )
         else:
             raise ValueError(f"Unknown resistivity type: {res_type}")

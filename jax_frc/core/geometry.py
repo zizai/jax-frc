@@ -65,4 +65,12 @@ class Geometry:
     @classmethod
     def from_config(cls, config: dict) -> "Geometry":
         """Create Geometry from configuration dictionary."""
-        return cls(**config)
+        return cls(
+            coord_system=config["coord_system"],
+            nr=int(config["nr"]),
+            nz=int(config["nz"]),
+            r_min=float(config["r_min"]),
+            r_max=float(config["r_max"]),
+            z_min=float(config["z_min"]),
+            z_max=float(config["z_max"]),
+        )
