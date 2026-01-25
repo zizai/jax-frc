@@ -6,6 +6,121 @@ A JAX-based implementation of three primary plasma physics models used in Field-
 
 This project provides GPU-accelerated implementations of plasma physics models using JAX's automatic differentiation and just-in-time compilation. The implementations are based on the theoretical framework described in `plasma_physics.md`.
 
+## JAX-FRC Framework (New)
+
+The `jax_frc` package provides a modular OOP framework for building and running FRC simulations with swappable physics models, solvers, and diagnostics.
+
+### Quick Start
+
+```python
+from jax_frc import Simulation, Geometry, ResistiveMHD, RK4Solver, TimeController
+import jax.numpy as jnp
+
+# Create geometry
+geometry = Geometry(
+    coord_system='cylindrical',
+    nr=32, nz=64,
+    r_min=0.01, r_max=1.0,
+    z_min=-1.0, z_max=1.0
+)
+
+# Create physics model
+model = ResistiveMHD.from_config({
+    'resistivity': {'type': 'chodura', 'eta_0': 1e-6, 'eta_anom': 1e-3}
+})
+
+# Create solver and time controller
+solver = RK4Solver()
+time_controller = TimeController(cfl_safety=0.25, dt_max=1e-4)
+
+# Create and run simulation
+sim = Simulation(geometry=geometry, model=model, solver=solver, time_controller=time_controller)
+sim.initialize(psi_init=lambda r, z: (1 - r**2) * jnp.exp(-z**2))
+
+# Run for 100 steps
+final_state = sim.run_steps(100)
+```
+
+### Configuration-Based Setup
+
+```python
+from jax_frc import Simulation
+
+# Load from YAML configuration
+sim = Simulation.from_config("configs/example_frc.yaml")
+sim.initialize(psi_init=lambda r, z: jnp.exp(-r**2 - z**2))
+final_state = sim.run_steps(100)
+```
+
+### Package Structure
+
+```
+jax_frc/
+├── core/
+│   ├── geometry.py      # Computational domain and coordinates
+│   ├── state.py         # State containers (State, ParticleState)
+│   └── simulation.py    # Main orchestrator class
+├── models/
+│   ├── base.py          # PhysicsModel abstract base class
+│   ├── resistive_mhd.py # Single-fluid resistive MHD
+│   ├── extended_mhd.py  # Two-fluid Extended MHD with Hall term
+│   ├── hybrid_kinetic.py# Hybrid kinetic with delta-f PIC
+│   └── resistivity.py   # Spitzer and Chodura resistivity models
+├── solvers/
+│   ├── base.py          # Solver abstract base class
+│   ├── explicit.py      # Euler and RK4 solvers
+│   ├── semi_implicit.py # Semi-implicit and hybrid solvers
+│   └── time_controller.py# Adaptive timestep control
+├── boundaries/
+│   ├── base.py          # BoundaryCondition base class
+│   ├── conducting.py    # Conducting wall boundary
+│   └── symmetry.py      # Symmetry axis boundary
+├── equilibrium/
+│   ├── grad_shafranov.py# Grad-Shafranov solver
+│   └── rigid_rotor.py   # Rigid rotor equilibrium
+├── diagnostics/
+│   ├── probes.py        # Diagnostic probes (Flux, Energy, Beta, Current)
+│   └── output.py        # HDF5 checkpoints and time history I/O
+└── config/
+    └── loader.py        # YAML configuration loading
+```
+
+### Available Physics Models
+
+| Model | Class | Solver | Use Case |
+|-------|-------|--------|----------|
+| Resistive MHD | `ResistiveMHD` | `RK4Solver` | Circuit design, formation dynamics |
+| Extended MHD | `ExtendedMHD` | `SemiImplicitSolver` | Hall physics, global stability |
+| Hybrid Kinetic | `HybridKinetic` | `HybridSolver` | Kinetic stability, beam injection |
+
+### Diagnostics
+
+```python
+from jax_frc.diagnostics import DiagnosticSet, save_time_history, save_checkpoint
+
+# Create default diagnostic set
+diagnostics = DiagnosticSet.default_set()
+
+# Measure during simulation
+for i in range(steps):
+    sim.step()
+    results = diagnostics.measure_all(sim.state, geometry)
+
+# Save time history and checkpoint
+save_time_history(diagnostics.get_history(), "output/history.csv")
+save_checkpoint(sim.state, geometry, "output/checkpoint.h5")
+```
+
+### Migration from Old Scripts
+
+Use the migration script to run old-style simulations with the new framework:
+
+```bash
+python scripts/migrate_old_sims.py --model resistive_mhd --steps 100
+python scripts/migrate_old_sims.py --model extended_mhd --steps 50
+python scripts/migrate_old_sims.py --model hybrid_kinetic --steps 100 --particles 1000
+```
+
 ## Models
 
 ### 1. Resistive MHD (Lamy Ridge Model)
