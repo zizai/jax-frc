@@ -29,17 +29,19 @@ class TimeDependentMirrorBC(BoundaryCondition):
     ramp_time: float
     profile: Literal["cosine", "linear"] = "cosine"
 
-    def apply(self, state: State, geometry: Geometry, t: float = 0.0) -> State:
+    def apply(self, state: State, geometry: Geometry) -> State:
         """Apply time-dependent mirror field at z boundaries.
+
+        Uses state.time to determine current mirror ratio.
 
         Args:
             state: Current state
             geometry: Computational geometry
-            t: Current simulation time
 
         Returns:
             State with modified boundary values
         """
+        t = float(state.time)  # Read time from state
         psi = state.psi
 
         # Compute current mirror ratio

@@ -32,7 +32,8 @@ class TestTimeDependentMirrorBC:
             profile="cosine"
         )
 
-        result = bc.apply(initial_state, geometry, t=0.0)
+        # State already has time=0.0 by default
+        result = bc.apply(initial_state, geometry)
 
         # At t=0, psi at boundaries should be unchanged
         assert jnp.allclose(result.psi[:, 0], initial_state.psi[:, 0])
@@ -47,10 +48,14 @@ class TestTimeDependentMirrorBC:
             profile="cosine"
         )
 
-        result = bc.apply(initial_state, geometry, t=10.0)
+        # Set state time to ramp_time
+        state_at_end = initial_state.replace(time=10.0)
+        result = bc.apply(state_at_end, geometry)
 
         # At t=ramp_time, boundary field should be at final value
         assert result is not None
+        # Verify mirror ratio is at final value
+        assert bc._compute_mirror_ratio(10.0) == 1.5
 
     def test_cosine_profile_smooth(self, initial_state, geometry):
         """Cosine profile gives smooth ramp."""
