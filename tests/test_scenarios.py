@@ -243,6 +243,26 @@ class TestPhysicsConditions:
         assert not triggered
 
 
+def test_phase_result_has_history():
+    """PhaseResult should have a history dict."""
+    from jax_frc.scenarios.phase import PhaseResult
+    from jax_frc.core.state import State
+
+    state = State.zeros(nr=8, nz=16)
+    result = PhaseResult(
+        name="test",
+        initial_state=state,
+        final_state=state,
+        start_time=0.0,
+        end_time=1.0,
+        termination="condition_met",
+        history={"time": [0.0, 0.5, 1.0], "metric": [1.0, 0.5, 0.2]}
+    )
+
+    assert result.history["time"] == [0.0, 0.5, 1.0]
+    assert result.history["metric"] == [1.0, 0.5, 0.2]
+
+
 def test_scenario_requires_physics_model_and_solver():
     """Scenario should require physics_model and solver fields."""
     from jax_frc.scenarios.scenario import Scenario
