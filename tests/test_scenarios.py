@@ -237,3 +237,18 @@ class TestPhysicsConditions:
         trans = velocity_below(3.0)  # Should not trigger (5.0 > 3.0)
         triggered, _ = trans.evaluate(state, t=0.0)
         assert not triggered
+
+
+def test_scenario_requires_physics_model_and_solver():
+    """Scenario should require physics_model and solver fields."""
+    from jax_frc.scenarios.scenario import Scenario
+    from jax_frc.models.base import PhysicsModel
+    from jax_frc.solvers.base import Solver
+
+    # Check that Scenario has these attributes in its signature
+    import inspect
+    sig = inspect.signature(Scenario)
+    params = list(sig.parameters.keys())
+
+    assert "physics_model" in params
+    assert "solver" in params

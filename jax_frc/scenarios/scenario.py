@@ -8,6 +8,8 @@ import logging
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
 from jax_frc.scenarios.phase import Phase, PhaseResult
+from jax_frc.models.base import PhysicsModel
+from jax_frc.solvers.base import Solver
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +41,8 @@ class Scenario:
         phases: Ordered list of phases to run
         geometry: Computational geometry
         initial_state: Starting state (or None if first phase creates it)
+        physics_model: Physics model for evolution equations
+        solver: Time integrator
         dt: Timestep for simulation
         config: Optional per-phase configuration overrides
     """
@@ -47,6 +51,8 @@ class Scenario:
     phases: List[Phase]
     geometry: Geometry
     initial_state: Optional[State]
+    physics_model: PhysicsModel
+    solver: Solver
     dt: float
     config: Dict[str, dict] = field(default_factory=dict)
 
