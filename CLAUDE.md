@@ -81,3 +81,8 @@ KB = 1.381e-23    # Boltzmann constant
 - Resistive MHD: dt ~ 1e-4
 - Extended MHD: dt ~ 1e-6 (Whistler constraint)
 - Hybrid Kinetic: dt ~ 1e-8 (cyclotron constraint)
+
+
+## Testing
+
+Examples and validation tests are excluded from unittest.
