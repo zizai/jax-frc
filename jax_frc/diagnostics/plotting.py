@@ -383,3 +383,67 @@ def plot_particles(
         plt.show()
 
     return fig
+
+
+def plot_overview(
+    result: SimulationResult,
+    save_dir: Optional[str] = "auto",
+    show: bool = False,
+    format: str = 'png',
+) -> str:
+    """Generate all standard plots for a simulation result.
+
+    Calls all applicable plotting functions and saves to a single directory.
+    Also generates an index.html for easy browsing.
+
+    Args:
+        result: SimulationResult object
+        save_dir: Directory to save all plots. "auto" creates timestamped dir.
+        show: Whether to display plots interactively (default False for overview)
+        format: Output format
+
+    Returns:
+        Path to output directory
+    """
+    from jax_frc.diagnostics.file_output import generate_index_html
+
+    # Determine output directory
+    if save_dir == "auto":
+        actual_dir = create_output_dir(result.model_name)
+    else:
+        actual_dir = save_dir
+
+    # Generate all applicable plots
+    if result.history is not None:
+        try:
+            plot_time_traces(result, save_dir=actual_dir, show=False, format=format)
+        except Exception as e:
+            print(f"Warning: Could not generate time traces: {e}")
+
+    # Field plots
+    try:
+        plot_fields(result, save_dir=actual_dir, show=False, format=format)
+    except Exception as e:
+        print(f"Warning: Could not generate field plots: {e}")
+
+    # Profile plots
+    try:
+        plot_profiles(result, axis='r', save_dir=actual_dir, show=False, format=format)
+        plot_profiles(result, axis='z', save_dir=actual_dir, show=False, format=format)
+    except Exception as e:
+        print(f"Warning: Could not generate profile plots: {e}")
+
+    # Particle plots (hybrid only)
+    if result.particles is not None:
+        try:
+            plot_particles(result, save_dir=actual_dir, show=False, format=format)
+        except Exception as e:
+            print(f"Warning: Could not generate particle plots: {e}")
+
+    # Generate index.html
+    generate_index_html(actual_dir)
+
+    if show:
+        plt.show()
+
+    return actual_dir

@@ -272,3 +272,58 @@ class TestPlotParticles:
         fig = plot_particles(result, show=False, save_dir=None)
 
         assert fig is None
+
+
+class TestPlotOverview:
+    """Tests for plot_overview function."""
+
+    def test_plot_overview_creates_all_plots(self):
+        """Verify plot_overview generates multiple files."""
+        from jax_frc.diagnostics.plotting import plot_overview
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plot_overview(result, save_dir=tmpdir, show=False)
+
+            files = os.listdir(tmpdir)
+            # Should have time traces, fields, profiles, and index.html
+            assert len(files) >= 3
+            assert any('time_traces' in f for f in files)
+
+        plt.close('all')
+
+    def test_plot_overview_creates_index_html(self):
+        """Verify plot_overview generates index.html."""
+        from jax_frc.diagnostics.plotting import plot_overview
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plot_overview(result, save_dir=tmpdir, show=False)
+
+            assert os.path.isfile(os.path.join(tmpdir, 'index.html'))
+
+        plt.close('all')
+
+
+class TestExports:
+    """Test that all functions are properly exported."""
+
+    def test_imports_from_diagnostics(self):
+        """Verify all plotting functions can be imported from diagnostics."""
+        from jax_frc.diagnostics import (
+            plot_overview,
+            plot_time_traces,
+            plot_fields,
+            plot_profiles,
+            plot_particles,
+        )
+
+        assert callable(plot_overview)
+        assert callable(plot_time_traces)
+        assert callable(plot_fields)
+        assert callable(plot_profiles)
+        assert callable(plot_particles)
