@@ -180,3 +180,40 @@ class TestPlotFields:
             assert len(files) >= 1
 
         plt.close(fig)
+
+
+class TestPlotProfiles:
+    """Tests for plot_profiles function."""
+
+    def test_plot_profiles_returns_figure(self):
+        """Verify plot_profiles returns matplotlib figure."""
+        from jax_frc.diagnostics.plotting import plot_profiles
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+        fig = plot_profiles(result, show=False, save_dir=None)
+
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_plot_profiles_radial_axis(self):
+        """Verify plot_profiles works with axis='r'."""
+        from jax_frc.diagnostics.plotting import plot_profiles
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+        fig = plot_profiles(result, axis='r', show=False, save_dir=None)
+
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_plot_profiles_axial_axis(self):
+        """Verify plot_profiles works with axis='z'."""
+        from jax_frc.diagnostics.plotting import plot_profiles
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+        fig = plot_profiles(result, axis='z', show=False, save_dir=None)
+
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)

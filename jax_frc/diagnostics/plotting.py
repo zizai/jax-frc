@@ -6,6 +6,8 @@ standard visualizations with consistent styling.
 
 from typing import Optional, Union
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 
 from jax_frc.results import SimulationResult
@@ -193,3 +195,90 @@ def plot_fields(
         plt.show()
 
     return last_fig
+
+
+def plot_profiles(
+    result: SimulationResult,
+    t: Optional[Union[int, float]] = None,
+    axis: str = 'r',
+    save_dir: Optional[str] = "auto",
+    show: Optional[bool] = None,
+    format: str = 'png',
+) -> plt.Figure:
+    """Plot 1D profiles through the midplane.
+
+    Creates line plots showing field values along a radial or axial slice.
+
+    Args:
+        result: SimulationResult object with field data
+        t: Time to plot (see plot_fields for format)
+        axis: Axis for profile ('r' for radial, 'z' for axial)
+        save_dir: Directory to save plots
+        show: Whether to display interactively
+        format: Output format
+
+    Returns:
+        Matplotlib Figure object
+    """
+    if show is None:
+        show = not is_notebook()
+
+    # Collect available fields
+    fields = {}
+    if result.density is not None:
+        fields['Density'] = np.asarray(result.density)
+    if result.pressure is not None:
+        fields['Pressure'] = np.asarray(result.pressure)
+    if result.psi is not None:
+        fields['Psi'] = np.asarray(result.psi)
+
+    if not fields:
+        raise ValueError("Result has no field data for profiles")
+
+    # Create coordinate arrays
+    nr, nz = result.grid_shape[:2]
+    dr, dz = result.grid_spacing[:2]
+    r = np.arange(nr) * dr
+    z = np.arange(nz) * dz
+
+    # Get midplane index
+    mid_r = nr // 2
+    mid_z = nz // 2
+
+    n_fields = len(fields)
+    fig, axes = plt.subplots(n_fields, 1, figsize=(10, 3 * n_fields), sharex=True)
+    if n_fields == 1:
+        axes = [axes]
+
+    for ax, (name, data) in zip(axes, fields.items()):
+        if axis == 'r':
+            # Radial profile at z midplane
+            profile = data[:, mid_z]
+            coord = r
+            xlabel = get_label('r')
+        else:
+            # Axial profile at r midplane
+            profile = data[mid_r, :]
+            coord = z
+            xlabel = get_label('z')
+
+        ax.plot(coord, profile, linewidth=2)
+        ax.set_ylabel(name)
+        ax.set_title(f"{name} profile along {axis}")
+
+    axes[-1].set_xlabel(xlabel)
+
+    time_label = f"t = {result.final_time:.2e} s"
+    fig.suptitle(f"{result.model_name} - Profiles ({time_label})", fontsize=14)
+    fig.tight_layout()
+
+    # Save if requested
+    if save_dir is not None:
+        if save_dir == "auto":
+            save_dir = create_output_dir(result.model_name)
+        save_figure(fig, f"profiles_{axis}", save_dir, format=format)
+
+    if show:
+        plt.show()
+
+    return fig
