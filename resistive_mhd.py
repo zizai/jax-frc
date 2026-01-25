@@ -46,23 +46,64 @@ def circuit_dynamics(I_coil, V_bank, L_coil, M_plasma_coil, dI_plasma_dt, dt):
     I_coil_new = I_coil + dI_coil_dt * dt
     return I_coil_new, dI_coil_dt
 
+def compute_stable_dt(eta_max, dr, dz):
+    """
+    Compute CFL-stable timestep for diffusion equation.
+    For 2D diffusion: dt < min(dr, dz)^2 / (4 * D) where D = eta/mu0
+    """
+    D = eta_max / MU0
+    dx_min = jnp.minimum(dr, dz)
+    return 0.25 * dx_min**2 / D  # 25% safety margin
+
+@jit
+def diffusion_substep(psi, dr, dz, r, dt_sub):
+    """Single diffusion substep with given timestep."""
+    j_phi = compute_j_phi(psi, dr, dz, r)
+    eta = chodura_resistivity(psi, j_phi)
+    d_psi = (eta / MU0) * laplace_star(psi, dr, dz, r)
+    return psi + d_psi * dt_sub, eta, j_phi
+
 @jit
 def step(state, _):
     psi, I_coil, t, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil = state
-    
+
+    # Compute stable substep size based on maximum resistivity
+    # eta_max = eta_0 + eta_anom = 1e-4 + 1e-2 = 0.0101
+    eta_max = 0.0101
+    dt_stable = compute_stable_dt(eta_max, dr, dz)
+
+    # Number of substeps needed (at least 1)
+    n_substeps = jnp.maximum(1, jnp.ceil(dt / dt_stable)).astype(jnp.int32)
+    dt_sub = dt / n_substeps
+
+    # Subcycle the diffusion equation using while_loop (handles dynamic bounds)
+    def cond_fn(carry):
+        i, _ = carry
+        return i < n_substeps
+
+    def body_fn(carry):
+        i, psi_acc = carry
+        new_psi, _, _ = diffusion_substep(psi_acc, dr, dz, r, dt_sub)
+        return (i + 1, new_psi)
+
+    _, new_psi = lax.while_loop(cond_fn, body_fn, (jnp.int32(0), psi))
+
+    # Compute j_phi for circuit coupling
     j_phi = compute_j_phi(psi, dr, dz, r)
-    eta = chodura_resistivity(psi, j_phi)
-    
-    d_psi = (eta / MU0) * laplace_star(psi, dr, dz, r)
-    
-    new_psi = psi + d_psi * dt
-    
     j_phi_new = compute_j_phi(new_psi, dr, dz, r)
-    dI_plasma_dt = jnp.mean(j_phi_new - j_phi) / dt
-    
+
+    # Use total plasma current change, but limit the rate for stability
+    delta_j = jnp.mean(j_phi_new - j_phi)
+    # Clip to prevent runaway: limit to 10% change per step
+    max_change = 0.1 * jnp.abs(jnp.mean(j_phi) + 1e-10)
+    delta_j_clipped = jnp.clip(delta_j, -max_change, max_change)
+    dI_plasma_dt = delta_j_clipped / dt
+
     I_coil_new, dI_coil_dt = circuit_dynamics(I_coil, V_bank, L_coil, M_plasma_coil, dI_plasma_dt, dt)
-    
-    new_psi = new_psi.at[0, :].set(I_coil_new * r[0, 0] / L_coil)
+
+    # Apply boundary conditions (conducting wall: psi = 0 at boundaries)
+    # Inner boundary: Neumann-like (extrapolate from interior) to avoid singularity at r=0
+    new_psi = new_psi.at[0, :].set(new_psi[1, :])
     new_psi = new_psi.at[-1, :].set(0)
     new_psi = new_psi.at[:, 0].set(0)
     new_psi = new_psi.at[:, -1].set(0)
