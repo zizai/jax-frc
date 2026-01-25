@@ -124,9 +124,9 @@ class Scenario:
             # Apply step hook (time-varying BCs, etc.)
             state = phase.step_hook(state, self.geometry, t)
 
-            # Advance time (actual physics stepping would go here)
-            t += self.dt
-            state = state.replace(time=t, step=state.step + 1)
+            # Advance physics via solver
+            state = self.solver.step(state, self.dt, self.physics_model, self.geometry)
+            t = float(state.time)
 
         # Cleanup
         state = phase.on_complete(state, self.geometry)

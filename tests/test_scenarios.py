@@ -252,3 +252,45 @@ def test_scenario_requires_physics_model_and_solver():
 
     assert "physics_model" in params
     assert "solver" in params
+
+
+def test_scenario_calls_solver_step():
+    """Scenario._run_phase should call solver.step() for physics evolution."""
+    from unittest.mock import MagicMock, patch
+    from jax_frc.core.geometry import Geometry
+    from jax_frc.core.state import State
+    from jax_frc.scenarios import Scenario
+    from jax_frc.scenarios.phase import Phase
+    from jax_frc.scenarios.transitions import timeout
+
+    geometry = Geometry(
+        coord_system="cylindrical", nr=8, nz=16,
+        r_min=0.01, r_max=1.0, z_min=-1.0, z_max=1.0
+    )
+    state = State.zeros(nr=8, nz=16)
+
+    # Mock physics model and solver
+    mock_model = MagicMock()
+    mock_solver = MagicMock()
+
+    # Solver.step returns updated state with incremented time
+    def fake_step(s, dt, model, geom):
+        return s.replace(time=s.time + dt, step=s.step + 1)
+    mock_solver.step.side_effect = fake_step
+
+    phase = Phase(name="test", transition=timeout(0.05))
+
+    scenario = Scenario(
+        name="test",
+        phases=[phase],
+        geometry=geometry,
+        initial_state=state,
+        physics_model=mock_model,
+        solver=mock_solver,
+        dt=0.01,
+    )
+
+    result = scenario.run()
+
+    # Solver should have been called multiple times
+    assert mock_solver.step.call_count >= 5
