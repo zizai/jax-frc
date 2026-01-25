@@ -63,7 +63,20 @@ def compute_stable_dt(eta_max, dr, dz):
     """
     Compute CFL-stable timestep for diffusion equation.
     For 2D diffusion: dt < min(dr, dz)^2 / (4 * D) where D = eta/mu0
+
+    Args:
+        eta_max: Maximum resistivity value (must be > 0)
+        dr: Grid spacing in r direction
+        dz: Grid spacing in z direction
+
+    Returns:
+        Stable timestep with 25% safety margin
+
+    Raises:
+        ValueError: If eta_max <= 0
     """
+    if eta_max <= 0:
+        raise ValueError(f"eta_max must be positive for stable timestep, got {eta_max}")
     D = eta_max / MU0
     dx_min = jnp.minimum(dr, dz)
     return 0.25 * dx_min**2 / D  # 25% safety margin
@@ -134,6 +147,32 @@ def step(state, _):
     return (new_psi, v_r, v_z, I_coil_new, t + dt, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil), psi
 
 def run_simulation(steps=500, nr=64, nz=128, V_bank=1000.0, L_coil=1e-6, M_plasma_coil=1e-7):
+    """Run resistive MHD simulation for FRC formation.
+
+    Args:
+        steps: Number of timesteps to run
+        nr: Number of radial grid points (must be >= 4)
+        nz: Number of axial grid points (must be >= 4)
+        V_bank: Capacitor bank voltage [V]
+        L_coil: Coil inductance [H] (must be > 0)
+        M_plasma_coil: Plasma-coil mutual inductance [H]
+
+    Returns:
+        Tuple of (final_psi, final_I_coil, history)
+
+    Raises:
+        ValueError: If input parameters are invalid
+    """
+    # Validate inputs
+    if steps < 1:
+        raise ValueError(f"steps must be at least 1, got {steps}")
+    if nr < 4:
+        raise ValueError(f"nr must be at least 4 for finite differences, got {nr}")
+    if nz < 4:
+        raise ValueError(f"nz must be at least 4 for finite differences, got {nz}")
+    if L_coil <= 0:
+        raise ValueError(f"L_coil must be positive, got {L_coil}")
+
     dr, dz = 1.0/nr, 2.0/nz
     dt = 1e-4
 

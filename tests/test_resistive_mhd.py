@@ -15,7 +15,11 @@ from tests.invariants.consistency import ResistivityBounds
 
 @pytest.fixture
 def resistive_mhd_state():
-    """Initialize resistive MHD state for testing."""
+    """Initialize resistive MHD state for testing.
+
+    State tuple structure (13 elements):
+        psi, v_r, v_z, I_coil, t, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil
+    """
     nr, nz = 32, 64
     dr, dz = 1.0/nr, 2.0/nz
     dt = 1e-4
@@ -24,13 +28,19 @@ def resistive_mhd_state():
     z = jnp.linspace(-1.0, 1.0, nz)[None, :]
 
     psi_init = (1 - r**2) * jnp.exp(-z**2)
+
+    # Velocity fields (weak inward radial flow for compression)
+    v_r_init = -0.01 * r * jnp.exp(-z**2)
+    v_z_init = jnp.zeros((nr, nz))
+
     I_coil_init = 0.0
 
     V_bank = 1000.0
     L_coil = 1e-6
     M_plasma_coil = 1e-7
 
-    state = (psi_init, I_coil_init, 0.0, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil)
+    # State: (psi, v_r, v_z, I_coil, t, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil)
+    state = (psi_init, v_r_init, v_z_init, I_coil_init, 0.0, dr, dz, dt, r, z, V_bank, L_coil, M_plasma_coil)
     step_fn = jax.jit(step)
 
     return state, step_fn, dr, dz, r
