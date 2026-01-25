@@ -62,10 +62,17 @@ class HybridKinetic(PhysicsModel):
 
     Uses delta-f PIC method for ions to reduce statistical noise.
     Electrons are treated as a massless neutralizing fluid.
+
+    Attributes:
+        equilibrium: Background distribution for delta-f
+        eta: Resistivity (Ohm·m)
+        collision_frequency: Ion-ion collision frequency (1/s) for Krook operator.
+            Typical FRC values: 1e3-1e5 s^-1. Set to 0 to disable collisions.
     """
 
     equilibrium: RigidRotorEquilibrium
     eta: float = 1e-6  # Resistivity
+    collision_frequency: float = 0.0  # Krook collision frequency (1/s)
 
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
         """Compute time derivatives for hybrid model.
@@ -229,7 +236,15 @@ class HybridKinetic(PhysicsModel):
 
         dlnf0_dt = self.equilibrium.d_ln_f0_dt(r, vr, vtheta, vz, ar, atheta, az)
         dw = -(1 - w) * dlnf0_dt
-        w_new = jnp.clip(w + dw * dt, -1.0, 1.0)
+        w_new = w + dw * dt
+
+        # Krook collision operator: dw/dt = -ν*w
+        # Exact solution: w(t+dt) = w(t) * exp(-ν*dt)
+        if self.collision_frequency > 0:
+            collision_decay = jnp.exp(-self.collision_frequency * dt)
+            w_new = w_new * collision_decay
+
+        w_new = jnp.clip(w_new, -1.0, 1.0)
 
         # Create new particle state
         new_particles = ParticleState(
@@ -301,8 +316,13 @@ class HybridKinetic(PhysicsModel):
         )
 
         eta = float(config.get("eta", 1e-6))
+        collision_frequency = float(config.get("collision_frequency", 0.0))
 
-        return cls(equilibrium=equilibrium, eta=eta)
+        return cls(
+            equilibrium=equilibrium,
+            eta=eta,
+            collision_frequency=collision_frequency
+        )
 
     @staticmethod
     def initialize_particles(n_particles: int, geometry: Geometry,
