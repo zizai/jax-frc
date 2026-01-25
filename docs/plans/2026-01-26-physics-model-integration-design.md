@@ -115,6 +115,55 @@ def belova_case2(model_type: str = "resistive_mhd") -> Scenario:
     )
 ```
 
+**Case 3: Separation sensitivity** (same FRC params as Case 2, varying separation):
+
+```python
+def belova_case3(separation: float = 1.5, model_type: str = "resistive_mhd") -> Scenario:
+    """Small FRC with variable separation (paper Section 2.3).
+
+    Tests sensitivity of merging to initial separation.
+
+    Args:
+        separation: Initial separation in normalized units
+                    1.5 ~ dZ=75, 2.2 ~ dZ=110, 2.5 ~ dZ=125, 3.7 ~ dZ=185
+        model_type: "resistive_mhd" or "hybrid_kinetic"
+    """
+    # Larger domain for large separation cases
+    zc = max(3.0, separation * 1.5)
+    geometry = create_default_geometry(rc=1.0, zc=zc, nr=64, nz=256)
+    initial_state = create_initial_frc(
+        geometry, s_star=20.0, elongation=1.5, xs=0.53, beta_s=0.2
+    )
+
+    model_config = {
+        "type": model_type,
+        "resistivity": {"type": "chodura", "eta_0": 1e-6, "eta_anom": 1e-3}
+    }
+    physics_model = PhysicsModel.create(model_config)
+    solver = Solver.create({"type": "rk4"})
+
+    # Longer timeout for large separations
+    max_time = 50.0 if separation > 2.5 else 25.0
+
+    merge_phase = MergingPhase(
+        name="merge_separation_test",
+        transition=any_of(separation_below(0.3, geometry), timeout(max_time)),
+        separation=separation,
+        initial_velocity=0.1,
+        compression=None,
+    )
+
+    return Scenario(
+        name=f"belova_case3_sep{separation}",
+        phases=[merge_phase],
+        geometry=geometry,
+        initial_state=initial_state,
+        physics_model=physics_model,
+        solver=solver,
+        dt=0.001,
+    )
+```
+
 ---
 
 ## Part B: Validation Infrastructure
@@ -254,6 +303,65 @@ class TestBelovaCase1:
         assert 1.8 < ratio < 2.8  # Paper: ~2.3x for doublet
 ```
 
+#### Case 3: Large Separation Merge (Small FRC)
+
+```python
+class TestBelovaCase3:
+    """Small FRC with varying initial separation - tests merging sensitivity.
+
+    Paper results (same params as Case 2, varying dZ):
+    - dZ=75:  merge by ~5-7 tA
+    - dZ=110: merge by ~18 tA
+    - dZ=125: merge by ~36 tA
+    - dZ=185: NO merge (FRCs drift apart after approaching to dZ~140)
+
+    Key finding: 14% increase in separation (110->125) nearly doubled merge time.
+    """
+
+    @pytest.mark.parametrize("separation,expected_merge,max_time", [
+        (1.5, True, 10.0),   # dZ=75 equivalent - fast merge
+        (2.2, True, 25.0),   # dZ=110 equivalent - slower merge
+        (2.5, True, 45.0),   # dZ=125 equivalent - much slower merge
+    ])
+    def test_merge_time_vs_separation(self, separation, expected_merge, max_time):
+        """Merging time increases sharply with initial separation."""
+        scenario = belova_case3(separation=separation)
+        result = scenario.run()
+
+        final_diag = MergingDiagnostics().compute(
+            result.final_state, scenario.geometry
+        )
+
+        if expected_merge:
+            assert final_diag["separation_dz"] < 0.5
+            assert result.total_time <= max_time
+
+    def test_large_separation_no_merge(self):
+        """Very large separation prevents merging entirely."""
+        scenario = belova_case3(separation=3.7)  # dZ=185 equivalent
+        result = scenario.run()
+
+        final_diag = MergingDiagnostics().compute(
+            result.final_state, scenario.geometry
+        )
+
+        # Should NOT merge - FRCs drift apart
+        assert final_diag["separation_dz"] > 2.0
+        assert result.phase_results[0].termination == "timeout"
+
+    def test_separation_sensitivity(self):
+        """14% separation increase should roughly double merge time."""
+        scenario_110 = belova_case3(separation=2.2)
+        scenario_125 = belova_case3(separation=2.5)
+
+        result_110 = scenario_110.run()
+        result_125 = scenario_125.run()
+
+        # 14% separation increase -> ~2x merge time
+        time_ratio = result_125.total_time / result_110.total_time
+        assert 1.5 < time_ratio < 2.5
+```
+
 #### Case 4: Compression-Driven Merge
 
 ```python
@@ -324,6 +432,7 @@ From Belova et al. paper:
 |------|------------|------------------|
 | 1 | S*=25.6, E=2.9, xs=0.69, no compression | Partial merge, doublet (dZ~40), E increase ~2.3x |
 | 2 | S*=20, E=1.5, xs=0.53, no compression | Complete merge by ~5-7 tA, E increase ~1.7x |
+| 3 | Case 2 params, varying dZ (75-185) | Merge time sensitive to separation; dZ=185 no merge |
 | 4 | Case 1 + compression (1.5x mirror) | Complete merge by ~20-25 tA |
 
 MHD vs Hybrid differences:
@@ -350,6 +459,7 @@ MHD vs Hybrid differences:
    - Create `tests/test_belova_validation.py`
    - Implement Case 2 tests (fastest to run)
    - Implement Case 1 tests (doublet formation)
+   - Implement Case 3 tests (separation sensitivity)
    - Implement Case 4 tests (compression)
    - Implement MHD vs Hybrid comparison tests
 
@@ -359,8 +469,8 @@ MHD vs Hybrid differences:
 
 - `jax_frc/scenarios/scenario.py` - Add physics_model, solver, diagnostics, history recording
 - `jax_frc/scenarios/phase.py` - Add history to PhaseResult
-- `examples/merging_examples.py` - Add model_type parameter, create model/solver
+- `examples/merging_examples.py` - Add model_type parameter, create model/solver, add belova_case3
 
 ## Files to Create
 
-- `tests/test_belova_validation.py` - Quantitative validation tests
+- `tests/test_belova_validation.py` - Quantitative validation tests (Cases 1-4 + MHD vs Hybrid)
