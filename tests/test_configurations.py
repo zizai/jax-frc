@@ -41,3 +41,42 @@ def test_abstract_configuration_importable_from_package():
     from jax_frc.configurations import AbstractConfiguration
 
     assert AbstractConfiguration is not None
+
+
+# SlabDiffusionConfiguration tests
+def test_slab_diffusion_builds_geometry():
+    """SlabDiffusionConfiguration creates valid geometry."""
+    from jax_frc.configurations.analytic import SlabDiffusionConfiguration
+
+    config = SlabDiffusionConfiguration()
+    geometry = config.build_geometry()
+
+    assert geometry.nr > 0
+    assert geometry.nz > 0
+    assert geometry.coord_system == "cylindrical"
+
+
+def test_slab_diffusion_builds_initial_state():
+    """SlabDiffusionConfiguration creates state with Gaussian temperature."""
+    from jax_frc.configurations.analytic import SlabDiffusionConfiguration
+    import jax.numpy as jnp
+
+    config = SlabDiffusionConfiguration()
+    geometry = config.build_geometry()
+    state = config.build_initial_state(geometry)
+
+    # Temperature should have Gaussian profile (peak in center)
+    center_idx = geometry.nz // 2
+    assert state.T[geometry.nr // 2, center_idx] > state.T[geometry.nr // 2, 0]
+
+
+def test_slab_diffusion_builds_model():
+    """SlabDiffusionConfiguration creates ExtendedMHD with thermal transport."""
+    from jax_frc.configurations.analytic import SlabDiffusionConfiguration
+    from jax_frc.models.extended_mhd import ExtendedMHD
+
+    config = SlabDiffusionConfiguration()
+    model = config.build_model()
+
+    assert isinstance(model, ExtendedMHD)
+    assert model.thermal is not None
