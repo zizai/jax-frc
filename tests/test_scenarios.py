@@ -330,3 +330,46 @@ def test_scenario_has_diagnostics_fields():
 
     assert "diagnostics" in params
     assert "output_interval" in params
+
+
+def test_scenario_records_diagnostics_history(mock_physics_model, mock_solver):
+    """Scenario should record diagnostics at output_interval."""
+    from jax_frc.diagnostics.probes import Probe
+    from jax_frc.scenarios.scenario import Scenario
+    from dataclasses import dataclass
+
+    @dataclass
+    class CountingProbe(Probe):
+        @property
+        def name(self) -> str:
+            return "counter"
+
+        def measure(self, state, geometry) -> float:
+            return float(state.step)
+
+    geometry = Geometry(
+        coord_system="cylindrical", nr=8, nz=16,
+        r_min=0.01, r_max=1.0, z_min=-1.0, z_max=1.0
+    )
+    state = State.zeros(nr=8, nz=16)
+    phase = Phase(name="test", transition=timeout(0.1))
+
+    scenario = Scenario(
+        name="test",
+        phases=[phase],
+        geometry=geometry,
+        initial_state=state,
+        physics_model=mock_physics_model,
+        solver=mock_solver,
+        dt=0.01,
+        diagnostics=[CountingProbe()],
+        output_interval=2,  # Record every 2 steps
+    )
+
+    result = scenario.run()
+
+    # Should have recorded history
+    history = result.phase_results[0].history
+    assert "time" in history
+    assert "counter" in history
+    assert len(history["time"]) > 0

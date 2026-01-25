@@ -116,6 +116,11 @@ class Scenario:
         t = start_time
         termination = "condition_met"
 
+        # Initialize history tracking
+        history: Dict[str, List[float]] = {"time": []}
+        for probe in self.diagnostics:
+            history[probe.name] = []
+
         # Run until transition triggers
         while True:
             # Check for completion
@@ -123,6 +128,12 @@ class Scenario:
             if complete:
                 termination = reason
                 break
+
+            # Record diagnostics at intervals
+            if state.step % self.output_interval == 0:
+                history["time"].append(t)
+                for probe in self.diagnostics:
+                    history[probe.name].append(probe.measure(state, self.geometry))
 
             # Apply step hook (time-varying BCs, etc.)
             state = phase.step_hook(state, self.geometry, t)
@@ -141,4 +152,5 @@ class Scenario:
             start_time=start_time,
             end_time=t,
             termination=termination,
+            history=history,
         )
