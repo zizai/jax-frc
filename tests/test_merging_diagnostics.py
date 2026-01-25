@@ -64,3 +64,11 @@ class TestMergingDiagnostics:
 
         assert "peak_pressure" in result
         assert result["peak_pressure"] > 0
+
+    def test_computes_elongation(self, two_frc_state, geometry):
+        """Diagnostics compute elongation."""
+        diag = MergingDiagnostics()
+        result = diag.compute(two_frc_state, geometry)
+
+        assert "elongation" in result
+        assert result["elongation"] > 0  # Positive for elongated FRC

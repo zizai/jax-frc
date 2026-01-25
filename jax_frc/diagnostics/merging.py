@@ -27,9 +27,6 @@ class MergingDiagnostics(Probe):
     - reconnection_rate: dpsi/dt proxy at midplane
     """
 
-    _prev_psi_midplane: Array = None
-    _prev_time: float = None
-
     @property
     def name(self) -> str:
         return "merging"
@@ -175,7 +172,11 @@ class MergingDiagnostics(Probe):
         return velocities
 
     def _compute_reconnection_rate(self, state: State, geometry: Geometry) -> float:
-        """Compute reconnection rate as dpsi/dt at midplane X-point."""
+        """Compute reconnection rate proxy as max E_phi at midplane.
+
+        Uses the toroidal electric field at the midplane as a proxy for
+        the reconnection rate, since E_phi drives flux change via Faraday's law.
+        """
         z_mid_idx = state.E.shape[1] // 2
         E_phi = state.E[:, z_mid_idx, 1]  # theta component
         return float(jnp.max(jnp.abs(E_phi)))
