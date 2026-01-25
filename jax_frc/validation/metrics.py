@@ -1,0 +1,76 @@
+"""Built-in validation metrics."""
+import jax.numpy as jnp
+from typing import Union
+
+
+def l2_error(actual: jnp.ndarray, expected: jnp.ndarray) -> float:
+    """Compute relative L2 norm error.
+    Returns ||actual - expected||_2 / ||expected||_2
+    """
+    diff = actual - expected
+    return float(jnp.linalg.norm(diff) / jnp.linalg.norm(expected))
+
+
+def linf_error(actual: jnp.ndarray, expected: jnp.ndarray) -> float:
+    """Compute max pointwise error.
+    Returns max|actual - expected|
+    """
+    return float(jnp.max(jnp.abs(actual - expected)))
+
+
+def rmse_curve(actual: jnp.ndarray, expected: jnp.ndarray) -> float:
+    """Compute root mean square error between curves.
+    Returns sqrt(mean((actual - expected)^2))
+    """
+    diff = actual - expected
+    return float(jnp.sqrt(jnp.mean(diff**2)))
+
+
+def conservation_drift(initial: float, final: float) -> float:
+    """Compute relative change in conserved quantity.
+    Returns |final - initial| / |initial|
+    """
+    return float(jnp.abs(final - initial) / jnp.abs(initial))
+
+
+def check_tolerance(
+    value: float,
+    expected: float,
+    tolerance: Union[str, float]
+) -> dict:
+    """Check if value is within tolerance of expected.
+
+    Args:
+        value: Computed metric value
+        expected: Expected value
+        tolerance: Either percentage string like "10%" or absolute float
+
+    Returns:
+        dict with 'pass', 'value', 'expected', 'tolerance', 'message'
+    """
+    if isinstance(tolerance, str) and tolerance.endswith('%'):
+        pct = float(tolerance.rstrip('%'))
+        threshold = abs(expected) * pct / 100.0
+        tol_str = tolerance
+    else:
+        threshold = float(tolerance)
+        tol_str = str(tolerance)
+
+    diff = abs(value - expected)
+    passed = diff <= threshold
+
+    return {
+        'pass': passed,
+        'value': value,
+        'expected': expected,
+        'tolerance': tol_str,
+        'message': '' if passed else f"Value {value} differs from {expected} by {diff:.4g} (tolerance: {tol_str})"
+    }
+
+
+METRIC_FUNCTIONS = {
+    'l2_error': l2_error,
+    'linf_error': linf_error,
+    'rmse_curve': rmse_curve,
+    'conservation_drift': conservation_drift,
+}
