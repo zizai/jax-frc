@@ -19,6 +19,17 @@ python test_simulations.py
 python -c "from resistive_mhd import run_simulation; run_simulation(steps=100)"
 python -c "from extended_mhd import run_simulation; run_simulation(steps=100)"
 python -c "from hybrid_kinetic import run_simulation; run_simulation(steps=100)"
+
+# Run invariant tests
+py -m pytest tests/ -v
+
+# Run specific model tests
+py -m pytest tests/test_resistive_mhd.py -v
+py -m pytest tests/test_extended_mhd.py -v
+py -m pytest tests/test_hybrid_kinetic.py -v
+
+# Run with coverage (if pytest-cov installed)
+py -m pytest tests/ --cov=. --cov-report=term-missing
 ```
 
 ## Architecture
