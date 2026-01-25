@@ -71,30 +71,35 @@ class HybridKinetic(PhysicsModel):
         """Compute time derivatives for hybrid model.
 
         This computes the RHS for the electromagnetic fields using Faraday's law
-        with E from the electron fluid equation (generalized Ohm's law).
+        with E from the electron fluid equation (generalized Ohm's law):
+            E = (J × B)/(ne) + ηJ - ∇p_e/(ne)
         """
         dr, dz = geometry.dr, geometry.dz
+        r = geometry.r_grid
 
-        # Compute ion current from particles
-        J_i = self.deposit_current(state, geometry)
+        # Compute current density from curl(B) / mu_0 for field evolution
+        B_r = state.B[:, :, 0]
+        B_phi = state.B[:, :, 1]
+        B_z = state.B[:, :, 2]
+        J_r, J_phi, J_z = self._compute_current(B_r, B_phi, B_z, dr, dz, r)
 
-        # For quasi-neutrality, J_total = J_i (electrons carry return current)
-        J_total = J_i
-
-        # Compute E from electron fluid equation per plasma_physics.md:
-        # E = (J_total×B - J_i×B)/(ne) - ∇p_e/(ne) + η*J
-        # Since J_total = J_i for quasi-neutrality, first term vanishes
-        # E = -∇p_e/(ne) + η*J
-        n = jnp.maximum(state.n, 1e16)  # Avoid division by zero
+        # Safe density to avoid division by zero
+        n = jnp.maximum(state.n, 1e16)
         ne = n * QE
+
+        # Hall term: (J × B) / (ne)
+        hall_r = (J_phi * B_z - J_z * B_phi) / ne
+        hall_phi = (J_z * B_r - J_r * B_z) / ne
+        hall_z = (J_r * B_phi - J_phi * B_r) / ne
 
         # Electron pressure gradient term: -∇p_e/(ne)
         dp_dr = (jnp.roll(state.p, -1, axis=0) - jnp.roll(state.p, 1, axis=0)) / (2*dr)
         dp_dz = (jnp.roll(state.p, -1, axis=1) - jnp.roll(state.p, 1, axis=1)) / (2*dz)
 
-        E_r = -dp_dr / ne + self.eta * J_total[:, :, 0]
-        E_phi = self.eta * J_total[:, :, 1]
-        E_z = -dp_dz / ne + self.eta * J_total[:, :, 2]
+        # Combined E-field: E = Hall + η*J - ∇p_e/(ne)
+        E_r = hall_r + self.eta * J_r - dp_dr / ne
+        E_phi = hall_phi + self.eta * J_phi
+        E_z = hall_z + self.eta * J_z - dp_dz / ne
 
         E = jnp.stack([E_r, E_phi, E_z], axis=-1)
 
@@ -104,6 +109,40 @@ class HybridKinetic(PhysicsModel):
 
         # Store E in state for particle pushing
         return state.replace(B=dB, E=E)
+
+    def _compute_current(self, B_r, B_phi, B_z, dr, dz, r):
+        """Compute J = curl(B) / mu_0 in cylindrical coordinates.
+
+        Curl in cylindrical (r, theta, z) with axisymmetry (d/dtheta = 0):
+            J_r = -(1/mu_0) * dB_phi/dz
+            J_phi = (1/mu_0) * (dB_r/dz - dB_z/dr)
+            J_z = (1/mu_0) * (1/r) * d(r*B_phi)/dr
+                = (1/mu_0) * (B_phi/r + dB_phi/dr)
+
+        At r=0, uses L'Hopital's rule:
+            J_z[0,:] = (1/mu_0) * 2 * dB_phi/dr[0,:]
+        """
+        # J_r = -(1/mu_0) * dB_phi/dz
+        dB_phi_dz = (jnp.roll(B_phi, -1, axis=1) - jnp.roll(B_phi, 1, axis=1)) / (2 * dz)
+        J_r = -(1.0 / MU0) * dB_phi_dz
+
+        # J_phi = (1/mu_0) * (dB_r/dz - dB_z/dr)
+        dB_r_dz = (jnp.roll(B_r, -1, axis=1) - jnp.roll(B_r, 1, axis=1)) / (2 * dz)
+        dB_z_dr = (jnp.roll(B_z, -1, axis=0) - jnp.roll(B_z, 1, axis=0)) / (2 * dr)
+        J_phi = (1.0 / MU0) * (dB_r_dz - dB_z_dr)
+
+        # J_z = (1/mu_0) * (B_phi/r + dB_phi/dr)
+        dB_phi_dr = (jnp.roll(B_phi, -1, axis=0) - jnp.roll(B_phi, 1, axis=0)) / (2 * dr)
+
+        # Handle r=0 singularity
+        r_safe = jnp.where(r > 1e-10, r, 1.0)
+        J_z = (1.0 / MU0) * jnp.where(
+            r > 1e-10,
+            B_phi / r_safe + dB_phi_dr,
+            2.0 * dB_phi_dr  # L'Hopital at r=0
+        )
+
+        return J_r, J_phi, J_z
 
     def _compute_curl_E(self, E_r, E_phi, E_z, dr, dz):
         """Compute curl(E) for Faraday's law in cylindrical coordinates."""
