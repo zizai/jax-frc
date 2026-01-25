@@ -1,18 +1,21 @@
-"""Extended MHD physics model with Hall effect."""
+"""Extended MHD physics model with Hall effect and energy equation."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 import jax.numpy as jnp
 from jax import jit
 
 from jax_frc.models.base import PhysicsModel
 from jax_frc.models.resistivity import ResistivityModel, SpitzerResistivity
+from jax_frc.models.energy import ThermalTransport
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
+from jax_frc.operators import divergence_cylindrical
 
 MU0 = 1.2566e-6
 QE = 1.602e-19
 ME = 9.109e-31
+KB = 1.381e-23  # Boltzmann constant [J/K]
 
 @dataclass
 class HaloDensityModel:
@@ -31,20 +34,23 @@ class HaloDensityModel:
 
 @dataclass
 class ExtendedMHD(PhysicsModel):
-    """Two-fluid extended MHD model with Hall effect.
+    """Two-fluid extended MHD model with Hall effect and energy equation.
 
     Includes:
     - Hall term: (J x B) / (ne)
     - Electron pressure gradient: -grad(p_e) / (ne)
     - Semi-implicit stepping for Whistler wave stability
+    - Optional temperature evolution with anisotropic thermal conduction
     """
 
     resistivity: ResistivityModel
     halo_model: HaloDensityModel
+    thermal: Optional[ThermalTransport] = None  # None = no temperature evolution
 
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
-        """Compute dB/dt from extended Ohm's law."""
+        """Compute dB/dt and optionally dT/dt from extended MHD equations."""
         dr, dz = geometry.dr, geometry.dz
+        r = geometry.r_grid
 
         # Apply halo density model
         n = self.halo_model.apply(state.n, geometry)
@@ -56,7 +62,6 @@ class ExtendedMHD(PhysicsModel):
         B_z = state.B[:, :, 2]
 
         # Compute current density: J = curl(B) / mu_0
-        r = geometry.r_grid
         J_r, J_phi, J_z = self._compute_current(B_r, B_phi, B_z, dr, dz, r)
 
         # Compute electric field from extended Ohm's law
@@ -73,7 +78,61 @@ class ExtendedMHD(PhysicsModel):
         # Stack into (nr, nz, 3) array
         dB = jnp.stack([dB_r, dB_phi, dB_z], axis=-1)
 
+        # Compute temperature RHS if thermal transport is enabled
+        if self.thermal is not None:
+            dT = self._compute_temperature_rhs(state, geometry, n, J_r, J_phi, J_z)
+            return state.replace(B=dB, T=dT)
+
         return state.replace(B=dB)
+
+    def _compute_temperature_rhs(self, state: State, geometry: Geometry,
+                                  n: jnp.ndarray, J_r: jnp.ndarray,
+                                  J_phi: jnp.ndarray, J_z: jnp.ndarray) -> jnp.ndarray:
+        """Compute dT/dt from energy equation.
+
+        Energy equation (assuming T in eV):
+            (3/2) n dT/dt = -p∇·v - ∇·q + ηJ² + Q_aux
+
+        Rearranged:
+            dT/dt = (2/3n) * (-p∇·v - ∇·q + ηJ² + Q_aux)
+
+        Terms:
+            -p∇·v: Compressional heating/cooling (PdV work)
+            -∇·q: Heat conduction (anisotropic)
+            ηJ²: Ohmic heating
+            Q_aux: Auxiliary heating (placeholder)
+        """
+        dr, dz = geometry.dr, geometry.dz
+        r = geometry.r_grid
+        T = state.T
+
+        # Pressure from ideal gas law: p = n * T (T in eV, so p in eV/m³)
+        p = n * T
+
+        # 1. Compressional heating: -p∇·v
+        v_r = state.v[:, :, 0]
+        v_z = state.v[:, :, 2]
+        div_v = divergence_cylindrical(v_r, v_z, dr, dz, r)
+        compression = -p * div_v
+
+        # 2. Ohmic heating: ηJ²
+        J_squared = J_r**2 + J_phi**2 + J_z**2
+        eta = self.resistivity.compute(J_phi)
+        ohmic = eta * J_squared
+
+        # 3. Heat conduction: -∇·q (using ThermalTransport)
+        div_q = self.thermal.compute_heat_flux_divergence(T, state.B, dr, dz, r)
+        conduction = -div_q
+
+        # 4. Auxiliary heating (placeholder for future: NBI, compression drive, etc.)
+        Q_aux = jnp.zeros_like(T)
+
+        # Combine: dT/dt = (2/3n) * (sources)
+        # Use minimum density to avoid division issues in halo
+        n_safe = jnp.maximum(n, self.halo_model.halo_density)
+        dT_dt = (2.0 / 3.0) / n_safe * (compression + ohmic + conduction + Q_aux)
+
+        return dT_dt
 
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
         """Whistler CFL constraint: dt < dx^2 * n * e * mu_0 / B."""
@@ -225,4 +284,16 @@ class ExtendedMHD(PhysicsModel):
             transition_width=float(halo_config.get("transition_width", 0.05))
         )
 
-        return cls(resistivity=resistivity, halo_model=halo_model)
+        # Thermal transport (optional)
+        thermal = None
+        if "thermal" in config:
+            thermal_config = config["thermal"]
+            thermal = ThermalTransport(
+                kappa_parallel_0=float(thermal_config.get("kappa_parallel_0", 3.16e20)),
+                kappa_perp_ratio=float(thermal_config.get("kappa_perp_ratio", 1e-6)),
+                use_spitzer=bool(thermal_config.get("use_spitzer", True)),
+                coulomb_log=float(thermal_config.get("coulomb_log", 15.0)),
+                min_temperature=float(thermal_config.get("min_temperature", 1e-3))
+            )
+
+        return cls(resistivity=resistivity, halo_model=halo_model, thermal=thermal)

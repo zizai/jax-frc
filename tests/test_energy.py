@@ -7,6 +7,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from jax_frc.models.energy import ThermalTransport
+from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+from jax_frc.models.resistivity import SpitzerResistivity
+from jax_frc.core.state import State
+from jax_frc.core.geometry import Geometry
 
 
 class TestThermalTransportKappa:
@@ -261,3 +265,150 @@ class TestThermalTransportPhysics:
             "q_r should be non-zero with angled B"
         assert jnp.any(jnp.abs(interior_q_z) > 1e-5), \
             "q_z should be non-zero with angled B"
+
+
+class TestExtendedMHDTemperature:
+    """Tests for temperature evolution in ExtendedMHD."""
+
+    @pytest.fixture
+    def geometry(self):
+        """Create test geometry."""
+        return Geometry(
+            coord_system="cylindrical",
+            r_min=0.01, r_max=1.0,
+            z_min=-1.0, z_max=1.0,
+            nr=16, nz=32
+        )
+
+    @pytest.fixture
+    def model_with_thermal(self):
+        """Create ExtendedMHD model with thermal transport."""
+        resistivity = SpitzerResistivity(eta_0=1e-4)  # Higher for visible Ohmic heating
+        halo = HaloDensityModel()
+        thermal = ThermalTransport(
+            kappa_parallel_0=1e10,  # Reduced for testing
+            kappa_perp_ratio=1e-6,
+            use_spitzer=False
+        )
+        return ExtendedMHD(resistivity=resistivity, halo_model=halo, thermal=thermal)
+
+    @pytest.fixture
+    def model_without_thermal(self):
+        """Create ExtendedMHD model without thermal transport."""
+        resistivity = SpitzerResistivity(eta_0=1e-6)
+        halo = HaloDensityModel()
+        return ExtendedMHD(resistivity=resistivity, halo_model=halo, thermal=None)
+
+    def test_compute_rhs_returns_dT_with_thermal(self, geometry, model_with_thermal):
+        """compute_rhs should return dT when thermal is enabled."""
+        nr, nz = geometry.nr, geometry.nz
+
+        # Create state with non-zero current (for Ohmic heating)
+        B = jnp.zeros((nr, nz, 3))
+        B = B.at[:, :, 2].set(0.1)  # Uniform B_z
+
+        state = State(
+            psi=jnp.zeros((nr, nz)),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=jnp.ones((nr, nz)) * 100.0,
+            B=B,
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        rhs = model_with_thermal.compute_rhs(state, geometry)
+
+        # RHS should have non-trivial T (dT/dt)
+        assert rhs.T.shape == (nr, nz), f"Expected T shape ({nr}, {nz})"
+
+    def test_compute_rhs_unchanged_without_thermal(self, geometry, model_without_thermal):
+        """compute_rhs should not modify T when thermal is disabled."""
+        nr, nz = geometry.nr, geometry.nz
+
+        B = jnp.zeros((nr, nz, 3))
+        B = B.at[:, :, 2].set(0.1)
+
+        state = State(
+            psi=jnp.zeros((nr, nz)),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=jnp.ones((nr, nz)) * 100.0,
+            B=B,
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        rhs = model_without_thermal.compute_rhs(state, geometry)
+
+        # T should be unchanged (no dT in RHS)
+        assert jnp.allclose(rhs.T, state.T), "T should be unchanged without thermal"
+
+    def test_ohmic_heating_increases_temperature(self, geometry, model_with_thermal):
+        """Ohmic heating (ηJ²) should increase temperature."""
+        nr, nz = geometry.nr, geometry.nz
+
+        # Create state with B that produces current
+        # B_z varying in r produces J_phi from dB_z/dr
+        r = geometry.r_grid
+        B = jnp.zeros((nr, nz, 3))
+        B = B.at[:, :, 2].set(0.1 * jnp.exp(-r**2))  # B_z(r)
+
+        state = State(
+            psi=jnp.zeros((nr, nz)),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=jnp.ones((nr, nz)) * 100.0,  # Uniform T (no conduction)
+            B=B,
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),  # No compression
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        rhs = model_with_thermal.compute_rhs(state, geometry)
+
+        # dT/dt should be positive where J² > 0 (Ohmic heating)
+        # Interior points away from boundaries
+        interior_dT = rhs.T[3:-3, 3:-3]
+
+        # With uniform T and no velocity, only Ohmic heating contributes
+        # dT/dt = (2/3n) * ηJ² > 0
+        assert jnp.any(interior_dT > 0), "Ohmic heating should increase temperature"
+
+    def test_from_config_with_thermal(self):
+        """from_config should create model with thermal transport."""
+        config = {
+            "resistivity": {"type": "spitzer", "eta_0": 1e-6},
+            "halo": {"halo_density": 1e16},
+            "thermal": {
+                "kappa_parallel_0": 1e15,
+                "kappa_perp_ratio": 1e-5,
+                "use_spitzer": False
+            }
+        }
+
+        model = ExtendedMHD.from_config(config)
+
+        assert model.thermal is not None, "Model should have thermal transport"
+        assert model.thermal.kappa_parallel_0 == 1e15
+        assert model.thermal.kappa_perp_ratio == 1e-5
+        assert model.thermal.use_spitzer is False
+
+    def test_from_config_without_thermal(self):
+        """from_config without thermal section should not enable thermal."""
+        config = {
+            "resistivity": {"type": "spitzer", "eta_0": 1e-6},
+            "halo": {"halo_density": 1e16}
+        }
+
+        model = ExtendedMHD.from_config(config)
+
+        assert model.thermal is None, "Model should not have thermal transport"
