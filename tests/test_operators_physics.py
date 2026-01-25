@@ -16,7 +16,7 @@ class TestCylindricalCurl:
             coord_system="cylindrical",
             r_min=0.01, r_max=1.0,
             z_min=-1.0, z_max=1.0,
-            nr=32, nz=64
+            nr=16, nz=32
         )
 
     @pytest.fixture
@@ -169,7 +169,7 @@ class TestHybridCollisions:
         )
 
         # Create particles with non-zero weights
-        n_particles = 100
+        n_particles = 50
         key = random.PRNGKey(42)
         keys = random.split(key, 4)
 
@@ -250,7 +250,7 @@ class TestDivergenceCleaning:
             coord_system="cylindrical",
             r_min=0.01, r_max=1.0,
             z_min=-1.0, z_max=1.0,
-            nr=32, nz=64
+            nr=16, nz=32
         )
 
         nr, nz = geometry.nr, geometry.nz

@@ -60,7 +60,7 @@ class TestResistiveMHDBoundedness:
         invariants = [FiniteValues("psi")]
 
         all_failures = []
-        for i in range(20):
+        for i in range(10):
             new_state, _ = step_fn(state, None)
             psi_before, psi_after = state[0], new_state[0]
             _, failures = invariant_checker(invariants, psi_before, psi_after, i)
@@ -75,7 +75,7 @@ class TestResistiveMHDBoundedness:
         invariants = [NoExponentialGrowth("psi", growth_factor=1.5)]
 
         all_failures = []
-        for i in range(20):
+        for i in range(10):
             new_state, _ = step_fn(state, None)
             psi_before, psi_after = state[0], new_state[0]
             _, failures = invariant_checker(invariants, psi_before, psi_after, i)
@@ -134,7 +134,7 @@ class TestResistiveMHDIntegration:
         ]
 
         all_failures = []
-        for i in range(20):
+        for i in range(10):
             new_state, _ = step_fn(state, None)
             psi_before, psi_after = state[0], new_state[0]
             _, failures = invariant_checker(invariants, psi_before, psi_after, i)

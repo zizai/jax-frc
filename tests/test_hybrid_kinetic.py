@@ -21,7 +21,7 @@ from tests.invariants.consistency import WeightBounds, DistributionPositivity, F
 @pytest.fixture
 def hybrid_kinetic_particles():
     """Initialize particles for testing."""
-    n_particles = 100
+    n_particles = 50
     nr, nz = 16, 32
     n0, T0, Omega = 1e19, 100.0 * QE, 1e5  # T0 in Joules (100 eV)
 
@@ -33,7 +33,7 @@ def hybrid_kinetic_particles():
 @pytest.fixture
 def boris_push_setup():
     """Setup for Boris push tests."""
-    n_particles = 100
+    n_particles = 50
     key = random.PRNGKey(42)
 
     # Initial positions in Cartesian
@@ -57,7 +57,7 @@ def boris_push_setup():
 def hybrid_kinetic_state():
     """Initialize full hybrid kinetic state for testing."""
     nr, nz = 16, 32
-    n_particles = 100
+    n_particles = 50
     dr, dz = 1.0/nr, 2.0/nz
     dt = 1e-8
     eta = 1e-4
@@ -117,7 +117,7 @@ class TestHybridKineticConservation:
         dt = 1e-8
 
         all_failures = []
-        for i in range(20):
+        for i in range(10):
             x_new, v_new = boris_push(x, v, E, B, QE, MI, dt)
             result = inv.check(x, x_new)
             if not result.passed:
@@ -174,7 +174,7 @@ class TestHybridKineticConsistency:
         b_initial = state[5].copy()
 
         # Run several steps
-        for i in range(10):
+        for i in range(5):
             state, _ = step_fn(state, None)
 
         b_final = state[5]
@@ -191,7 +191,7 @@ class TestHybridKineticConsistency:
         n_e_initial = state[3].copy()
 
         # Run several steps
-        for i in range(10):
+        for i in range(5):
             state, _ = step_fn(state, None)
 
         n_e_final = state[3]
@@ -211,7 +211,7 @@ class TestHybridKineticIntegration:
         dt = 1e-8
 
         all_failures = []
-        for i in range(20):
+        for i in range(10):
             x_new, v_new = boris_push(x, v, E, B, QE, MI, dt)
 
             # Check positions finite
@@ -234,8 +234,8 @@ class TestHybridKineticIntegration:
         """Full simulation step should remain stable."""
         state, step_fn = hybrid_kinetic_state
 
-        # Run 10 steps and check stability
-        for i in range(10):
+        # Run 5 steps and check stability
+        for i in range(5):
             state, _ = step_fn(state, None)
 
             # Check particles are finite

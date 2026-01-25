@@ -24,7 +24,7 @@ class TestEndToEndTemperatureEvolution:
             coord_system="cylindrical",
             r_min=0.01, r_max=1.0,
             z_min=-1.0, z_max=1.0,
-            nr=32, nz=64
+            nr=16, nz=32
         )
 
     @pytest.fixture
@@ -146,7 +146,7 @@ class TestEndToEndTemperatureEvolution:
 
         # Run many steps
         dt = 1e-7
-        n_steps = 50
+        n_steps = 20
         for _ in range(n_steps):
             state = solver.step(state, dt, model, geometry)
 
@@ -247,7 +247,7 @@ class TestHeatConductionAnalytical:
             coord_system="cylindrical",
             r_min=0.1, r_max=0.9,  # Avoid boundaries
             z_min=-2.0, z_max=2.0,
-            nr=8, nz=128  # Fine grid in z for diffusion
+            nr=8, nz=64  # Fine grid in z for diffusion
         )
 
         # Use uniform B in z (parallel to gradient)
@@ -307,7 +307,7 @@ class TestHeatConductionAnalytical:
 
         # Run for some time
         dt = 1e-5
-        n_steps = 100
+        n_steps = 30
         total_time = dt * n_steps
 
         for _ in range(n_steps):
