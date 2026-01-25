@@ -2,4 +2,8 @@
 from .base import AbstractConfiguration
 from .analytic import SlabDiffusionConfiguration
 
-__all__ = ['AbstractConfiguration', 'SlabDiffusionConfiguration']
+CONFIGURATION_REGISTRY = {
+    'SlabDiffusionConfiguration': SlabDiffusionConfiguration,
+}
+
+__all__ = ['AbstractConfiguration', 'SlabDiffusionConfiguration', 'CONFIGURATION_REGISTRY']

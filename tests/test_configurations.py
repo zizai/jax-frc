@@ -80,3 +80,22 @@ def test_slab_diffusion_builds_model():
 
     assert isinstance(model, ExtendedMHD)
     assert model.thermal is not None
+
+
+# Configuration Registry tests
+def test_configuration_registry_has_slab_diffusion():
+    """Registry contains SlabDiffusionConfiguration."""
+    from jax_frc.configurations import CONFIGURATION_REGISTRY
+
+    assert 'SlabDiffusionConfiguration' in CONFIGURATION_REGISTRY
+    assert CONFIGURATION_REGISTRY['SlabDiffusionConfiguration'] is not None
+
+
+def test_configuration_registry_creates_instance():
+    """Registry can create configuration instances."""
+    from jax_frc.configurations import CONFIGURATION_REGISTRY
+
+    ConfigClass = CONFIGURATION_REGISTRY['SlabDiffusionConfiguration']
+    config = ConfigClass()
+
+    assert config.name == "slab_diffusion"
