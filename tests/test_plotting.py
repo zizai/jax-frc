@@ -78,3 +78,64 @@ class TestFileOutput:
             assert path.endswith('.png')
 
         plt.close(fig)
+
+
+import jax.numpy as jnp
+from jax_frc.results import SimulationResult
+
+
+def make_mock_result(model_name: str = "resistive_mhd") -> SimulationResult:
+    """Create a mock SimulationResult for testing."""
+    nr, nz = 32, 64
+    n_steps = 10
+
+    # Create mock history as dict with time series
+    history = {
+        'time': jnp.linspace(0, 1e-3, n_steps),
+        'magnetic_energy': jnp.linspace(1.0, 0.8, n_steps),
+        'kinetic_energy': jnp.linspace(0.0, 0.2, n_steps),
+        'max_B': jnp.linspace(0.5, 0.4, n_steps),
+    }
+
+    return SimulationResult(
+        model_name=model_name,
+        final_time=1e-3,
+        n_steps=n_steps,
+        grid_shape=(nr, nz),
+        grid_spacing=(0.01, 0.01),
+        psi=jnp.zeros((nr, nz)),
+        density=jnp.ones((nr, nz)) * 1e20,
+        pressure=jnp.ones((nr, nz)) * 1000,
+        history=history,
+    )
+
+
+class TestPlotTimeTraces:
+    """Tests for plot_time_traces function."""
+
+    def test_plot_time_traces_returns_figure(self):
+        """Verify plot_time_traces returns matplotlib figure."""
+        from jax_frc.diagnostics.plotting import plot_time_traces
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+        fig = plot_time_traces(result, show=False, save_dir=None)
+
+        assert isinstance(fig, plt.Figure)
+        assert len(fig.axes) >= 1  # At least one subplot
+        plt.close(fig)
+
+    def test_plot_time_traces_saves_file(self):
+        """Verify plot_time_traces saves to directory when specified."""
+        from jax_frc.diagnostics.plotting import plot_time_traces
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fig = plot_time_traces(result, show=False, save_dir=tmpdir)
+
+            files = os.listdir(tmpdir)
+            assert any('time_traces' in f for f in files)
+
+        plt.close(fig)
