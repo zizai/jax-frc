@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(py -m pip install:*)",
+      "Bash(py -c:*)",
+      "Bash(git commit:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git branch:*)",
+      "Bash(git worktree:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(py -m pip:*)",
+      "Bash(xargs -r git rm:*)",
+      "Bash(git push:*)",
+      "Bash(py -m pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pip install:*)",
+      "Bash(python -c:*)"
+    ]
+  },
+  "disabledMcpjsonServers": [
+    "desktop-commander"
+  ]
+}
