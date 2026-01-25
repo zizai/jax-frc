@@ -4,6 +4,7 @@ from jax_frc.solvers.base import Solver
 from jax_frc.solvers.explicit import EulerSolver, RK4Solver
 from jax_frc.solvers.semi_implicit import SemiImplicitSolver, HybridSolver
 from jax_frc.solvers.time_controller import TimeController
+from jax_frc.solvers.divergence_cleaning import clean_divergence_b
 
 __all__ = [
     "Solver",
@@ -12,4 +13,5 @@ __all__ = [
     "SemiImplicitSolver",
     "HybridSolver",
     "TimeController",
+    "clean_divergence_b",
 ]

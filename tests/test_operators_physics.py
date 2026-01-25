@@ -223,3 +223,60 @@ class TestHybridCollisions:
         # Allow tolerance for finite timestep effects and weight evolution physics
         assert decay_ratio < 0.5, f"Weights not decaying: ratio = {decay_ratio:.3f}"
         assert decay_ratio > 0.25, f"Weights decaying too fast: ratio = {decay_ratio:.3f}"
+
+
+class TestDivergenceCleaning:
+    """Tests for divergence-B divergence cleaning."""
+
+    def test_projection_reduces_div_b(self):
+        """Projection method should reduce |div(B)| significantly.
+
+        For B with non-zero divergence, cleaning via:
+            B_clean = B - grad(phi), where laplacian(phi) = div(B)
+        should produce div(B_clean) << div(B_initial).
+
+        Note: The projection method with Dirichlet BCs is most effective in the
+        interior of the domain. Near boundaries, gradient artifacts from the
+        phi=0 boundary condition reduce effectiveness. We test on the interior
+        region [5:-5, 5:-5] which represents the physics region of interest.
+        """
+        from jax_frc.solvers.divergence_cleaning import clean_divergence_b
+        from jax_frc.core.geometry import Geometry
+
+        geometry = Geometry(
+            coord_system="cylindrical",
+            r_min=0.01, r_max=1.0,
+            z_min=-1.0, z_max=1.0,
+            nr=32, nz=64
+        )
+
+        nr, nz = geometry.nr, geometry.nz
+        dr, dz = geometry.dr, geometry.dz
+        r = geometry.r_grid
+
+        # Create B field with non-zero divergence
+        # B_r = r, B_z = z gives div(B) != 0
+        # In cylindrical: div(B) = (1/r)*d(r*B_r)/dr + dB_z/dz
+        #                        = (1/r)*(2r) + 1 = 3
+        B_r = r * jnp.ones((1, nz))
+        B_phi = jnp.zeros((nr, nz))
+        B_z = geometry.z_grid * jnp.ones((nr, 1))
+        B = jnp.stack([B_r, B_phi, B_z], axis=-1)
+
+        # Compute initial divergence - check interior region
+        from jax_frc.operators import divergence_cylindrical
+        div_B_initial = divergence_cylindrical(B_r, B_z, dr, dz, r)
+        max_div_initial = float(jnp.max(jnp.abs(div_B_initial[5:-5, 5:-5])))
+
+        # Clean divergence
+        B_clean = clean_divergence_b(B, geometry)
+
+        # Compute cleaned divergence - check same interior region
+        B_r_clean = B_clean[:, :, 0]
+        B_z_clean = B_clean[:, :, 2]
+        div_B_clean = divergence_cylindrical(B_r_clean, B_z_clean, dr, dz, r)
+        max_div_clean = float(jnp.max(jnp.abs(div_B_clean[5:-5, 5:-5])))
+
+        # Divergence should be reduced significantly (at least 5x) in the interior
+        reduction = max_div_initial / max(max_div_clean, 1e-20)
+        assert reduction > 5, f"Insufficient cleaning: {max_div_initial:.2e} -> {max_div_clean:.2e} (reduction {reduction:.1f}x)"
