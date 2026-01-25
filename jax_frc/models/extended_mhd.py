@@ -56,7 +56,8 @@ class ExtendedMHD(PhysicsModel):
         B_z = state.B[:, :, 2]
 
         # Compute current density: J = curl(B) / mu_0
-        J_r, J_phi, J_z = self._compute_current(B_r, B_phi, B_z, dr, dz)
+        r = geometry.r_grid
+        J_r, J_phi, J_z = self._compute_current(B_r, B_phi, B_z, dr, dz, r)
 
         # Compute electric field from extended Ohm's law
         E_r, E_phi, E_z = self._extended_ohm_law(
@@ -108,9 +109,19 @@ class ExtendedMHD(PhysicsModel):
 
         return state.replace(B=B)
 
-    def _compute_current(self, B_r, B_phi, B_z, dr, dz):
-        """Compute J = curl(B) / mu_0."""
-        # J_r = (1/mu_0) * (dB_z/dphi/r - dB_phi/dz) ~ -(1/mu_0) * dB_phi/dz (axisymmetric)
+    def _compute_current(self, B_r, B_phi, B_z, dr, dz, r):
+        """Compute J = curl(B) / mu_0 in cylindrical coordinates.
+
+        Curl in cylindrical (r, theta, z) with axisymmetry (d/dtheta = 0):
+            J_r = -(1/mu_0) * dB_phi/dz
+            J_phi = (1/mu_0) * (dB_r/dz - dB_z/dr)
+            J_z = (1/mu_0) * (1/r) * d(r*B_phi)/dr
+                = (1/mu_0) * (B_phi/r + dB_phi/dr)
+
+        At r=0, uses L'Hopital's rule:
+            J_z[0,:] = (1/mu_0) * 2 * dB_phi/dr[0,:]
+        """
+        # J_r = -(1/mu_0) * dB_phi/dz
         dB_phi_dz = (jnp.roll(B_phi, -1, axis=1) - jnp.roll(B_phi, 1, axis=1)) / (2 * dz)
         J_r = -(1.0 / MU0) * dB_phi_dz
 
@@ -119,9 +130,16 @@ class ExtendedMHD(PhysicsModel):
         dB_z_dr = (jnp.roll(B_z, -1, axis=0) - jnp.roll(B_z, 1, axis=0)) / (2 * dr)
         J_phi = (1.0 / MU0) * (dB_r_dz - dB_z_dr)
 
-        # J_z = (1/mu_0) * (1/r * d(r*B_phi)/dr) ~ (1/mu_0) * dB_phi/dr (simplified)
+        # J_z = (1/mu_0) * (B_phi/r + dB_phi/dr)
         dB_phi_dr = (jnp.roll(B_phi, -1, axis=0) - jnp.roll(B_phi, 1, axis=0)) / (2 * dr)
-        J_z = (1.0 / MU0) * dB_phi_dr
+
+        # Handle r=0 singularity
+        r_safe = jnp.where(r > 1e-10, r, 1.0)
+        J_z = (1.0 / MU0) * jnp.where(
+            r > 1e-10,
+            B_phi / r_safe + dB_phi_dr,
+            2.0 * dB_phi_dr  # L'Hopital at r=0
+        )
 
         return J_r, J_phi, J_z
 
