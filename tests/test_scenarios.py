@@ -88,3 +88,62 @@ class TestPhase:
         complete, reason = phase.is_complete(state, t=5.0)
         assert complete
         assert reason == "timeout"
+
+
+class TestScenario:
+    """Tests for Scenario runner."""
+
+    @pytest.fixture
+    def simple_geometry(self):
+        return Geometry(
+            coord_system="cylindrical",
+            nr=10, nz=20,
+            r_min=0.1, r_max=1.0,
+            z_min=-1.0, z_max=1.0
+        )
+
+    @pytest.fixture
+    def initial_state(self):
+        return State.zeros(nr=10, nz=20)
+
+    def test_scenario_runs_single_phase(self, simple_geometry, initial_state):
+        """Scenario runs a single phase to completion."""
+        from jax_frc.scenarios.scenario import Scenario, ScenarioResult
+
+        phase = Phase(name="test", transition=timeout(1.0))
+
+        scenario = Scenario(
+            name="test_scenario",
+            phases=[phase],
+            geometry=simple_geometry,
+            initial_state=initial_state,
+            dt=0.1,
+        )
+
+        result = scenario.run()
+
+        assert isinstance(result, ScenarioResult)
+        assert len(result.phase_results) == 1
+        assert result.phase_results[0].name == "test"
+        assert result.phase_results[0].termination == "timeout"
+
+    def test_scenario_chains_phases(self, simple_geometry, initial_state):
+        """Scenario passes state between phases."""
+        from jax_frc.scenarios.scenario import Scenario, ScenarioResult
+
+        phase1 = Phase(name="phase1", transition=timeout(1.0))
+        phase2 = Phase(name="phase2", transition=timeout(2.0))
+
+        scenario = Scenario(
+            name="test_scenario",
+            phases=[phase1, phase2],
+            geometry=simple_geometry,
+            initial_state=initial_state,
+            dt=0.1,
+        )
+
+        result = scenario.run()
+
+        assert len(result.phase_results) == 2
+        assert result.phase_results[0].name == "phase1"
+        assert result.phase_results[1].name == "phase2"
