@@ -60,6 +60,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+    "slow: marks tests as slow (running full physics simulations)",
+]
 
 [tool.black]
 line-length = 100
