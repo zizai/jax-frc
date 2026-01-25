@@ -1,0 +1,42 @@
+# validation/cases/frc/belova_case1.yaml
+name: belova_case1
+description: "Large FRC merging without compression (Belova et al. Fig. 1-2)"
+
+configuration:
+  class: BelovaCase1Configuration
+  overrides:
+    model_type: resistive_mhd
+    eta_0: 1e-6
+    eta_anom: 1e-3
+
+runtime:
+  t_end: 30.0
+  dt: 0.001
+
+reference:
+  type: qualitative
+  description: "Partial merge expected, doublet configuration forms"
+  source: "Belova et al., Phys. Plasmas, Figures 1-2"
+
+acceptance:
+  quantitative:
+    - metric: no_numerical_instability
+      description: "No NaN or Inf values in solution"
+    - metric: flux_conservation
+      threshold: 0.1
+      description: "Total flux conserved within 10%"
+    - metric: energy_bounded
+      description: "Total energy remains bounded throughout simulation"
+
+output:
+  plots:
+    - type: contour
+      name: psi_evolution
+      field: psi
+      times: [0.0, 10.0, 20.0, 30.0]
+    - type: profiles
+      name: flux_profile
+      axis: z
+      field: psi
+  html_report: true
+  log_level: INFO
