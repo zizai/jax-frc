@@ -106,7 +106,7 @@ class TestScenario:
     def initial_state(self):
         return State.zeros(nr=10, nz=20)
 
-    def test_scenario_runs_single_phase(self, simple_geometry, initial_state):
+    def test_scenario_runs_single_phase(self, simple_geometry, initial_state, mock_physics_model, mock_solver):
         """Scenario runs a single phase to completion."""
         from jax_frc.scenarios.scenario import Scenario, ScenarioResult
 
@@ -117,6 +117,8 @@ class TestScenario:
             phases=[phase],
             geometry=simple_geometry,
             initial_state=initial_state,
+            physics_model=mock_physics_model,
+            solver=mock_solver,
             dt=0.1,
         )
 
@@ -127,7 +129,7 @@ class TestScenario:
         assert result.phase_results[0].name == "test"
         assert result.phase_results[0].termination == "timeout"
 
-    def test_scenario_chains_phases(self, simple_geometry, initial_state):
+    def test_scenario_chains_phases(self, simple_geometry, initial_state, mock_physics_model, mock_solver):
         """Scenario passes state between phases."""
         from jax_frc.scenarios.scenario import Scenario, ScenarioResult
 
@@ -139,6 +141,8 @@ class TestScenario:
             phases=[phase1, phase2],
             geometry=simple_geometry,
             initial_state=initial_state,
+            physics_model=mock_physics_model,
+            solver=mock_solver,
             dt=0.1,
         )
 
