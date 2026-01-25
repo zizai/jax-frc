@@ -1,7 +1,7 @@
 """Tests for scenario framework."""
 
 import pytest
-from jax_frc.scenarios.transitions import Transition, timeout, condition, any_of
+from jax_frc.scenarios.transitions import Transition, timeout, condition, any_of, all_of
 from jax_frc.scenarios.phase import Phase, PhaseResult
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
@@ -42,6 +42,22 @@ class TestTransition:
         triggered, reason = trans.evaluate(None, t=6.0)
         assert triggered
         assert reason == "condition_met"
+
+    def test_all_of_triggers_when_all_match(self):
+        """all_of triggers only when all sub-transitions trigger."""
+        trans = all_of(
+            timeout(5.0),
+            condition(lambda s, t: t > 3.0)
+        )
+
+        # At t=4, timeout not met (need >= 5.0)
+        triggered, reason = trans.evaluate(None, t=4.0)
+        assert not triggered
+
+        # At t=5, both met
+        triggered, reason = trans.evaluate(None, t=5.0)
+        assert triggered
+        assert reason == "all_conditions_met"
 
 
 class TestPhase:
