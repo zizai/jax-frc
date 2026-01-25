@@ -139,3 +139,44 @@ class TestPlotTimeTraces:
             assert any('time_traces' in f for f in files)
 
         plt.close(fig)
+
+
+class TestPlotFields:
+    """Tests for plot_fields function."""
+
+    def test_plot_fields_returns_figure(self):
+        """Verify plot_fields returns matplotlib figure."""
+        from jax_frc.diagnostics.plotting import plot_fields
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+        fig = plot_fields(result, show=False, save_dir=None)
+
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_plot_fields_with_time_index(self):
+        """Verify plot_fields accepts time index."""
+        from jax_frc.diagnostics.plotting import plot_fields
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+        fig = plot_fields(result, t=0, show=False, save_dir=None)
+
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_plot_fields_saves_files(self):
+        """Verify plot_fields saves PNG files."""
+        from jax_frc.diagnostics.plotting import plot_fields
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fig = plot_fields(result, show=False, save_dir=tmpdir)
+            files = os.listdir(tmpdir)
+            # Should have at least one field plot
+            assert len(files) >= 1
+
+        plt.close(fig)
