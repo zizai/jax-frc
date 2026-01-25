@@ -53,3 +53,51 @@ class ImexSolver(Solver):
                             model: PhysicsModel, geometry: Geometry) -> State:
         """Solve implicit diffusion step."""
         raise NotImplementedError("Implicit diffusion not yet implemented")
+
+    def _build_diffusion_operator(
+        self, geometry: Geometry, dt: float, eta: Array, component: str
+    ) -> tuple:
+        """Build implicit diffusion operator (I - theta*dt*D) and diagonal.
+
+        Args:
+            geometry: Grid geometry
+            dt: Timestep
+            eta: Resistivity field eta(r,z)
+            component: 'r', 'theta', or 'z' for B component
+
+        Returns:
+            (operator, diagonal) where operator is A(x) and diagonal for preconditioner
+        """
+        dr, dz = geometry.dr, geometry.dz
+        r = geometry.r_grid
+        theta = self.config.theta
+
+        # Diffusion coefficient: D = eta/mu_0
+        D = eta / MU0
+
+        # For Cartesian-like Laplacian: nabla^2 B = d^2B/dr^2 + d^2B/dz^2
+        # (Ignoring 1/r terms for B_z, which is approximately valid away from axis)
+
+        # Diagonal of implicit operator: 1 + theta*dt*D*(2/dr^2 + 2/dz^2)
+        diag = 1.0 + theta * dt * D * (2.0/dr**2 + 2.0/dz**2)
+
+        def operator(B: Array) -> Array:
+            """Apply (I - theta*dt*D*nabla^2) to B field component."""
+            # Laplacian using central differences
+            # Interior only; boundaries handled separately
+            lap = jnp.zeros_like(B)
+
+            # d^2B/dr^2
+            lap = lap.at[1:-1, :].add(
+                (B[2:, :] - 2*B[1:-1, :] + B[:-2, :]) / dr**2
+            )
+
+            # d^2B/dz^2
+            lap = lap.at[:, 1:-1].add(
+                (B[:, 2:] - 2*B[:, 1:-1] + B[:, :-2]) / dz**2
+            )
+
+            # (I - theta*dt*D*nabla^2)B
+            return B - theta * dt * D * lap
+
+        return operator, diag

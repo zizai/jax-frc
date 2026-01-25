@@ -263,3 +263,57 @@ class TestImexSolver:
         solver = ImexSolver(config)
 
         assert solver.config.theta == 1.0
+
+
+class TestImexDiffusion:
+    """Tests for IMEX implicit diffusion."""
+
+    @pytest.fixture
+    def geometry(self):
+        """Create test geometry."""
+        from jax_frc.core.geometry import Geometry
+        return Geometry(
+            coord_system="cylindrical",
+            r_min=0.01, r_max=1.0,
+            z_min=-1.0, z_max=1.0,
+            nr=16, nz=32
+        )
+
+    def test_build_diffusion_operator(self, geometry):
+        """Should build implicit diffusion operator."""
+        from jax_frc.solvers.imex import ImexSolver, ImexConfig
+
+        config = ImexConfig(theta=1.0)
+        solver = ImexSolver(config)
+
+        dt = 0.001
+        eta = jnp.ones((geometry.nr, geometry.nz)) * 1e-4  # Uniform resistivity
+
+        # Build operator for B_z component
+        operator, diag = solver._build_diffusion_operator(
+            geometry, dt, eta, component='z'
+        )
+
+        # Test that operator is well-formed
+        B_test = jnp.sin(jnp.pi * geometry.r_grid) * jnp.cos(jnp.pi * geometry.z_grid)
+        result = operator(B_test)
+
+        assert result.shape == B_test.shape
+        assert jnp.all(jnp.isfinite(result))
+
+    def test_diffusion_operator_identity_at_zero_dt(self, geometry):
+        """At dt=0, operator should be identity."""
+        from jax_frc.solvers.imex import ImexSolver, ImexConfig
+
+        config = ImexConfig(theta=1.0)
+        solver = ImexSolver(config)
+
+        dt = 0.0
+        eta = jnp.ones((geometry.nr, geometry.nz)) * 1e-4
+
+        operator, _ = solver._build_diffusion_operator(geometry, dt, eta, component='z')
+
+        B_test = jnp.sin(jnp.pi * geometry.r_grid)
+        result = operator(B_test)
+
+        assert jnp.allclose(result, B_test)
