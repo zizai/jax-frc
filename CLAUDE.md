@@ -76,11 +76,24 @@ MI = 1.673e-27    # Ion mass (proton)
 KB = 1.381e-23    # Boltzmann constant
 ```
 
+### Solvers
+
+**IMEX Solver** (`jax_frc/solvers/imex.py`) - Implicit-Explicit time integration
+- Strang splitting: explicit(dt/2) → implicit(dt) → explicit(dt/2)
+- Implicit treatment of resistive diffusion for unconditional stability
+- Matrix-free conjugate gradient with Jacobi preconditioning
+- Config: `ImexConfig(theta, cg_tol, cg_max_iter, cfl_factor)`
+
+**Linear Solvers** (`jax_frc/solvers/linear/`)
+- `conjugate_gradient()` - Matrix-free CG using `lax.while_loop` for JIT compatibility
+- `jacobi_preconditioner()` - Diagonal preconditioning for acceleration
+
 ### Typical Time Steps
 
 - Resistive MHD: dt ~ 1e-4
 - Extended MHD: dt ~ 1e-6 (Whistler constraint)
 - Hybrid Kinetic: dt ~ 1e-8 (cyclotron constraint)
+- IMEX (resistive diffusion): dt ~ 1e-4 (unconditionally stable for diffusion)
 
 
 ## Testing
