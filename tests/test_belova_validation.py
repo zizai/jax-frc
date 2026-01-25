@@ -50,3 +50,70 @@ class TestBelovaCase2:
 
         ratio = final_diag["elongation"] / (initial_diag["elongation"] + 1e-10)
         assert ratio > 1.2  # Should increase
+
+
+class TestBelovaCase1:
+    """Large FRC - expect partial merge, doublet formation."""
+
+    @pytest.mark.slow
+    def test_doublet_formation_mhd(self):
+        """MHD: should NOT fully merge."""
+        scenario = belova_case1(model_type="resistive_mhd")
+        result = scenario.run()
+
+        final_diag = MergingDiagnostics().compute(
+            result.final_state, scenario.geometry
+        )
+
+        # Should remain as doublet (two nulls)
+        assert final_diag["separation_dz"] > 0.3
+        assert len(final_diag["null_positions"]) == 2
+
+
+class TestBelovaCase3:
+    """Small FRC with varying initial separation."""
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("separation,should_merge", [
+        (1.5, True),   # dZ=75 equivalent
+        (2.2, True),   # dZ=110 equivalent
+    ])
+    def test_merge_vs_separation(self, separation, should_merge):
+        """Merging depends on initial separation."""
+        scenario = belova_case3(separation=separation)
+        result = scenario.run()
+
+        final_diag = MergingDiagnostics().compute(
+            result.final_state, scenario.geometry
+        )
+
+        if should_merge:
+            assert final_diag["separation_dz"] < 1.0
+
+    @pytest.mark.slow
+    def test_large_separation_no_merge(self):
+        """Very large separation prevents merging."""
+        scenario = belova_case3(separation=3.7)
+        result = scenario.run()
+
+        final_diag = MergingDiagnostics().compute(
+            result.final_state, scenario.geometry
+        )
+
+        assert final_diag["separation_dz"] > 2.0
+
+
+class TestBelovaCase4:
+    """Large FRC with compression - expect complete merge."""
+
+    @pytest.mark.slow
+    def test_compression_enables_merge(self):
+        """Compression should enable complete merge."""
+        scenario = belova_case4(model_type="resistive_mhd")
+        result = scenario.run()
+
+        final_diag = MergingDiagnostics().compute(
+            result.final_state, scenario.geometry
+        )
+
+        assert final_diag["separation_dz"] < 0.5
