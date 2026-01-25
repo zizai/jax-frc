@@ -27,6 +27,7 @@ class State:
     psi: Array        # Poloidal flux function
     n: Array          # Number density
     p: Array          # Pressure
+    T: Array          # Temperature (eV)
 
     # Vector fields (nr, nz, 3)
     B: Array          # Magnetic field
@@ -57,6 +58,7 @@ class State:
             psi=jnp.zeros((nr, nz)),
             n=jnp.zeros((nr, nz)),
             p=jnp.zeros((nr, nz)),
+            T=jnp.zeros((nr, nz)),
             B=jnp.zeros((nr, nz, 3)),
             E=jnp.zeros((nr, nz, 3)),
             v=jnp.zeros((nr, nz, 3)),
@@ -72,14 +74,14 @@ class State:
 
 # Register State as a JAX pytree for JIT compatibility
 def _state_flatten(state):
-    children = (state.psi, state.n, state.p, state.B, state.E, state.v,
+    children = (state.psi, state.n, state.p, state.T, state.B, state.E, state.v,
                 state.particles, state.time, state.step)
     aux_data = None
     return children, aux_data
 
 def _state_unflatten(aux_data, children):
-    psi, n, p, B, E, v, particles, time, step = children
-    return State(psi=psi, n=n, p=p, B=B, E=E, v=v,
+    psi, n, p, T, B, E, v, particles, time, step = children
+    return State(psi=psi, n=n, p=p, T=T, B=B, E=E, v=v,
                  particles=particles, time=time, step=step)
 
 jax.tree_util.register_pytree_node(State, _state_flatten, _state_unflatten)
