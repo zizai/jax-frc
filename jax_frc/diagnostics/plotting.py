@@ -282,3 +282,104 @@ def plot_profiles(
         plt.show()
 
     return fig
+
+
+def plot_particles(
+    result: SimulationResult,
+    t: Optional[Union[int, float]] = None,
+    save_dir: Optional[str] = "auto",
+    show: Optional[bool] = None,
+    format: str = 'png',
+) -> Optional[plt.Figure]:
+    """Plot particle phase space and velocity distributions.
+
+    Only applicable to hybrid kinetic simulations. Returns None for other models.
+
+    Args:
+        result: SimulationResult object with particle data
+        t: Time to plot (see plot_fields for format)
+        save_dir: Directory to save plots
+        show: Whether to display interactively
+        format: Output format
+
+    Returns:
+        Matplotlib Figure object, or None if no particle data
+    """
+    import seaborn as sns
+
+    if result.particles is None:
+        return None
+
+    if show is None:
+        show = not is_notebook()
+
+    particles = result.particles
+    x = np.asarray(particles.get('x', particles.get('r', [])))
+    v = np.asarray(particles.get('v', particles.get('vr', [])))
+    w = np.asarray(particles.get('w', []))
+
+    if len(x) == 0:
+        return None
+
+    # Handle different particle data formats
+    if x.ndim == 2:
+        r = x[:, 0] if x.shape[1] > 0 else x
+        z = x[:, 2] if x.shape[1] > 2 else np.zeros_like(r)
+    else:
+        r = x
+        z = np.zeros_like(r)
+
+    if v.ndim == 2:
+        vr = v[:, 0] if v.shape[1] > 0 else v
+        vz = v[:, 2] if v.shape[1] > 2 else np.zeros_like(vr)
+    else:
+        vr = v
+        vz = np.zeros_like(vr)
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+    # Phase space: r vs vr
+    ax = axes[0, 0]
+    ax.scatter(r, vr, alpha=0.5, s=5)
+    ax.set_xlabel(get_label('r'))
+    ax.set_ylabel(get_label('v_r'))
+    ax.set_title('Phase Space (r, vr)')
+
+    # Phase space: z vs vz
+    ax = axes[0, 1]
+    ax.scatter(z, vz, alpha=0.5, s=5)
+    ax.set_xlabel(get_label('z'))
+    ax.set_ylabel(get_label('v_z'))
+    ax.set_title('Phase Space (z, vz)')
+
+    # Velocity distribution
+    ax = axes[1, 0]
+    sns.histplot(vr, ax=ax, kde=True, bins=30)
+    ax.set_xlabel(get_label('v_r'))
+    ax.set_title('Radial Velocity Distribution')
+
+    # Weight distribution
+    ax = axes[1, 1]
+    if len(w) > 0:
+        sns.histplot(w, ax=ax, kde=True, bins=30)
+        ax.set_xlabel('Weight')
+        ax.set_title('Delta-f Weight Distribution')
+    else:
+        ax.text(0.5, 0.5, 'No weight data', ha='center', va='center',
+                transform=ax.transAxes)
+        ax.set_title('Weight Distribution')
+
+    time_label = f"t = {result.final_time:.2e} s"
+    fig.suptitle(f"{result.model_name} - Particles ({time_label})", fontsize=14)
+    fig.tight_layout()
+
+    # Save if requested
+    if save_dir is not None:
+        if save_dir == "auto":
+            save_dir = create_output_dir(result.model_name)
+        save_figure(fig, "particles", save_dir, format=format)
+
+    if show:
+        plt.show()
+
+    return fig

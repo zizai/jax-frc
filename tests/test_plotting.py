@@ -217,3 +217,58 @@ class TestPlotProfiles:
 
         assert isinstance(fig, plt.Figure)
         plt.close(fig)
+
+
+def make_hybrid_result() -> SimulationResult:
+    """Create a mock SimulationResult for hybrid kinetic model."""
+    nr, nz = 32, 64
+    n_particles = 100
+
+    particles = {
+        'x': jnp.column_stack([
+            jnp.linspace(0.1, 0.3, n_particles),  # r
+            jnp.zeros(n_particles),                # theta
+            jnp.linspace(-0.5, 0.5, n_particles), # z
+        ]),
+        'v': jnp.column_stack([
+            jnp.linspace(-1e5, 1e5, n_particles),  # vr
+            jnp.zeros(n_particles),                 # vtheta
+            jnp.linspace(-1e5, 1e5, n_particles),  # vz
+        ]),
+        'w': jnp.ones(n_particles) * 0.1,
+    }
+
+    return SimulationResult(
+        model_name="hybrid_kinetic",
+        final_time=1e-6,
+        n_steps=10,
+        grid_shape=(nr, nz),
+        grid_spacing=(0.01, 0.01),
+        particles=particles,
+        history={'time': jnp.linspace(0, 1e-6, 10)},
+    )
+
+
+class TestPlotParticles:
+    """Tests for plot_particles function."""
+
+    def test_plot_particles_returns_figure(self):
+        """Verify plot_particles returns matplotlib figure."""
+        from jax_frc.diagnostics.plotting import plot_particles
+        import matplotlib.pyplot as plt
+
+        result = make_hybrid_result()
+        fig = plot_particles(result, show=False, save_dir=None)
+
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_plot_particles_skips_non_hybrid(self):
+        """Verify plot_particles returns None for non-hybrid models."""
+        from jax_frc.diagnostics.plotting import plot_particles
+        import matplotlib.pyplot as plt
+
+        result = make_mock_result()  # resistive_mhd, no particles
+        fig = plot_particles(result, show=False, save_dir=None)
+
+        assert fig is None
