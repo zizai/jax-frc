@@ -33,6 +33,25 @@ class HaloDensityModel:
 
 
 @dataclass
+class TemperatureBoundaryCondition:
+    """Temperature boundary condition settings.
+
+    Supports:
+    - Dirichlet: T = T_wall (fixed wall temperature)
+    - Neumann: ∂T/∂n = 0 (insulating wall, zero heat flux)
+    - Symmetry at axis: ∂T/∂r = 0 at r=0
+
+    Attributes:
+        bc_type: "dirichlet" or "neumann"
+        T_wall: Wall temperature [eV] for Dirichlet BC
+        apply_axis_symmetry: If True, enforce ∂T/∂r = 0 at r=0
+    """
+    bc_type: str = "neumann"  # "dirichlet" or "neumann"
+    T_wall: float = 10.0      # Wall temperature [eV] for Dirichlet
+    apply_axis_symmetry: bool = True
+
+
+@dataclass
 class ExtendedMHD(PhysicsModel):
     """Two-fluid extended MHD model with Hall effect and energy equation.
 
@@ -46,6 +65,7 @@ class ExtendedMHD(PhysicsModel):
     resistivity: ResistivityModel
     halo_model: HaloDensityModel
     thermal: Optional[ThermalTransport] = None  # None = no temperature evolution
+    temperature_bc: Optional[TemperatureBoundaryCondition] = None  # None = default Neumann
 
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
         """Compute dB/dt and optionally dT/dt from extended MHD equations."""
@@ -155,8 +175,9 @@ class ExtendedMHD(PhysicsModel):
         return jnp.minimum(dt_whistler, dt_resistive)
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
-        """Apply boundary conditions."""
+        """Apply boundary conditions for B and T fields."""
         B = state.B
+        T = state.T
 
         # Conducting wall: B_tangential = 0 at boundaries
         # r boundaries
@@ -166,7 +187,46 @@ class ExtendedMHD(PhysicsModel):
         B = B.at[:, 0, :].set(0)
         B = B.at[:, -1, :].set(0)
 
-        return state.replace(B=B)
+        # Temperature boundary conditions (if thermal enabled)
+        if self.thermal is not None:
+            T = self._apply_temperature_bc(T, geometry)
+
+        return state.replace(B=B, T=T)
+
+    def _apply_temperature_bc(self, T: jnp.ndarray, geometry: Geometry) -> jnp.ndarray:
+        """Apply temperature boundary conditions.
+
+        Supports:
+        - Dirichlet: T = T_wall at boundaries
+        - Neumann: ∂T/∂n = 0 (extrapolate from interior)
+        - Axis symmetry: ∂T/∂r = 0 at r_min (first row)
+
+        Args:
+            T: Temperature field (nr, nz)
+            geometry: Grid geometry
+
+        Returns:
+            Temperature field with BCs applied
+        """
+        bc = self.temperature_bc or TemperatureBoundaryCondition()
+
+        if bc.bc_type == "dirichlet":
+            # Fixed wall temperature
+            T = T.at[-1, :].set(bc.T_wall)  # Outer r boundary
+            T = T.at[:, 0].set(bc.T_wall)   # z_min boundary
+            T = T.at[:, -1].set(bc.T_wall)  # z_max boundary
+        else:  # "neumann" (default)
+            # Zero gradient (insulating wall) - extrapolate from interior
+            T = T.at[-1, :].set(T[-2, :])   # Outer r boundary
+            T = T.at[:, 0].set(T[:, 1])     # z_min boundary
+            T = T.at[:, -1].set(T[:, -2])   # z_max boundary
+
+        # Axis symmetry at r=0 (r_min): ∂T/∂r = 0
+        if bc.apply_axis_symmetry:
+            # First row (r_min) gets same value as second row
+            T = T.at[0, :].set(T[1, :])
+
+        return T
 
     def _compute_current(self, B_r, B_phi, B_z, dr, dz, r):
         """Compute J = curl(B) / mu_0 in cylindrical coordinates.
@@ -296,4 +356,15 @@ class ExtendedMHD(PhysicsModel):
                 min_temperature=float(thermal_config.get("min_temperature", 1e-3))
             )
 
-        return cls(resistivity=resistivity, halo_model=halo_model, thermal=thermal)
+        # Temperature boundary conditions (optional)
+        temperature_bc = None
+        if "temperature_bc" in config:
+            bc_config = config["temperature_bc"]
+            temperature_bc = TemperatureBoundaryCondition(
+                bc_type=str(bc_config.get("bc_type", "neumann")),
+                T_wall=float(bc_config.get("T_wall", 10.0)),
+                apply_axis_symmetry=bool(bc_config.get("apply_axis_symmetry", True))
+            )
+
+        return cls(resistivity=resistivity, halo_model=halo_model,
+                   thermal=thermal, temperature_bc=temperature_bc)

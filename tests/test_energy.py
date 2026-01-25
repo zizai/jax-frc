@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from jax_frc.models.energy import ThermalTransport
-from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel, TemperatureBoundaryCondition
 from jax_frc.models.resistivity import SpitzerResistivity
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
@@ -412,3 +412,156 @@ class TestExtendedMHDTemperature:
         model = ExtendedMHD.from_config(config)
 
         assert model.thermal is None, "Model should not have thermal transport"
+
+
+class TestTemperatureBoundaryConditions:
+    """Tests for temperature boundary conditions."""
+
+    @pytest.fixture
+    def geometry(self):
+        """Create test geometry."""
+        return Geometry(
+            coord_system="cylindrical",
+            r_min=0.01, r_max=1.0,
+            z_min=-1.0, z_max=1.0,
+            nr=16, nz=32
+        )
+
+    def test_dirichlet_bc_sets_wall_temperature(self, geometry):
+        """Dirichlet BC should set T = T_wall at boundaries."""
+        T_wall = 50.0
+        resistivity = SpitzerResistivity(eta_0=1e-6)
+        halo = HaloDensityModel()
+        thermal = ThermalTransport(use_spitzer=False)
+        bc = TemperatureBoundaryCondition(bc_type="dirichlet", T_wall=T_wall)
+
+        model = ExtendedMHD(
+            resistivity=resistivity,
+            halo_model=halo,
+            thermal=thermal,
+            temperature_bc=bc
+        )
+
+        nr, nz = geometry.nr, geometry.nz
+
+        # Create state with non-wall temperature
+        T_interior = 200.0
+        state = State(
+            psi=jnp.zeros((nr, nz)),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=jnp.ones((nr, nz)) * T_interior,
+            B=jnp.zeros((nr, nz, 3)),
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        # Apply constraints
+        constrained = model.apply_constraints(state, geometry)
+
+        # Wall boundaries should have T_wall
+        assert jnp.allclose(constrained.T[-1, :], T_wall), "Outer r boundary should be T_wall"
+        assert jnp.allclose(constrained.T[:, 0], T_wall), "z_min boundary should be T_wall"
+        assert jnp.allclose(constrained.T[:, -1], T_wall), "z_max boundary should be T_wall"
+
+        # Interior should be unchanged
+        assert jnp.allclose(constrained.T[5, 5], T_interior), "Interior should be unchanged"
+
+    def test_neumann_bc_extrapolates_from_interior(self, geometry):
+        """Neumann BC should extrapolate from interior (zero gradient)."""
+        resistivity = SpitzerResistivity(eta_0=1e-6)
+        halo = HaloDensityModel()
+        thermal = ThermalTransport(use_spitzer=False)
+        bc = TemperatureBoundaryCondition(bc_type="neumann")
+
+        model = ExtendedMHD(
+            resistivity=resistivity,
+            halo_model=halo,
+            thermal=thermal,
+            temperature_bc=bc
+        )
+
+        nr, nz = geometry.nr, geometry.nz
+
+        # Create state with gradient toward boundaries
+        T = jnp.linspace(100, 300, nr)[:, None] * jnp.ones((1, nz))
+        state = State(
+            psi=jnp.zeros((nr, nz)),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=T,
+            B=jnp.zeros((nr, nz, 3)),
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        constrained = model.apply_constraints(state, geometry)
+
+        # Outer r boundary should equal adjacent interior
+        assert jnp.allclose(constrained.T[-1, :], constrained.T[-2, :]), \
+            "Neumann: outer r should match interior"
+
+    def test_axis_symmetry_enforced(self, geometry):
+        """Axis symmetry should enforce ∂T/∂r = 0 at r=0."""
+        resistivity = SpitzerResistivity(eta_0=1e-6)
+        halo = HaloDensityModel()
+        thermal = ThermalTransport(use_spitzer=False)
+        bc = TemperatureBoundaryCondition(apply_axis_symmetry=True)
+
+        model = ExtendedMHD(
+            resistivity=resistivity,
+            halo_model=halo,
+            thermal=thermal,
+            temperature_bc=bc
+        )
+
+        nr, nz = geometry.nr, geometry.nz
+
+        # Create state with different value at axis
+        T = jnp.ones((nr, nz)) * 100.0
+        T = T.at[0, :].set(50.0)  # Different at axis
+
+        state = State(
+            psi=jnp.zeros((nr, nz)),
+            n=jnp.ones((nr, nz)) * 1e19,
+            p=jnp.ones((nr, nz)) * 1e3,
+            T=T,
+            B=jnp.zeros((nr, nz, 3)),
+            E=jnp.zeros((nr, nz, 3)),
+            v=jnp.zeros((nr, nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+        constrained = model.apply_constraints(state, geometry)
+
+        # First row (axis) should equal second row
+        assert jnp.allclose(constrained.T[0, :], constrained.T[1, :]), \
+            "Axis symmetry: T[0,:] should equal T[1,:]"
+
+    def test_from_config_with_temperature_bc(self):
+        """from_config should parse temperature_bc settings."""
+        config = {
+            "resistivity": {"type": "spitzer", "eta_0": 1e-6},
+            "halo": {"halo_density": 1e16},
+            "thermal": {"use_spitzer": False},
+            "temperature_bc": {
+                "bc_type": "dirichlet",
+                "T_wall": 25.0,
+                "apply_axis_symmetry": False
+            }
+        }
+
+        model = ExtendedMHD.from_config(config)
+
+        assert model.temperature_bc is not None
+        assert model.temperature_bc.bc_type == "dirichlet"
+        assert model.temperature_bc.T_wall == 25.0
+        assert model.temperature_bc.apply_axis_symmetry is False
