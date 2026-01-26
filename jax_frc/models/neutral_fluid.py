@@ -153,3 +153,132 @@ def hlle_flux_1d(
     F_E = hlle_component(F_E_L, F_E_R, U_E_L, U_E_R)
 
     return F_rho, F_mom, F_E
+
+
+@dataclass
+class NeutralFluid:
+    """Hydrodynamic neutral fluid model.
+
+    Solves Euler equations with optional atomic source terms.
+    """
+
+    gamma: float = GAMMA
+
+    def compute_flux_divergence(
+        self, state: NeutralState, geometry: "Geometry"
+    ) -> Tuple[Array, Array, Array]:
+        """Compute -div(F) for Euler equations using HLLE.
+
+        Args:
+            state: Current neutral state
+            geometry: Grid geometry
+
+        Returns:
+            d_rho: Mass density RHS [kg/m³/s]
+            d_mom: Momentum density RHS [kg/m²/s²]
+            d_E: Energy density RHS [W/m³]
+        """
+        dr, dz = geometry.dr, geometry.dz
+        rho = state.rho_n
+        v = state.v_n
+        p = state.p_n
+        E = state.E_n
+
+        # Radial fluxes (r-direction, axis=0)
+        F_r = self._compute_radial_flux(rho, v, p, E)
+
+        # Axial fluxes (z-direction, axis=1)
+        F_z = self._compute_axial_flux(rho, v, p, E)
+
+        # Flux divergence: -d(F_r)/dr - d(F_z)/dz
+        # Using central differences for divergence
+        d_rho = -(
+            (jnp.roll(F_r[0], -1, axis=0) - jnp.roll(F_r[0], 1, axis=0)) / (2 * dr) +
+            (jnp.roll(F_z[0], -1, axis=1) - jnp.roll(F_z[0], 1, axis=1)) / (2 * dz)
+        )
+
+        # Momentum: handle each component
+        d_mom_r = -(
+            (jnp.roll(F_r[1], -1, axis=0) - jnp.roll(F_r[1], 1, axis=0)) / (2 * dr) +
+            (jnp.roll(F_z[1], -1, axis=1) - jnp.roll(F_z[1], 1, axis=1)) / (2 * dz)
+        )
+        d_mom_theta = jnp.zeros_like(d_mom_r)  # No theta flux in axisymmetric
+        d_mom_z = -(
+            (jnp.roll(F_r[2], -1, axis=0) - jnp.roll(F_r[2], 1, axis=0)) / (2 * dr) +
+            (jnp.roll(F_z[2], -1, axis=1) - jnp.roll(F_z[2], 1, axis=1)) / (2 * dz)
+        )
+        d_mom = jnp.stack([d_mom_r, d_mom_theta, d_mom_z], axis=-1)
+
+        d_E = -(
+            (jnp.roll(F_r[3], -1, axis=0) - jnp.roll(F_r[3], 1, axis=0)) / (2 * dr) +
+            (jnp.roll(F_z[3], -1, axis=1) - jnp.roll(F_z[3], 1, axis=1)) / (2 * dz)
+        )
+
+        return d_rho, d_mom, d_E
+
+    def _compute_radial_flux(self, rho, v, p, E):
+        """Compute HLLE flux in r-direction at cell faces."""
+        v_r = v[..., 0]  # Radial velocity
+
+        # Left and right states (i-1/2 interface uses i-1 and i)
+        rho_L = jnp.roll(rho, 1, axis=0)
+        rho_R = rho
+        v_L = jnp.roll(v_r, 1, axis=0)
+        v_R = v_r
+        p_L = jnp.roll(p, 1, axis=0)
+        p_R = p
+        E_L = jnp.roll(E, 1, axis=0)
+        E_R = E
+
+        F_rho, F_mom_r, F_E = hlle_flux_1d(
+            rho_L, rho_R, v_L, v_R, p_L, p_R, E_L, E_R, self.gamma
+        )
+
+        # For momentum components perpendicular to flux direction,
+        # flux is rho * v_r * v_perp
+        mom_theta_L = jnp.roll(rho * v[..., 1], 1, axis=0)
+        mom_theta_R = rho * v[..., 1]
+        F_mom_theta = jnp.where(
+            v_L + v_R > 0,
+            v_L * mom_theta_L / jnp.maximum(rho_L, 1e-20),
+            v_R * mom_theta_R / jnp.maximum(rho_R, 1e-20)
+        ) * 0.5 * (rho_L + rho_R)
+
+        mom_z_L = jnp.roll(rho * v[..., 2], 1, axis=0)
+        mom_z_R = rho * v[..., 2]
+        F_mom_z = jnp.where(
+            v_L + v_R > 0,
+            v_L * mom_z_L / jnp.maximum(rho_L, 1e-20),
+            v_R * mom_z_R / jnp.maximum(rho_R, 1e-20)
+        ) * 0.5 * (rho_L + rho_R)
+
+        return (F_rho, F_mom_r, F_mom_z, F_E)
+
+    def _compute_axial_flux(self, rho, v, p, E):
+        """Compute HLLE flux in z-direction at cell faces."""
+        v_z = v[..., 2]  # Axial velocity
+
+        # Left and right states
+        rho_L = jnp.roll(rho, 1, axis=1)
+        rho_R = rho
+        v_L = jnp.roll(v_z, 1, axis=1)
+        v_R = v_z
+        p_L = jnp.roll(p, 1, axis=1)
+        p_R = p
+        E_L = jnp.roll(E, 1, axis=1)
+        E_R = E
+
+        F_rho, F_mom_z, F_E = hlle_flux_1d(
+            rho_L, rho_R, v_L, v_R, p_L, p_R, E_L, E_R, self.gamma
+        )
+
+        # Perpendicular momentum fluxes
+        mom_r_L = jnp.roll(rho * v[..., 0], 1, axis=1)
+        mom_r_R = rho * v[..., 0]
+        F_mom_r = jnp.where(
+            v_L + v_R > 0,
+            v_L * mom_r_L / jnp.maximum(rho_L, 1e-20),
+            v_R * mom_r_R / jnp.maximum(rho_R, 1e-20)
+        ) * 0.5 * (rho_L + rho_R)
+
+        return (F_rho, F_mom_r, F_mom_z, F_E)

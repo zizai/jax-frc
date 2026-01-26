@@ -143,3 +143,69 @@ class TestHLLEFlux:
 
         # Should be close to left flux
         assert jnp.allclose(F_hlle[0], F_left[0], rtol=0.1)
+
+
+class TestNeutralFluid:
+    """Tests for NeutralFluid model class."""
+
+    def test_neutral_fluid_importable(self):
+        """NeutralFluid is importable."""
+        from jax_frc.models.neutral_fluid import NeutralFluid
+        assert NeutralFluid is not None
+
+    def test_neutral_fluid_creation(self):
+        """Can create NeutralFluid instance."""
+        from jax_frc.models.neutral_fluid import NeutralFluid
+        model = NeutralFluid(gamma=5/3)
+        assert model.gamma == 5/3
+
+    def test_compute_flux_divergence_shape(self):
+        """Flux divergence returns correct shapes."""
+        from jax_frc.models.neutral_fluid import NeutralFluid, NeutralState
+        from jax_frc.core.geometry import Geometry
+
+        nr, nz = 16, 32
+        model = NeutralFluid()
+        geometry = Geometry(
+            coord_system="cylindrical",
+            nr=nr, nz=nz,
+            r_min=0.1, r_max=1.0,
+            z_min=0.0, z_max=2.0
+        )
+
+        rho_n = jnp.ones((nr, nz)) * 1e-6
+        mom_n = jnp.zeros((nr, nz, 3))
+        E_n = jnp.ones((nr, nz)) * 1e3
+        state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
+
+        d_rho, d_mom, d_E = model.compute_flux_divergence(state, geometry)
+
+        assert d_rho.shape == (nr, nz)
+        assert d_mom.shape == (nr, nz, 3)
+        assert d_E.shape == (nr, nz)
+
+    def test_uniform_state_zero_flux_divergence(self):
+        """Uniform stationary state has ~zero flux divergence."""
+        from jax_frc.models.neutral_fluid import NeutralFluid, NeutralState
+        from jax_frc.core.geometry import Geometry
+
+        nr, nz = 16, 32
+        model = NeutralFluid()
+        geometry = Geometry(
+            coord_system="cylindrical",
+            nr=nr, nz=nz,
+            r_min=0.1, r_max=1.0,
+            z_min=0.0, z_max=2.0
+        )
+
+        # Uniform stationary state
+        rho_n = jnp.ones((nr, nz)) * 1e-6
+        mom_n = jnp.zeros((nr, nz, 3))
+        p_n = 1e3
+        E_n = jnp.ones((nr, nz)) * p_n / (5/3 - 1)
+        state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
+
+        d_rho, d_mom, d_E = model.compute_flux_divergence(state, geometry)
+
+        # Interior should be near zero (boundaries may have edge effects)
+        assert jnp.max(jnp.abs(d_rho[2:-2, 2:-2])) < 1e-10
