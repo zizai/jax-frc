@@ -13,7 +13,7 @@ from jax_frc.configurations import (
     TransitionSpec,
     PhaseSpec,
 )
-from jax_frc.scenarios import (
+from jax_frc.configurations import (
     Phase, PhaseResult, PHASE_REGISTRY, timeout, transition_from_spec,
 )
 from jax_frc.models.base import PhysicsModel

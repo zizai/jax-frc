@@ -1,8 +1,8 @@
 """Tests for scenario framework."""
 
 import pytest
-from jax_frc.scenarios.transitions import Transition, timeout, condition, any_of, all_of
-from jax_frc.scenarios.phase import Phase, PhaseResult
+from jax_frc.configurations import Transition, timeout, condition, any_of, all_of
+from jax_frc.configurations import Phase, PhaseResult
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
 
@@ -95,7 +95,7 @@ class TestPhysicsConditions:
 
     def test_separation_below_threshold(self):
         """separation_below triggers when dZ < threshold."""
-        from jax_frc.scenarios.transitions import separation_below
+        from jax_frc.configurations import separation_below
         import jax.numpy as jnp
 
         # Create state with two magnetic nulls
@@ -123,7 +123,7 @@ class TestPhysicsConditions:
 
     def test_temperature_above_threshold(self):
         """temperature_above triggers when T > threshold."""
-        from jax_frc.scenarios.transitions import temperature_above
+        from jax_frc.configurations import temperature_above
         import jax.numpy as jnp
 
         state = State.zeros(nr=10, nz=20)
@@ -143,7 +143,7 @@ class TestPhysicsConditions:
 
     def test_flux_below_threshold(self):
         """flux_below triggers when max(psi) < threshold."""
-        from jax_frc.scenarios.transitions import flux_below
+        from jax_frc.configurations import flux_below
         import jax.numpy as jnp
 
         state = State.zeros(nr=10, nz=20)
@@ -161,7 +161,7 @@ class TestPhysicsConditions:
 
     def test_velocity_below_threshold(self):
         """velocity_below triggers when max(|v|) < threshold."""
-        from jax_frc.scenarios.transitions import velocity_below
+        from jax_frc.configurations import velocity_below
         import jax.numpy as jnp
 
         state = State.zeros(nr=10, nz=20)
@@ -182,7 +182,7 @@ class TestPhysicsConditions:
 
 def test_phase_result_has_history():
     """PhaseResult should have a history dict."""
-    from jax_frc.scenarios.phase import PhaseResult
+    from jax_frc.configurations import PhaseResult
     from jax_frc.core.state import State
 
     state = State.zeros(nr=8, nz=16)
