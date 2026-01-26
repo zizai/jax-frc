@@ -7,7 +7,7 @@ All rates use SI units and are JIT-compatible.
 import jax.numpy as jnp
 from jax import jit, Array
 
-from jax_frc.constants import QE
+from jax_frc.constants import QE, MI
 
 
 # =============================================================================
@@ -48,3 +48,22 @@ def ionization_rate_coefficient(Te: Array) -> Array:
     sigma_v = A * (1 + P * jnp.sqrt(U_clamped)) * U_clamped**K * jnp.exp(-U_clamped) / (X + U_clamped)
 
     return sigma_v
+
+
+@jit
+def ionization_rate(Te: Array, ne: Array, rho_n: Array) -> Array:
+    """Mass ionization rate S_ion [kg/m³/s].
+
+    S_ion = m_i * ne * nn * <σv>_ion(Te)
+
+    Args:
+        Te: Electron temperature [J]
+        ne: Electron density [m⁻³]
+        rho_n: Neutral mass density [kg/m³]
+
+    Returns:
+        Mass ionization rate [kg/m³/s]
+    """
+    nn = rho_n / MI  # Neutral number density [m⁻³]
+    sigma_v = ionization_rate_coefficient(Te)
+    return MI * ne * nn * sigma_v

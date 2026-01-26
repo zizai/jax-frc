@@ -38,3 +38,40 @@ class TestIonizationRateCoefficient:
         Te_low = 1.0 * QE  # 1 eV
         Te_high = 100.0 * QE  # 100 eV
         assert ionization_rate_coefficient(Te_low) < 0.01 * ionization_rate_coefficient(Te_high)
+
+
+class TestIonizationRate:
+    """Tests for mass ionization rate S_ion."""
+
+    def test_ionization_rate_exists(self):
+        """Function is importable."""
+        from jax_frc.models.atomic_rates import ionization_rate
+        assert callable(ionization_rate)
+
+    def test_ionization_rate_dimensions(self):
+        """Output has same shape as inputs."""
+        from jax_frc.models.atomic_rates import ionization_rate
+        Te = jnp.ones((16, 32)) * 50 * QE  # 50 eV
+        ne = jnp.ones((16, 32)) * 1e19  # m^-3
+        rho_n = jnp.ones((16, 32)) * 1e-6  # kg/m³
+        S_ion = ionization_rate(Te, ne, rho_n)
+        assert S_ion.shape == (16, 32)
+
+    def test_ionization_rate_positive(self):
+        """Rate is positive for positive inputs."""
+        from jax_frc.models.atomic_rates import ionization_rate
+        Te = jnp.ones((16, 32)) * 50 * QE
+        ne = jnp.ones((16, 32)) * 1e19
+        rho_n = jnp.ones((16, 32)) * 1e-6
+        S_ion = ionization_rate(Te, ne, rho_n)
+        assert jnp.all(S_ion > 0)
+
+    def test_ionization_rate_scales_with_density(self):
+        """Doubling ne or rho_n doubles rate."""
+        from jax_frc.models.atomic_rates import ionization_rate
+        Te = 50 * QE
+        ne = 1e19
+        rho_n = 1e-6
+        S1 = ionization_rate(Te, ne, rho_n)
+        S2 = ionization_rate(Te, 2*ne, rho_n)
+        assert jnp.isclose(S2, 2*S1, rtol=1e-5)
