@@ -72,3 +72,28 @@ class TestMergingDiagnostics:
 
         assert "elongation" in result
         assert result["elongation"] > 0  # Positive for elongated FRC
+
+    def test_reconnection_rate_in_compute_result(self, two_frc_state, geometry):
+        """Reconnection rate is included in compute() output."""
+        diag = MergingDiagnostics()
+        result = diag.compute(two_frc_state, geometry)
+
+        assert "reconnection_rate" in result
+
+    def test_reconnection_rate_non_negative(self, two_frc_state, geometry):
+        """Reconnection rate is non-negative (uses absolute value)."""
+        diag = MergingDiagnostics()
+        result = diag.compute(two_frc_state, geometry)
+
+        assert result["reconnection_rate"] >= 0
+
+    def test_reconnection_rate_zero_when_E_field_zero(self, geometry):
+        """Reconnection rate is zero when E field is zero."""
+        # Create state with zero E field
+        state = State.zeros(nr=20, nz=40)
+        # E field is already zeros from State.zeros()
+
+        diag = MergingDiagnostics()
+        result = diag.compute(state, geometry)
+
+        assert result["reconnection_rate"] == 0.0
