@@ -114,3 +114,45 @@ class TestRecombinationRate:
         )
         Te_high = 100.0 * QE  # 100 eV
         assert ionization_rate_coefficient(Te_high) > recombination_rate_coefficient(Te_high)
+
+
+class TestChargeExchangeRates:
+    """Tests for charge exchange momentum and energy transfer."""
+
+    def test_charge_exchange_rates_exists(self):
+        """Function is importable."""
+        from jax_frc.models.atomic_rates import charge_exchange_rates
+        assert callable(charge_exchange_rates)
+
+    def test_charge_exchange_returns_tuple(self):
+        """Returns (R_cx, Q_cx) tuple."""
+        from jax_frc.models.atomic_rates import charge_exchange_rates
+        Ti = jnp.ones((16, 32)) * 100 * QE
+        ni = jnp.ones((16, 32)) * 1e19
+        nn = jnp.ones((16, 32)) * 1e18
+        v_i = jnp.zeros((16, 32, 3))
+        v_n = jnp.zeros((16, 32, 3))
+        R_cx, Q_cx = charge_exchange_rates(Ti, ni, nn, v_i, v_n)
+        assert R_cx.shape == (16, 32, 3)
+        assert Q_cx.shape == (16, 32)
+
+    def test_charge_exchange_momentum_zero_when_velocities_equal(self):
+        """R_cx = 0 when v_i = v_n."""
+        from jax_frc.models.atomic_rates import charge_exchange_rates
+        Ti = jnp.ones((16, 32)) * 100 * QE
+        ni = jnp.ones((16, 32)) * 1e19
+        nn = jnp.ones((16, 32)) * 1e18
+        v = jnp.ones((16, 32, 3)) * 1000  # Same velocity
+        R_cx, _ = charge_exchange_rates(Ti, ni, nn, v, v)
+        assert jnp.allclose(R_cx, 0, atol=1e-20)
+
+    def test_charge_exchange_energy_positive(self):
+        """Q_cx > 0 for hot ions (energy flows from ions to neutrals)."""
+        from jax_frc.models.atomic_rates import charge_exchange_rates
+        Ti = jnp.ones((16, 32)) * 100 * QE  # Hot ions
+        ni = jnp.ones((16, 32)) * 1e19
+        nn = jnp.ones((16, 32)) * 1e18
+        v_i = jnp.zeros((16, 32, 3))
+        v_n = jnp.zeros((16, 32, 3))
+        _, Q_cx = charge_exchange_rates(Ti, ni, nn, v_i, v_n)
+        assert jnp.all(Q_cx > 0)

@@ -5,6 +5,8 @@ All rates use SI units and are JIT-compatible.
 """
 
 import jax.numpy as jnp
+from typing import Tuple
+
 from jax import jit, Array
 
 from jax_frc.constants import QE, MI
@@ -107,3 +109,66 @@ def recombination_rate(Te: Array, ne: Array, ni: Array) -> Array:
     """
     sigma_v = recombination_rate_coefficient(Te)
     return MI * ne * ni * sigma_v
+
+
+# =============================================================================
+# Charge Exchange (H+ + H -> H + H+)
+# =============================================================================
+
+@jit
+def charge_exchange_cross_section(Ti: Array) -> Array:
+    """Charge exchange cross-section sigma_cx(Ti) [m^2].
+
+    Nearly constant ~3e-19 m^2 for Ti < 10 keV.
+
+    Args:
+        Ti: Ion temperature [J]
+
+    Returns:
+        Cross-section [m^2]
+    """
+    return 3.0e-19 * jnp.ones_like(Ti)
+
+
+@jit
+def charge_exchange_rates(
+    Ti: Array, ni: Array, nn: Array, v_i: Array, v_n: Array
+) -> Tuple[Array, Array]:
+    """Charge exchange momentum and energy transfer rates.
+
+    R_cx: Momentum transfer to plasma [N/m^3] (add to plasma, subtract from neutrals)
+    Q_cx: Energy transfer to plasma [W/m^3] (add to plasma, subtract from neutrals)
+
+    For cold neutrals (T_n << T_i), energy flows from ions to neutrals,
+    so Q_cx represents energy gained by plasma from neutrals (negative for hot plasma).
+    Convention: positive Q_cx means plasma gains energy.
+
+    Args:
+        Ti: Ion temperature [J]
+        ni: Ion density [m^-3]
+        nn: Neutral density [m^-3]
+        v_i: Ion velocity (nr, nz, 3) [m/s]
+        v_n: Neutral velocity (nr, nz, 3) [m/s]
+
+    Returns:
+        R_cx: Momentum transfer [N/m^3], shape (nr, nz, 3)
+        Q_cx: Energy transfer [W/m^3], shape (nr, nz)
+    """
+    # Thermal speed for collision frequency
+    v_thermal = jnp.sqrt(8 * Ti / (jnp.pi * MI))
+
+    sigma = charge_exchange_cross_section(Ti)
+    nu_cx = nn * sigma * v_thermal  # CX collision frequency [1/s]
+
+    # Momentum transfer: R_cx = m_i * n_i * nu_cx * (v_n - v_i)
+    # This is the momentum gained by plasma from neutrals
+    # If v_n > v_i, plasma gains momentum (R_cx > 0 in that component)
+    R_cx = MI * ni[..., None] * nu_cx[..., None] * (v_n - v_i)
+
+    # Energy transfer: Q_cx = (3/2) * n_i * nu_cx * (T_n - T_i)
+    # Assume cold neutrals: T_n << T_i, so Q_cx ≈ -(3/2) * n_i * nu_cx * T_i
+    # This is energy lost by plasma to neutrals (negative)
+    # Convention: return positive value representing energy loss rate
+    Q_cx = 1.5 * ni * nu_cx * Ti  # Energy loss from plasma [W/m^3]
+
+    return R_cx, Q_cx
