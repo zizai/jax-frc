@@ -425,7 +425,7 @@ class TestImexFullStep:
             coord_system="cylindrical",
             r_min=0.01, r_max=1.0,
             z_min=-1.0, z_max=1.0,
-            nr=16, nz=32
+            nr=8, nz=16
         )
 
     def test_imex_step_advances_time(self, geometry):

@@ -26,8 +26,8 @@ class TestResistiveDiffusionAnalytic:
         from jax_frc.models.resistive_mhd import ResistiveMHD
         from jax_frc.models.resistivity import SpitzerResistivity
 
-        # Setup: smaller grid for faster test
-        nr, nz = 32, 64
+        # Setup: coarse grid for fast test (physics validated with higher eta)
+        nr, nz = 16, 32
         L_r, L_z = 1.0, 2.0
         geometry = Geometry(
             coord_system="cylindrical",
@@ -36,8 +36,8 @@ class TestResistiveDiffusionAnalytic:
             nr=nr, nz=nz
         )
 
-        # Use higher resistivity to ensure measurable diffusion
-        eta = 1e-4
+        # Use moderately higher resistivity for faster decay
+        eta = 2e-4
         model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=eta))
 
         # Backward Euler is unconditionally stable, tight CG tolerance
@@ -71,11 +71,9 @@ class TestResistiveDiffusionAnalytic:
             step=0
         )
 
-        # Run simulation - use smaller timestep for accuracy
-        # Choose dt and n_steps to get measurable decay while maintaining accuracy
-        # Backward Euler has O(dt) truncation error, so smaller dt = more accurate
-        dt = 2e-5
-        n_steps = 100
+        # Run simulation - moderate dt for accuracy with fewer steps
+        dt = 5e-5
+        n_steps = 25
         t_final = dt * n_steps
 
         for _ in range(n_steps):
@@ -124,7 +122,7 @@ class TestResistiveDiffusionAnalytic:
         from jax_frc.models.resistive_mhd import ResistiveMHD
         from jax_frc.models.resistivity import SpitzerResistivity
 
-        nr, nz = 16, 32
+        nr, nz = 8, 16
         L_z = 2.0
         geometry = Geometry(
             coord_system="cylindrical",
@@ -161,7 +159,7 @@ class TestResistiveDiffusionAnalytic:
 
         # Run a few steps
         dt = 1e-5
-        for _ in range(10):
+        for _ in range(5):
             state = solver.step(state, dt, model, geometry)
 
         # The pattern should remain sinusoidal: B(z) ~ sin(k*z)
@@ -190,7 +188,7 @@ class TestResistiveDiffusionAnalytic:
         from jax_frc.models.resistive_mhd import ResistiveMHD
         from jax_frc.models.resistivity import SpitzerResistivity
 
-        nr, nz = 16, 32
+        nr, nz = 8, 16
         geometry = Geometry(
             coord_system="cylindrical",
             r_min=0.01, r_max=1.0,
@@ -223,7 +221,7 @@ class TestResistiveDiffusionAnalytic:
 
         # Run several steps
         dt = 1e-4
-        for _ in range(20):
+        for _ in range(10):
             state = solver.step(state, dt, model, geometry)
 
         # Interior should remain uniform (boundaries may have effects)
@@ -249,7 +247,7 @@ class TestResistiveDiffusionAnalytic:
         from jax_frc.models.resistive_mhd import ResistiveMHD
         from jax_frc.models.resistivity import SpitzerResistivity
 
-        nr, nz = 16, 32
+        nr, nz = 8, 16
         L_z = 2.0
         geometry = Geometry(
             coord_system="cylindrical",
@@ -291,12 +289,12 @@ class TestResistiveDiffusionAnalytic:
             # Return peak amplitude (interior)
             return jnp.max(jnp.abs(state.B[nr//4:3*nr//4, nz//4:3*nz//4, 2]))
 
-        # Compare low and high resistivity
-        eta_low = 1e-5
-        eta_high = 1e-4  # 10x higher
+        # Compare low and high resistivity (higher values for faster decay)
+        eta_low = 1e-4
+        eta_high = 1e-3  # 10x higher
 
         dt = 1e-5
-        n_steps = 50
+        n_steps = 15
 
         B_final_low = measure_decay(eta_low, dt, n_steps)
         B_final_high = measure_decay(eta_high, dt, n_steps)

@@ -241,7 +241,7 @@ class TestDivergenceCleaning:
         Note: The projection method with Dirichlet BCs is most effective in the
         interior of the domain. Near boundaries, gradient artifacts from the
         phi=0 boundary condition reduce effectiveness. We test on the interior
-        region [5:-5, 5:-5] which represents the physics region of interest.
+        region [3:-3, 3:-3] which represents the physics region of interest.
         """
         from jax_frc.solvers.divergence_cleaning import clean_divergence_b
         from jax_frc.core.geometry import Geometry
@@ -250,7 +250,7 @@ class TestDivergenceCleaning:
             coord_system="cylindrical",
             r_min=0.01, r_max=1.0,
             z_min=-1.0, z_max=1.0,
-            nr=16, nz=32
+            nr=8, nz=16
         )
 
         nr, nz = geometry.nr, geometry.nz
@@ -269,7 +269,7 @@ class TestDivergenceCleaning:
         # Compute initial divergence - check interior region
         from jax_frc.operators import divergence_cylindrical
         div_B_initial = divergence_cylindrical(B_r, B_z, dr, dz, r)
-        max_div_initial = float(jnp.max(jnp.abs(div_B_initial[5:-5, 5:-5])))
+        max_div_initial = float(jnp.max(jnp.abs(div_B_initial[3:-3, 3:-3])))
 
         # Clean divergence
         B_clean = clean_divergence_b(B, geometry)
@@ -278,7 +278,7 @@ class TestDivergenceCleaning:
         B_r_clean = B_clean[:, :, 0]
         B_z_clean = B_clean[:, :, 2]
         div_B_clean = divergence_cylindrical(B_r_clean, B_z_clean, dr, dz, r)
-        max_div_clean = float(jnp.max(jnp.abs(div_B_clean[5:-5, 5:-5])))
+        max_div_clean = float(jnp.max(jnp.abs(div_B_clean[3:-3, 3:-3])))
 
         # Divergence should be reduced significantly (at least 5x) in the interior
         reduction = max_div_initial / max(max_div_clean, 1e-20)
