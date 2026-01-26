@@ -1,101 +1,29 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project Overview
-
-JAX-based GPU-accelerated plasma physics simulation for Field-Reversed Configuration (FRC) research. Implements three physics models with increasing fidelity and computational cost.
+JAX-based plasma physics simulation for FRC research. GPU-accelerated, uses JAX's functional patterns throughout.
 
 ## Commands
 
 ```bash
-# Run all examples
-python examples.py
-
-# Run test suite
-python test_simulations.py
-
-# Run individual models
-python -c "from resistive_mhd import run_simulation; run_simulation(steps=100)"
-python -c "from extended_mhd import run_simulation; run_simulation(steps=100)"
-python -c "from hybrid_kinetic import run_simulation; run_simulation(steps=100)"
-
-# Run invariant tests
-py -m pytest tests/ -v
-
-# Run specific model tests
-py -m pytest tests/test_resistive_mhd.py -v
-py -m pytest tests/test_extended_mhd.py -v
-py -m pytest tests/test_hybrid_kinetic.py -v
-
-# Run with coverage (if pytest-cov installed)
-py -m pytest tests/ --cov=. --cov-report=term-missing
+py -m pytest tests/ -v              # Run all tests
+py -m pytest tests/ -k "not slow"   # Skip slow physics tests
 ```
 
-## Architecture
+## JAX Patterns
 
-### Three Physics Models (Increasing Fidelity)
+- **Loops**: Use `lax.scan`, not Python for-loops (breaks JIT tracing)
+- **Branches**: Use `lax.cond`, not if/else on traced values
+- **State**: Immutable tuples/dataclasses passed through `step()` functions
+- **JIT**: All compute functions `@jax.jit`; use `static_argnums` for config/shape args
 
-1. **Resistive MHD** (`resistive_mhd.py`) - Single-fluid, flux function formulation
-   - Solves for poloidal flux ψ(r,z) in 2D axisymmetric geometry
-   - Key: `laplace_star()` computes Δ* operator, `circuit_dynamics()` couples external coils
-   - Uses Chodura anomalous resistivity for rapid reconnection
+## Testing Patterns
 
-2. **Extended MHD** (`extended_mhd.py`) - Two-fluid with Hall effect
-   - Semi-implicit stepping for stiff Whistler waves
-   - Key: `extended_ohm_law()` includes Hall term (J×B)/(ne)
-   - Halo density model handles vacuum regions
+- **Fast tests**: Mock physics operators, test logic separately from numerics
+- **Slow tests**: Mark with `@pytest.mark.slow` if they run actual simulations
+- **Invariants**: Test conservation laws, symmetries, boundary conditions
 
-3. **Hybrid Kinetic** (`hybrid_kinetic.py`) - Kinetic ions + fluid electrons
-   - Delta-f PIC method reduces statistical noise
-   - Key: `boris_push()` for particles, `weight_evolution()` for delta-f
-   - Rigid rotor equilibrium distribution f₀
+## Gotchas
 
-### Shared Utilities
-
-`physics_utils.py` - Plasma parameter calculations (Alfvén speed, cyclotron frequency, beta, etc.) and numerical operators (gradient, divergence, curl, Laplacian)
-
-### Simulation Pattern
-
-All models use JAX's `lax.scan` for the main loop:
-- State is an immutable tuple passed through `step()` function
-- History accumulated via scan's output
-- All compute functions are `@jax.jit` decorated
-
-### Coordinate System
-
-Cylindrical (r, θ, z) with 2D axisymmetric assumption. Array layout: `(spatial_r, spatial_z, [component])`.
-
-### Physical Constants
-
-```python
-MU0 = 1.2566e-6   # Permeability of free space
-QE = 1.602e-19    # Elementary charge
-ME = 9.109e-31    # Electron mass
-MI = 1.673e-27    # Ion mass (proton)
-KB = 1.381e-23    # Boltzmann constant
-```
-
-### Solvers
-
-**IMEX Solver** (`jax_frc/solvers/imex.py`) - Implicit-Explicit time integration
-- Strang splitting: explicit(dt/2) → implicit(dt) → explicit(dt/2)
-- Implicit treatment of resistive diffusion for unconditional stability
-- Matrix-free conjugate gradient with Jacobi preconditioning
-- Config: `ImexConfig(theta, cg_tol, cg_max_iter, cfl_factor)`
-
-**Linear Solvers** (`jax_frc/solvers/linear/`)
-- `conjugate_gradient()` - Matrix-free CG using `lax.while_loop` for JIT compatibility
-- `jacobi_preconditioner()` - Diagonal preconditioning for acceleration
-
-### Typical Time Steps
-
-- Resistive MHD: dt ~ 1e-4
-- Extended MHD: dt ~ 1e-6 (Whistler constraint)
-- Hybrid Kinetic: dt ~ 1e-8 (cyclotron constraint)
-- IMEX (resistive diffusion): dt ~ 1e-4 (unconditionally stable for diffusion)
-
-
-## Testing
-
-Examples and validation tests are excluded from unittest.
+- **Static args**: Forgetting `static_argnums` causes recompilation or tracing errors
+- **Magic constants**: Use `jax_frc.constants`, not hardcoded numbers
+- **Slow tests**: Don't put physics in unit tests; use small grids or mocks
