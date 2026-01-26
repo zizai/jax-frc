@@ -282,3 +282,56 @@ class NeutralFluid:
         ) * 0.5 * (rho_L + rho_R)
 
         return (F_rho, F_mom_r, F_mom_z, F_E)
+
+    def apply_boundary_conditions(
+        self, state: NeutralState, geometry: "Geometry", bc_type: str = "reflecting"
+    ) -> NeutralState:
+        """Apply boundary conditions to neutral state.
+
+        Args:
+            state: Current neutral state
+            geometry: Grid geometry
+            bc_type: "reflecting" or "absorbing"
+
+        Returns:
+            State with boundary conditions applied
+        """
+        rho_n = state.rho_n
+        mom_n = state.mom_n
+        E_n = state.E_n
+
+        # Axis (r=0): symmetry
+        # v_r = 0, v_theta = 0, scalars have zero gradient
+        mom_n = mom_n.at[0, :, 0].set(0.0)  # v_r = 0
+        mom_n = mom_n.at[0, :, 1].set(0.0)  # v_theta = 0
+        rho_n = rho_n.at[0, :].set(rho_n[1, :])  # Neumann
+        E_n = E_n.at[0, :].set(E_n[1, :])
+
+        if bc_type == "reflecting":
+            # Outer radial wall: reflect v_r
+            mom_n = mom_n.at[-1, :, 0].set(-mom_n[-2, :, 0])
+            rho_n = rho_n.at[-1, :].set(rho_n[-2, :])
+            E_n = E_n.at[-1, :].set(E_n[-2, :])
+
+            # Axial walls: reflect v_z
+            mom_n = mom_n.at[:, 0, 2].set(-mom_n[:, 1, 2])
+            mom_n = mom_n.at[:, -1, 2].set(-mom_n[:, -2, 2])
+            rho_n = rho_n.at[:, 0].set(rho_n[:, 1])
+            rho_n = rho_n.at[:, -1].set(rho_n[:, -2])
+            E_n = E_n.at[:, 0].set(E_n[:, 1])
+            E_n = E_n.at[:, -1].set(E_n[:, -2])
+
+        elif bc_type == "absorbing":
+            # Outflow: zero gradient
+            rho_n = rho_n.at[-1, :].set(rho_n[-2, :])
+            mom_n = mom_n.at[-1, :, :].set(mom_n[-2, :, :])
+            E_n = E_n.at[-1, :].set(E_n[-2, :])
+
+            rho_n = rho_n.at[:, 0].set(rho_n[:, 1])
+            rho_n = rho_n.at[:, -1].set(rho_n[:, -2])
+            mom_n = mom_n.at[:, 0, :].set(mom_n[:, 1, :])
+            mom_n = mom_n.at[:, -1, :].set(mom_n[:, -2, :])
+            E_n = E_n.at[:, 0].set(E_n[:, 1])
+            E_n = E_n.at[:, -1].set(E_n[:, -2])
+
+        return NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)

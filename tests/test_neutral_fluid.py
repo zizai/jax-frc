@@ -209,3 +209,63 @@ class TestNeutralFluid:
 
         # Interior should be near zero (boundaries may have edge effects)
         assert jnp.max(jnp.abs(d_rho[2:-2, 2:-2])) < 1e-10
+
+
+class TestNeutralBoundaryConditions:
+    """Tests for neutral boundary conditions."""
+
+    def test_apply_boundary_conditions_exists(self):
+        """Method exists on NeutralFluid."""
+        from jax_frc.models.neutral_fluid import NeutralFluid
+        model = NeutralFluid()
+        assert hasattr(model, 'apply_boundary_conditions')
+
+    def test_reflecting_bc_reverses_normal_velocity(self):
+        """Reflecting BC reverses velocity normal to wall."""
+        from jax_frc.models.neutral_fluid import NeutralFluid, NeutralState
+        from jax_frc.core.geometry import Geometry
+
+        nr, nz = 16, 32
+        model = NeutralFluid()
+        geometry = Geometry(
+            coord_system="cylindrical",
+            nr=nr, nz=nz,
+            r_min=0.1, r_max=1.0,
+            z_min=0.0, z_max=2.0
+        )
+
+        rho_n = jnp.ones((nr, nz)) * 1e-6
+        # Velocity pointing outward at outer r boundary
+        mom_n = jnp.zeros((nr, nz, 3))
+        mom_n = mom_n.at[-1, :, 0].set(1e-6 * 100)  # v_r = 100 at outer wall
+        E_n = jnp.ones((nr, nz)) * 1e3
+        state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
+
+        state_bc = model.apply_boundary_conditions(state, geometry, bc_type="reflecting")
+
+        # v_r should be zero or reversed at outer boundary
+        assert jnp.all(state_bc.mom_n[-1, :, 0] <= 0)
+
+    def test_axis_symmetry(self):
+        """Axis (r=0) has correct symmetry."""
+        from jax_frc.models.neutral_fluid import NeutralFluid, NeutralState
+        from jax_frc.core.geometry import Geometry
+
+        nr, nz = 16, 32
+        model = NeutralFluid()
+        geometry = Geometry(
+            coord_system="cylindrical",
+            nr=nr, nz=nz,
+            r_min=0.1, r_max=1.0,
+            z_min=0.0, z_max=2.0
+        )
+
+        rho_n = jnp.ones((nr, nz)) * 1e-6
+        mom_n = jnp.ones((nr, nz, 3)) * 1e-6 * 100
+        E_n = jnp.ones((nr, nz)) * 1e3
+        state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
+
+        state_bc = model.apply_boundary_conditions(state, geometry)
+
+        # v_r = 0 at axis
+        assert jnp.allclose(state_bc.mom_n[0, :, 0], 0, atol=1e-20)
