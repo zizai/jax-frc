@@ -1,7 +1,7 @@
 """Resistive MHD physics model."""
 
-from dataclasses import dataclass
-from typing import Union
+from dataclasses import dataclass, field
+from typing import Union, Optional
 import jax.numpy as jnp
 from jax import jit
 
@@ -9,6 +9,7 @@ from jax_frc.models.base import PhysicsModel
 from jax_frc.models.resistivity import ResistivityModel, SpitzerResistivity, ChoduraResistivity
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
+from jax_frc.fields import CoilField
 
 MU0 = 1.2566e-6
 
@@ -17,9 +18,59 @@ class ResistiveMHD(PhysicsModel):
     """Single-fluid resistive MHD model.
 
     Solves: d(psi)/dt + v*grad(psi) = (eta/mu_0)*Delta*psi
+
+    Args:
+        resistivity: Model for plasma resistivity
+        external_field: Optional external magnetic field from coils
     """
 
     resistivity: ResistivityModel
+    external_field: Optional[CoilField] = None
+
+    def get_total_B(self, state: State, geometry: Geometry, t: float = 0.0) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Get total B field including external field contribution.
+
+        The total magnetic field is the sum of:
+        - B from psi (equilibrium field from plasma currents)
+        - External field from coils (if present)
+
+        In cylindrical coordinates, B from psi is:
+        - B_r = -(1/r) * dpsi/dz
+        - B_z = (1/r) * dpsi/dr
+
+        Args:
+            state: Current simulation state containing psi
+            geometry: Computational geometry
+            t: Time for time-dependent external fields
+
+        Returns:
+            (B_r, B_z): Radial and axial field components on the grid
+        """
+        psi = state.psi
+        dr, dz = geometry.dr, geometry.dz
+        r = geometry.r_grid
+
+        # Compute B from psi using central differences
+        # B_r = -(1/r) * dpsi/dz
+        dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
+        B_r_psi = -dpsi_dz / r
+
+        # B_z = (1/r) * dpsi/dr
+        dpsi_dr = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
+        B_z_psi = dpsi_dr / r
+
+        # Add external field if present
+        if self.external_field is not None:
+            r_grid = geometry.r_grid
+            z_grid = geometry.z_grid
+            B_r_ext, B_z_ext = self.external_field.B_field(r_grid, z_grid, t)
+            B_r = B_r_psi + B_r_ext
+            B_z = B_z_psi + B_z_ext
+        else:
+            B_r = B_r_psi
+            B_z = B_z_psi
+
+        return B_r, B_z
 
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
         """Compute d(psi)/dt from Grad-Shafranov evolution."""
