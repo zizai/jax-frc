@@ -83,3 +83,82 @@ def get_skin_depth(n: float, m: float = MI) -> float:
     """
     import jax.numpy as jnp
     return jnp.sqrt(m / (MU0 * n * QE**2))
+
+
+# =============================================================================
+# Nuclear Reaction Data
+# =============================================================================
+
+# Particle masses for fusion products
+M_DEUTERIUM: Final[float] = 2.014102 * 1.66053906660e-27  # [kg]
+M_TRITIUM: Final[float] = 3.016049 * 1.66053906660e-27    # [kg]
+M_HELIUM3: Final[float] = 3.016029 * 1.66053906660e-27    # [kg]
+M_HELIUM4: Final[float] = 4.002603 * 1.66053906660e-27    # [kg]
+M_PROTON: Final[float] = 1.007276 * 1.66053906660e-27     # [kg]
+M_NEUTRON: Final[float] = 1.008665 * 1.66053906660e-27    # [kg]
+
+# Fusion reaction energies [J]
+E_DT: Final[float] = 17.6e6 * QE      # D + T -> He4 + n
+E_DD_T: Final[float] = 4.03e6 * QE    # D + D -> T + p
+E_DD_HE3: Final[float] = 3.27e6 * QE  # D + D -> He3 + n
+E_DHE3: Final[float] = 18.3e6 * QE    # D + He3 -> He4 + p
+
+# Charged particle energy fractions
+F_CHARGED_DT: Final[float] = 3.5 / 17.6       # Alpha only
+F_CHARGED_DD_T: Final[float] = 1.0            # T + p both charged
+F_CHARGED_DD_HE3: Final[float] = 0.82 / 3.27  # He3 only
+F_CHARGED_DHE3: Final[float] = 1.0            # He4 + p both charged
+
+# Bosch-Hale parameterization coefficients (NF 1992)
+# <sigma*v> = C1 * theta * sqrt(xi / (m_rc2 * T^3)) * exp(-3*xi)
+# where theta = T / (1 - (T*(C2 + T*(C4 + T*C6))) / (1 + T*(C3 + T*(C5 + T*C7))))
+#       xi = (B_G^2 / (4*theta))^(1/3)
+# T in keV, <sigma*v> in cm^3/s
+
+BOSCH_HALE_DT: Final[dict] = {
+    "B_G": 34.3827,  # Gamow constant [keV^0.5]
+    "m_rc2": 1124656,  # Reduced mass * c^2 [keV]
+    "C1": 1.17302e-9,
+    "C2": 1.51361e-2,
+    "C3": 7.51886e-2,
+    "C4": 4.60643e-3,
+    "C5": 1.35000e-2,
+    "C6": -1.06750e-4,
+    "C7": 1.36600e-5,
+}
+
+BOSCH_HALE_DD_T: Final[dict] = {
+    "B_G": 31.3970,
+    "m_rc2": 937814,
+    "C1": 5.65718e-12,
+    "C2": 3.41267e-3,
+    "C3": 1.99167e-3,
+    "C4": 0.0,
+    "C5": 1.05060e-5,
+    "C6": 0.0,
+    "C7": 0.0,
+}
+
+BOSCH_HALE_DD_HE3: Final[dict] = {
+    "B_G": 31.3970,
+    "m_rc2": 937814,
+    "C1": 5.43360e-12,
+    "C2": 5.85778e-3,
+    "C3": 7.68222e-3,
+    "C4": 0.0,
+    "C5": -2.96400e-6,
+    "C6": 0.0,
+    "C7": 0.0,
+}
+
+BOSCH_HALE_DHE3: Final[dict] = {
+    "B_G": 68.7508,
+    "m_rc2": 1124572,
+    "C1": 5.51036e-10,
+    "C2": 6.41918e-3,
+    "C3": -2.02896e-3,
+    "C4": -1.91080e-5,
+    "C5": 1.35776e-4,
+    "C6": 0.0,
+    "C7": 0.0,
+}
