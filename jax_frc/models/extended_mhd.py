@@ -11,6 +11,7 @@ from jax_frc.models.energy import ThermalTransport
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
 from jax_frc.operators import divergence_cylindrical
+from jax_frc.fields import CoilField
 
 MU0 = 1.2566e-6
 QE = 1.602e-19
@@ -66,6 +67,39 @@ class ExtendedMHD(PhysicsModel):
     halo_model: HaloDensityModel
     thermal: Optional[ThermalTransport] = None  # None = no temperature evolution
     temperature_bc: Optional[TemperatureBoundaryCondition] = None  # None = default Neumann
+    external_field: Optional[CoilField] = None  # External field from coils
+
+    def get_total_B(self, state: State, geometry: Geometry, t: float = 0.0) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Get total B field including external field contribution.
+
+        The total magnetic field is the sum of:
+        - B from state (plasma B field)
+        - External field from coils (if present)
+
+        Args:
+            state: Current simulation state containing B field
+            geometry: Computational geometry
+            t: Time for time-dependent external fields
+
+        Returns:
+            (B_r, B_z): Radial and axial field components on the grid
+        """
+        # Extract B components from state
+        B_r_plasma = state.B[:, :, 0]
+        B_z_plasma = state.B[:, :, 2]
+
+        # Add external field if present
+        if self.external_field is not None:
+            r_grid = geometry.r_grid
+            z_grid = geometry.z_grid
+            B_r_ext, B_z_ext = self.external_field.B_field(r_grid, z_grid, t)
+            B_r = B_r_plasma + B_r_ext
+            B_z = B_z_plasma + B_z_ext
+        else:
+            B_r = B_r_plasma
+            B_z = B_z_plasma
+
+        return B_r, B_z
 
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
         """Compute dB/dt and optionally dT/dt from extended MHD equations."""

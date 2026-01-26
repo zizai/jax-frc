@@ -118,3 +118,147 @@ class TestExternalFieldIntegration:
         # B at t=1 should be ~2x B at t=0 (since current doubles)
         ratio = jnp.max(jnp.abs(B_z_t1)) / jnp.max(jnp.abs(B_z_t0))
         assert jnp.abs(ratio - 2.0) < 0.1  # Allow some tolerance
+
+
+class TestExtendedMHDExternalField:
+    """Tests for external field integration with ExtendedMHD model."""
+
+    @pytest.fixture
+    def geometry(self):
+        return Geometry(
+            coord_system="cylindrical",
+            nr=20, nz=40,
+            r_min=0.01, r_max=0.5,
+            z_min=-1.0, z_max=1.0
+        )
+
+    @pytest.fixture
+    def solenoid(self):
+        return Solenoid(length=2.0, radius=0.6, n_turns=100, current=1000.0)
+
+    @pytest.fixture
+    def extended_mhd(self):
+        from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+        from jax_frc.models.resistivity import SpitzerResistivity
+        return ExtendedMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-6),
+            halo_model=HaloDensityModel()
+        )
+
+    def test_model_accepts_external_field(self, geometry, solenoid, extended_mhd):
+        """ExtendedMHD can be constructed with external_field parameter."""
+        from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+        from jax_frc.models.resistivity import SpitzerResistivity
+        model = ExtendedMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-6),
+            halo_model=HaloDensityModel(),
+            external_field=solenoid
+        )
+        assert model.external_field is not None
+
+    def test_external_field_adds_to_total(self, geometry, solenoid):
+        """External B adds to plasma B in total field."""
+        from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+        from jax_frc.models.resistivity import SpitzerResistivity
+        model = ExtendedMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-6),
+            halo_model=HaloDensityModel(),
+            external_field=solenoid
+        )
+        state = State.zeros(nr=20, nz=40)
+
+        # Get total B field
+        B_r, B_z = model.get_total_B(state, geometry, t=0.0)
+
+        # Should have contribution from external field
+        center_r, center_z = 10, 20
+        assert jnp.abs(B_z[center_r, center_z]) > 1e-6
+
+    def test_no_external_field_default(self, geometry, extended_mhd):
+        """Without external_field, model uses only plasma B."""
+        assert extended_mhd.external_field is None
+
+    def test_total_B_without_external_field(self, geometry, extended_mhd):
+        """get_total_B works when external_field is None."""
+        state = State.zeros(nr=20, nz=40)
+
+        # Should not raise an error
+        B_r, B_z = extended_mhd.get_total_B(state, geometry, t=0.0)
+
+        # With zero B in state, B should be zero
+        assert B_r.shape == (20, 40)
+        assert B_z.shape == (20, 40)
+
+    def test_total_B_with_nonzero_plasma_B(self, geometry, solenoid):
+        """get_total_B includes contribution from plasma B field."""
+        from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+        from jax_frc.models.resistivity import SpitzerResistivity
+        model = ExtendedMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-6),
+            halo_model=HaloDensityModel(),
+            external_field=solenoid
+        )
+
+        # Create state with non-zero B field
+        state = State.zeros(nr=20, nz=40)
+        B_plasma = jnp.ones((20, 40, 3)) * 0.1  # 0.1 T uniform
+        state = state.replace(B=B_plasma)
+
+        # Get total B field
+        B_r, B_z = model.get_total_B(state, geometry, t=0.0)
+
+        # B should be non-zero from both plasma and external field
+        assert jnp.max(jnp.abs(B_r)) > 0
+        assert jnp.max(jnp.abs(B_z)) > 0
+
+    def test_external_field_contributes_to_total(self, geometry, solenoid):
+        """Verify external field actually adds to the total."""
+        from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+        from jax_frc.models.resistivity import SpitzerResistivity
+        model_with = ExtendedMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-6),
+            halo_model=HaloDensityModel(),
+            external_field=solenoid
+        )
+        model_without = ExtendedMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-6),
+            halo_model=HaloDensityModel(),
+            external_field=None
+        )
+
+        state = State.zeros(nr=20, nz=40)
+
+        B_r_with, B_z_with = model_with.get_total_B(state, geometry, t=0.0)
+        B_r_without, B_z_without = model_without.get_total_B(state, geometry, t=0.0)
+
+        # With external field should be different from without
+        diff_z = jnp.max(jnp.abs(B_z_with - B_z_without))
+        assert diff_z > 1e-6
+
+    def test_time_dependent_external_field(self, geometry):
+        """get_total_B passes time to external field."""
+        from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+        from jax_frc.models.resistivity import SpitzerResistivity
+
+        # Create solenoid with time-dependent current
+        def current_func(t):
+            return 1000.0 * (1.0 + t)
+
+        solenoid = Solenoid(
+            length=2.0, radius=0.6, n_turns=100,
+            current=current_func
+        )
+        model = ExtendedMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-6),
+            halo_model=HaloDensityModel(),
+            external_field=solenoid
+        )
+        state = State.zeros(nr=20, nz=40)
+
+        # Get B at t=0 and t=1
+        B_r_t0, B_z_t0 = model.get_total_B(state, geometry, t=0.0)
+        B_r_t1, B_z_t1 = model.get_total_B(state, geometry, t=1.0)
+
+        # B at t=1 should be ~2x B at t=0 (since current doubles)
+        ratio = jnp.max(jnp.abs(B_z_t1)) / jnp.max(jnp.abs(B_z_t0))
+        assert jnp.abs(ratio - 2.0) < 0.1
