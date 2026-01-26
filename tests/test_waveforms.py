@@ -120,3 +120,37 @@ class TestWaveformFromConfig:
         waveform = waveform_from_config(config)
         assert waveform(0.0) == 500.0
         assert waveform(1.0) == 500.0
+
+    def test_sinusoid_from_config(self):
+        """Can create sinusoid from config."""
+        from jax_frc.circuits.waveforms import waveform_from_config
+
+        config = {"type": "sinusoid", "amplitude": 100.0, "frequency": 1e3}
+        waveform = waveform_from_config(config)
+        t_quarter = 1.0 / (4 * 1e3)
+        assert jnp.isclose(waveform(t_quarter), 100.0, rtol=1e-5)
+
+    def test_crowbar_from_config(self):
+        """Can create crowbar from config."""
+        from jax_frc.circuits.waveforms import waveform_from_config
+
+        config = {"type": "crowbar", "V_initial": 1000.0, "t_crowbar": 1e-4}
+        waveform = waveform_from_config(config)
+        assert waveform(5e-5) == 1000.0
+        assert waveform(1.5e-4) == 0.0
+
+    def test_pulse_from_config(self):
+        """Can create pulse from config."""
+        from jax_frc.circuits.waveforms import waveform_from_config
+
+        config = {"type": "pulse", "amplitude": 500.0, "t_start": 1e-5, "t_end": 5e-5}
+        waveform = waveform_from_config(config)
+        assert waveform(3e-5) == 500.0
+
+    def test_unknown_type_raises(self):
+        """Unknown waveform type raises ValueError."""
+        from jax_frc.circuits.waveforms import waveform_from_config
+
+        config = {"type": "unknown"}
+        with pytest.raises(ValueError, match="Unknown waveform type"):
+            waveform_from_config(config)

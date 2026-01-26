@@ -96,7 +96,8 @@ def make_constant(value: float) -> Callable[[float], float]:
     """
 
     def constant(t: float) -> float:
-        return value
+        # Return as JAX array for consistency with other waveforms
+        return value + 0.0 * t  # Ensures output is same type as input
 
     return constant
 
