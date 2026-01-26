@@ -10,9 +10,16 @@ Provides common plasma parameter calculations including:
 
 import jax
 import jax.numpy as jnp
-from jax import jit, vmap
+from jax import jit
 
 from jax_frc.constants import MU0, QE, ME, MI, KB, EPSILON0
+
+# Spitzer resistivity coefficient in SI units (Ohm*m*eV^(3/2))
+# From classical transport theory: eta = SPITZER_COEFFICIENT * Z * ln(Lambda) / T_e^(3/2)
+SPITZER_COEFFICIENT = 5.2e-5
+
+# Small epsilon to avoid division by zero in numerical operations
+NUMERICAL_EPSILON = 1e-10
 
 @jit
 def compute_alfven_speed(B, n, m_i=MI):
@@ -66,10 +73,10 @@ def compute_beta(n, T, B, mu0=MU0):
 @jit
 def compute_spitzer_resistivity(T_e, Z=1.0):
     """
-    Computes Spitzer resistivity: eta = 5.2e-5 * Z * ln(Lambda) / T_e^(3/2)
+    Computes Spitzer resistivity: eta = SPITZER_COEFFICIENT * Z * ln(Lambda) / T_e^(3/2)
     Simplified version without Coulomb logarithm.
     """
-    return 5.2e-5 * Z / (T_e ** 1.5)
+    return SPITZER_COEFFICIENT * Z / (T_e ** 1.5)
 
 @jit
 def compute_magnetic_pressure(B, mu0=MU0):
@@ -93,11 +100,11 @@ def compute_reynolds_number(v, L, eta, mu0=MU0):
     return v * L / eta
 
 @jit
-def compute_lundquist_number(B, L, eta, mu0=MU0):
+def compute_lundquist_number(B, L, n, eta, mu0=MU0):
     """
     Computes Lundquist number: S = L * v_A / eta
     """
-    v_A = compute_alfven_speed(B, 1e19)
+    v_A = compute_alfven_speed(B, n)
     return L * v_A / eta
 
 @jit
@@ -149,7 +156,7 @@ def normalize_field(field, field_max):
     """
     Normalizes a field to [0, 1] range.
     """
-    return field / (field_max + 1e-10)
+    return field / (field_max + NUMERICAL_EPSILON)
 
 @jit
 def compute_gradient(f, dx, dy, dz=None):
