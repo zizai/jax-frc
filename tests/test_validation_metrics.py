@@ -74,3 +74,45 @@ def test_shock_position_error_computes_relative():
 
     error = shock_position_error(rho, z, expected=0.3)
     assert abs(error - 0.0667) < 0.01  # (0.32 - 0.3) / 0.3 ≈ 0.067
+
+
+def test_reconnection_rate_from_flux():
+    """reconnection_rate computes dpsi/dt."""
+    from jax_frc.validation.metrics import reconnection_rate
+    import jax.numpy as jnp
+
+    # Linear increase in reconnected flux
+    times = jnp.array([0.0, 1.0, 2.0, 3.0])
+    psi = jnp.array([0.0, 0.1, 0.2, 0.3])
+
+    rate = reconnection_rate(psi, times)
+    assert abs(rate - 0.1) < 0.01
+
+
+def test_peak_reconnection_rate():
+    """peak_reconnection_rate finds maximum rate."""
+    from jax_frc.validation.metrics import peak_reconnection_rate
+    import jax.numpy as jnp
+
+    times = jnp.array([0.0, 1.0, 2.0, 3.0, 4.0])
+    psi = jnp.array([0.0, 0.05, 0.2, 0.25, 0.26])  # Peak rate between t=1 and t=2
+
+    peak, t_peak = peak_reconnection_rate(psi, times)
+    assert abs(peak - 0.15) < 0.02
+    assert abs(t_peak - 1.5) < 0.5
+
+
+def test_current_layer_thickness():
+    """current_layer_thickness computes FWHM."""
+    from jax_frc.validation.metrics import current_layer_thickness
+    import jax.numpy as jnp
+
+    # Gaussian current profile
+    z = jnp.linspace(-2, 2, 100)
+    sigma = 0.5
+    J = jnp.exp(-z**2 / (2 * sigma**2))
+
+    # FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
+    fwhm = current_layer_thickness(J, z)
+    expected_fwhm = 2.355 * sigma
+    assert abs(fwhm - expected_fwhm) < 0.1
