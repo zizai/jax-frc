@@ -17,6 +17,7 @@ from jax_frc.circuits.external import (
     ExternalCircuits,
 )
 from jax_frc.circuits.coupling import FluxCoupling
+from jax_frc.circuits.system import CircuitSystem
 
 __all__ = [
     "CircuitState",
@@ -33,4 +34,5 @@ __all__ = [
     "ExternalCircuit",
     "ExternalCircuits",
     "FluxCoupling",
+    "CircuitSystem",
 ]
