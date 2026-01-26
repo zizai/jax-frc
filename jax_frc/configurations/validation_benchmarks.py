@@ -6,6 +6,7 @@ from jax_frc.core.geometry import Geometry
 from jax_frc.core.state import State
 from jax_frc.models.resistive_mhd import ResistiveMHD
 from jax_frc.models.resistivity import SpitzerResistivity
+from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
 from .base import AbstractConfiguration
 
 
@@ -176,3 +177,98 @@ class CylindricalVortexConfiguration(AbstractConfiguration):
 
     def default_runtime(self) -> dict:
         return {"t_end": 0.5, "dt": 1e-4}
+
+
+@dataclass
+class CylindricalGEMConfiguration(AbstractConfiguration):
+    """GEM reconnection challenge adapted to cylindrical coordinates.
+
+    Harris sheet current layer with Hall MHD.
+    Tests Hall reconnection physics, quadrupole signature.
+    """
+
+    name: str = "cylindrical_gem"
+    description: str = "GEM magnetic reconnection in cylindrical coordinates"
+
+    # Grid parameters
+    nr: int = 256
+    nz: int = 512
+    r_min: float = 0.01
+    r_max: float = 2.0
+    z_min: float = -jnp.pi
+    z_max: float = jnp.pi
+
+    # Harris sheet parameters
+    B0: float = 1.0  # Asymptotic field
+    lambda_: float = 0.5  # Current sheet half-width (in d_i units)
+    n0: float = 1.0  # Peak density
+    n_b: float = 0.2  # Background density (fraction of n0)
+
+    # Perturbation
+    psi1: float = 0.1  # Perturbation amplitude (fraction of B0*lambda)
+
+    def build_geometry(self) -> Geometry:
+        return Geometry(
+            coord_system="cylindrical",
+            r_min=self.r_min, r_max=self.r_max,
+            z_min=float(self.z_min), z_max=float(self.z_max),
+            nr=self.nr, nz=self.nz
+        )
+
+    def build_initial_state(self, geometry: Geometry) -> State:
+        r = geometry.r_grid
+        z = geometry.z_grid
+
+        # Harris sheet: Br = B0 * tanh(z/lambda)
+        Br = self.B0 * jnp.tanh(z / self.lambda_)
+        B = jnp.zeros((geometry.nr, geometry.nz, 3))
+        B = B.at[:, :, 0].set(Br)
+
+        # Density: n = n0 * sech^2(z/lambda) + n_b
+        sech_sq = 1.0 / jnp.cosh(z / self.lambda_)**2
+        n = self.n0 * sech_sq + self.n_b * self.n0
+
+        # Pressure balance: p + B^2/(2*mu0) = const
+        # At z=0: p_max, B=0
+        # At z->inf: p_min, B=B0
+        p_max = self.B0**2 / 2  # Total pressure (normalized)
+        p = p_max - B[:, :, 0]**2 / 2
+        p = jnp.maximum(p, 0.01)  # Floor to avoid negative pressure
+
+        T = p / n
+
+        # Add perturbation to seed reconnection
+        Lr = self.r_max - self.r_min
+        psi_pert = self.psi1 * self.B0 * self.lambda_ * (
+            jnp.cos(2 * jnp.pi * (r - self.r_min) / Lr) *
+            jnp.cos(z / self.lambda_)
+        )
+
+        return State(
+            psi=psi_pert,
+            n=n,
+            p=p,
+            T=T,
+            B=B,
+            E=jnp.zeros((geometry.nr, geometry.nz, 3)),
+            v=jnp.zeros((geometry.nr, geometry.nz, 3)),
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+    def build_model(self) -> ExtendedMHD:
+        return ExtendedMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-4),
+            halo_model=HaloDensityModel(
+                halo_density=self.n_b * self.n0,
+                core_density=self.n0
+            ),
+            # Hall term enabled by default in ExtendedMHD
+        )
+
+    def build_boundary_conditions(self) -> list:
+        return []
+
+    def default_runtime(self) -> dict:
+        return {"t_end": 25.0, "dt": 0.01}  # In Alfven time units
