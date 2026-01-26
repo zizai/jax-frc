@@ -133,17 +133,34 @@ class TestMirrorCoil:
         coil1 = MirrorCoil(z_position=-1.0, radius=0.5, current=1000.0)
         coil2 = MirrorCoil(z_position=1.0, radius=0.5, current=1000.0)
 
-        r = jnp.array([0.0])
         z_points = jnp.linspace(-1.5, 1.5, 31)
+        # Use vectorized operations - MirrorCoil.B_field accepts arrays
+        r_points = jnp.zeros_like(z_points)
 
-        B_z_total = jnp.zeros_like(z_points)
-        for i, z_val in enumerate(z_points):
-            z_arr = jnp.array([z_val])
-            _, B_z1 = coil1.B_field(r, z_arr, t=0.0)
-            _, B_z2 = coil2.B_field(r, z_arr, t=0.0)
-            B_z_total = B_z_total.at[i].set(B_z1[0] + B_z2[0])
+        _, B_z1 = coil1.B_field(r_points, z_points, t=0.0)
+        _, B_z2 = coil2.B_field(r_points, z_points, t=0.0)
+        B_z_total = B_z1 + B_z2
 
         # Field at center should be local minimum
         center_idx = 15
         assert B_z_total[center_idx] < B_z_total[center_idx - 5]
         assert B_z_total[center_idx] < B_z_total[center_idx + 5]
+
+    def test_vector_potential(self):
+        """A_phi returns reasonable values and is zero on axis."""
+        coil = MirrorCoil(z_position=0.0, radius=0.5, current=1000.0)
+
+        # On axis, A_phi should be zero by symmetry
+        r_axis = jnp.array([0.0, 0.0, 0.0])
+        z_axis = jnp.array([-0.5, 0.0, 0.5])
+        A_axis = coil.A_phi(r_axis, z_axis, t=0.0)
+        assert jnp.allclose(A_axis, 0.0, atol=1e-10)
+
+        # Off axis, A_phi should be non-zero
+        r_off = jnp.array([0.1, 0.2, 0.3])
+        z_off = jnp.array([0.0, 0.0, 0.0])
+        A_off = coil.A_phi(r_off, z_off, t=0.0)
+        assert jnp.all(A_off != 0.0)
+
+        # A_phi should be positive for positive current (standard convention)
+        assert jnp.all(A_off > 0.0)
