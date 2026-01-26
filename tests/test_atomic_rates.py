@@ -75,3 +75,42 @@ class TestIonizationRate:
         S1 = ionization_rate(Te, ne, rho_n)
         S2 = ionization_rate(Te, 2*ne, rho_n)
         assert jnp.isclose(S2, 2*S1, rtol=1e-5)
+
+
+class TestRecombinationRate:
+    """Tests for radiative recombination."""
+
+    def test_recombination_rate_coefficient_exists(self):
+        """Function is importable."""
+        from jax_frc.models.atomic_rates import recombination_rate_coefficient
+        assert callable(recombination_rate_coefficient)
+
+    def test_recombination_rate_exists(self):
+        """Function is importable."""
+        from jax_frc.models.atomic_rates import recombination_rate
+        assert callable(recombination_rate)
+
+    def test_recombination_decreases_with_Te(self):
+        """Recombination rate decreases as Te increases."""
+        from jax_frc.models.atomic_rates import recombination_rate_coefficient
+        Te_low = 1.0 * QE
+        Te_high = 100.0 * QE
+        assert recombination_rate_coefficient(Te_low) > recombination_rate_coefficient(Te_high)
+
+    def test_recombination_dominates_at_low_Te(self):
+        """Recombination > ionization below ~1 eV."""
+        from jax_frc.models.atomic_rates import (
+            ionization_rate_coefficient,
+            recombination_rate_coefficient,
+        )
+        Te_low = 1.0 * QE  # 1 eV
+        assert recombination_rate_coefficient(Te_low) > ionization_rate_coefficient(Te_low)
+
+    def test_ionization_dominates_at_high_Te(self):
+        """Ionization > recombination above ~50 eV."""
+        from jax_frc.models.atomic_rates import (
+            ionization_rate_coefficient,
+            recombination_rate_coefficient,
+        )
+        Te_high = 100.0 * QE  # 100 eV
+        assert ionization_rate_coefficient(Te_high) > recombination_rate_coefficient(Te_high)

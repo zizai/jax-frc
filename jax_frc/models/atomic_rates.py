@@ -67,3 +67,43 @@ def ionization_rate(Te: Array, ne: Array, rho_n: Array) -> Array:
     nn = rho_n / MI  # Neutral number density [m⁻³]
     sigma_v = ionization_rate_coefficient(Te)
     return MI * ne * nn * sigma_v
+
+
+# =============================================================================
+# Recombination (radiative: H+ + e -> H + hν)
+# =============================================================================
+
+@jit
+def recombination_rate_coefficient(Te: Array) -> Array:
+    """Radiative recombination <σv>_rec(Te) [m³/s].
+
+    Approximate fit: <σv>_rec ≈ 2.6e-19 * (13.6 eV / Te)^0.7
+    Valid for Te > 0.1 eV.
+
+    Args:
+        Te: Electron temperature [J]
+
+    Returns:
+        Rate coefficient [m³/s]
+    """
+    Te_eV = Te / QE
+    Te_eV_safe = jnp.maximum(Te_eV, 0.1)
+    return 2.6e-19 * (13.6 / Te_eV_safe)**0.7
+
+
+@jit
+def recombination_rate(Te: Array, ne: Array, ni: Array) -> Array:
+    """Mass recombination rate S_rec [kg/m³/s].
+
+    S_rec = m_i * ne * ni * <σv>_rec(Te)
+
+    Args:
+        Te: Electron temperature [J]
+        ne: Electron density [m⁻³]
+        ni: Ion density [m⁻³]
+
+    Returns:
+        Mass recombination rate [kg/m³/s]
+    """
+    sigma_v = recombination_rate_coefficient(Te)
+    return MI * ne * ni * sigma_v
