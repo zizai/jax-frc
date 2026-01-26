@@ -78,7 +78,7 @@ def external_circuits():
         driver=driver,
     )
 
-    return ExternalCircuits(circuits=[circuit1, circuit2])
+    return ExternalCircuits(circuits=(circuit1, circuit2))
 
 
 class TestFluxCouplingCreation:
@@ -288,7 +288,7 @@ class TestEmptyCircuits:
         from jax_frc.circuits.coupling import FluxCoupling
 
         coupling = FluxCoupling()
-        empty_external = ExternalCircuits(circuits=[])
+        empty_external = ExternalCircuits(circuits=())
 
         B = jnp.zeros((geometry.nr, geometry.nz, 3))
         B = B.at[:, :, 2].set(1.0)
@@ -306,7 +306,7 @@ class TestEmptyCircuits:
         from jax_frc.circuits.coupling import FluxCoupling
 
         coupling = FluxCoupling()
-        empty_external = ExternalCircuits(circuits=[])
+        empty_external = ExternalCircuits(circuits=())
 
         I_external = jnp.array([])
 

@@ -134,7 +134,7 @@ class TestExternalCircuits:
             driver=CircuitDriver(mode="voltage", waveform=make_constant(0.0)),
         )
 
-        external = ExternalCircuits(circuits=[circuit1, circuit2])
+        external = ExternalCircuits(circuits=(circuit1, circuit2))
         assert external.n_circuits == 2
 
     def test_compute_b_field(self, geometry):
@@ -158,7 +158,7 @@ class TestExternalCircuits:
             ),
             driver=CircuitDriver(mode="voltage", waveform=make_constant(0.0)),
         )
-        external = ExternalCircuits(circuits=[circuit])
+        external = ExternalCircuits(circuits=(circuit,))
 
         I = jnp.array([1000.0])  # 1000 A
         B = external.compute_b_field(I, geometry)

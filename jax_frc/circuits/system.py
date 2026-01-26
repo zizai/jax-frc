@@ -115,6 +115,7 @@ class CircuitSystem:
         Returns:
             V_source: Voltage for each external circuit [V]
         """
+        # n_circuits is static (set at construction), so Python if is safe here
         if self.external.n_circuits == 0:
             return jnp.array([])
 
@@ -201,32 +202,30 @@ class CircuitSystem:
         )
 
     def _estimate_min_timescale(self) -> float:
-        """Estimate minimum L/R timescale across all circuits.
+        """Estimate minimum circuit timescale (L/R) for subcycling.
+
+        n_coils and n_circuits are static (set at construction), so Python
+        conditionals are safe here. The values are known at trace time.
 
         Returns:
             Minimum tau = L/R [s], or inf if no circuits
         """
-        tau_values = []
+        tau_pickup = jnp.inf
+        tau_external = jnp.inf
 
-        # Pickup coils: effective R = R + load_resistance
+        # n_coils is static (set at construction), so Python if is safe here
         if self.pickup.n_coils > 0:
             R_eff = self.pickup.params.R + self.pickup.load_resistance
-            # Avoid division by zero
             R_eff_safe = jnp.maximum(R_eff, 1e-10)
-            tau_pickup = self.pickup.params.L / R_eff_safe
-            tau_values.append(jnp.min(tau_pickup))
+            tau_pickup = jnp.min(self.pickup.params.L / R_eff_safe)
 
-        # External circuits
+        # n_circuits is static (set at construction), so Python if is safe here
         if self.external.n_circuits > 0:
             params = self.external.get_combined_params()
             R_safe = jnp.maximum(params.R, 1e-10)
-            tau_external = params.L / R_safe
-            tau_values.append(jnp.min(tau_external))
+            tau_external = jnp.min(params.L / R_safe)
 
-        if tau_values:
-            return jnp.min(jnp.array(tau_values))
-        else:
-            return jnp.inf
+        return jnp.minimum(tau_pickup, tau_external)
 
     def _ode_step_pickup(
         self,
@@ -254,6 +253,7 @@ class CircuitSystem:
         Returns:
             (new_I, new_Q): Updated currents and charges
         """
+        # n_coils is static (set at construction), so Python if is safe here
         if self.pickup.n_coils == 0:
             return I, Q
 
@@ -329,6 +329,7 @@ class CircuitSystem:
         Returns:
             (new_I, new_Q): Updated currents and charges
         """
+        # n_circuits is static (set at construction), so Python if is safe here
         if self.external.n_circuits == 0:
             return I, Q
 
@@ -375,12 +376,14 @@ class CircuitSystem:
         P_extracted = 0.0
         P_dissipated = 0.0
 
+        # n_coils is static (set at construction), so Python if is safe here
         # Pickup coils
         if self.pickup.n_coils > 0:
             P_load, P_diss = self.pickup.compute_power(state.I_pickup)
             P_extracted = P_extracted + jnp.sum(P_load)
             P_dissipated = P_dissipated + jnp.sum(P_diss)
 
+        # n_circuits is static (set at construction), so Python if is safe here
         # External circuits
         if self.external.n_circuits > 0:
             params = self.external.get_combined_params()

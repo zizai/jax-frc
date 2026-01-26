@@ -81,7 +81,7 @@ class FluxCoupling:
         dr = geometry.dr
 
         # Extract coil parameters
-        z_centers, radii, lengths, n_turns = external._coil_params
+        z_centers, radii, lengths, n_turns = external._get_coil_params()
 
         def flux_for_coil(z_center: float, radius: float, n_turn: int) -> float:
             """Compute flux for a single external coil."""

@@ -51,7 +51,7 @@ def simple_pickup():
 @pytest.fixture
 def simple_external():
     """Empty external circuits for simple tests."""
-    return ExternalCircuits(circuits=[])
+    return ExternalCircuits(circuits=())
 
 
 @pytest.fixture
@@ -151,7 +151,7 @@ class TestRLCircuitODE:
             params=params,
             load_resistance=jnp.array([0.0]),  # No load for pure RL
         )
-        external = ExternalCircuits(circuits=[])
+        external = ExternalCircuits(circuits=())
         flux_coupling = FluxCoupling()
 
         system = CircuitSystem(
@@ -200,7 +200,7 @@ class TestRLCircuitODE:
             params=params,
             load_resistance=jnp.array([0.5]),  # R_eff = 0.5 + 0.5 = 1.0
         )
-        external = ExternalCircuits(circuits=[])
+        external = ExternalCircuits(circuits=())
         flux_coupling = FluxCoupling()
 
         system = CircuitSystem(
@@ -250,7 +250,7 @@ class TestInducedEMF:
             params=params,
             load_resistance=jnp.array([0.0]),
         )
-        external = ExternalCircuits(circuits=[])
+        external = ExternalCircuits(circuits=())
         flux_coupling = FluxCoupling()
 
         system = CircuitSystem(
@@ -309,7 +309,7 @@ class TestExternalCircuitDriven:
             params=circuit_params,
             driver=driver,
         )
-        external = ExternalCircuits(circuits=[ext_circuit])
+        external = ExternalCircuits(circuits=(ext_circuit,))
 
         # Empty pickup array
         pickup_params = CircuitParams(
@@ -368,7 +368,7 @@ class TestRLCCircuitODE:
             params=params,
             load_resistance=jnp.array([0.0]),
         )
-        external = ExternalCircuits(circuits=[])
+        external = ExternalCircuits(circuits=())
         flux_coupling = FluxCoupling()
 
         system = CircuitSystem(
@@ -423,7 +423,7 @@ class TestSubcycling:
             params=params,
             load_resistance=jnp.array([0.0]),
         )
-        external = ExternalCircuits(circuits=[])
+        external = ExternalCircuits(circuits=())
         flux_coupling = FluxCoupling()
 
         system = CircuitSystem(
@@ -473,7 +473,7 @@ class TestPowerTracking:
             params=params,
             load_resistance=jnp.array([1.0]),
         )
-        external = ExternalCircuits(circuits=[])
+        external = ExternalCircuits(circuits=())
         flux_coupling = FluxCoupling()
 
         system = CircuitSystem(
@@ -518,7 +518,7 @@ class TestPowerTracking:
             params=params,
             load_resistance=jnp.array([0.0]),
         )
-        external = ExternalCircuits(circuits=[])
+        external = ExternalCircuits(circuits=())
         flux_coupling = FluxCoupling()
 
         system = CircuitSystem(
@@ -600,6 +600,29 @@ class TestJITCompatibility:
         new_states = vmapped_step(batch_states)
 
         assert new_states.I_pickup.shape == (3, 1)
+
+    def test_step_in_lax_scan(self, simple_pickup, simple_external, flux_coupling, geometry):
+        """step() works inside lax.scan for time evolution."""
+        from jax import lax
+        from jax_frc.circuits.system import CircuitSystem
+
+        system = CircuitSystem(
+            pickup=simple_pickup,
+            external=simple_external,
+            flux_coupling=flux_coupling,
+        )
+        initial_state = CircuitState.zeros(n_pickup=1, n_external=0)
+        initial_state = initial_state.replace(I_pickup=jnp.array([1.0]))
+        B_plasma = jnp.zeros((geometry.nr, geometry.nz, 3))
+        dt = 1e-6
+
+        def body(state, _):
+            return system.step(state, B_plasma, geometry, t=0.0, dt=dt), None
+
+        final_state, _ = lax.scan(body, initial_state, jnp.arange(100))
+
+        # Current should have decayed
+        assert final_state.I_pickup[0] < initial_state.I_pickup[0]
 
 
 class TestFluxUpdate:

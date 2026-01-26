@@ -1,7 +1,6 @@
 """External circuits with coils and drivers."""
 
 from dataclasses import dataclass
-from functools import cached_property
 from typing import Callable, Optional
 
 import jax.numpy as jnp
@@ -112,23 +111,22 @@ class ExternalCircuit:
     driver: CircuitDriver
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExternalCircuits:
     """Collection of external circuits.
 
     Manages multiple external coils and their circuits.
     """
 
-    circuits: list[ExternalCircuit]
+    circuits: tuple[ExternalCircuit, ...]
 
     @property
     def n_circuits(self) -> int:
         """Number of external circuits."""
         return len(self.circuits)
 
-    @cached_property
-    def _coil_params(self) -> tuple[Array, Array, Array, Array]:
-        """Pre-extract coil parameters as arrays for vectorized computation.
+    def _get_coil_params(self) -> tuple[Array, Array, Array, Array]:
+        """Extract coil parameters as arrays for vectorized computation.
 
         Returns:
             Tuple of (z_centers, radii, lengths, n_turns) arrays.
@@ -162,7 +160,7 @@ class ExternalCircuits:
         if self.n_circuits == 0:
             return jnp.zeros((geometry.nr, geometry.nz, 3))
 
-        z_centers, radii, lengths, n_turns = self._coil_params
+        z_centers, radii, lengths, n_turns = self._get_coil_params()
 
         def single_coil_field(current, z_center, radius, length, n_turn):
             return self._solenoid_field(
