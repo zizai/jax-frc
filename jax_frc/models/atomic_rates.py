@@ -172,3 +172,92 @@ def charge_exchange_rates(
     Q_cx = 1.5 * ni * nu_cx * Ti  # Energy loss from plasma [W/m^3]
 
     return R_cx, Q_cx
+
+
+# =============================================================================
+# Radiation Losses
+# =============================================================================
+
+@jit
+def bremsstrahlung_loss(Te: Array, ne: Array, ni: Array, Z_eff: float = 1.0) -> Array:
+    """Bremsstrahlung power loss P_brem [W/m³].
+
+    P_brem = 1.69e-38 * Z_eff² * ne * ni * sqrt(Te_eV)
+
+    Args:
+        Te: Electron temperature [J]
+        ne: Electron density [m⁻³]
+        ni: Ion density [m⁻³]
+        Z_eff: Effective charge (default 1.0 for hydrogen)
+
+    Returns:
+        Power loss [W/m³]
+    """
+    Te_eV = Te / QE
+    Te_eV_safe = jnp.maximum(Te_eV, 0.1)
+    return 1.69e-38 * Z_eff**2 * ne * ni * jnp.sqrt(Te_eV_safe)
+
+
+@jit
+def line_radiation_loss(Te: Array, ne: Array, n_impurity: Array) -> Array:
+    """Line radiation from impurities [W/m³].
+
+    Uses simplified cooling curve for carbon impurity.
+    Peak around 10 eV, drops at higher Te.
+
+    Args:
+        Te: Electron temperature [J]
+        ne: Electron density [m⁻³]
+        n_impurity: Impurity density [m⁻³]
+
+    Returns:
+        Power loss [W/m³]
+    """
+    Te_eV = Te / QE
+    Te_eV_safe = jnp.maximum(Te_eV, 0.1)
+    # Gaussian cooling curve peaked at ~10 eV
+    L_cool = 1e-31 * jnp.exp(-((jnp.log10(Te_eV_safe) - 1.0) / 0.5)**2)
+    return ne * n_impurity * L_cool
+
+
+@jit
+def ionization_energy_loss(S_ion: Array) -> Array:
+    """Energy sink from ionization events [W/m³].
+
+    Each ionization costs E_ion = 13.6 eV.
+
+    Args:
+        S_ion: Mass ionization rate [kg/m³/s]
+
+    Returns:
+        Power loss [W/m³]
+    """
+    E_ion = 13.6 * QE
+    # S_ion has units kg/m³/s, divide by MI to get ionizations/m³/s
+    ionizations_per_volume = S_ion / MI
+    return ionizations_per_volume * E_ion
+
+
+@jit
+def total_radiation_loss(
+    Te: Array, ne: Array, ni: Array, n_impurity: Array, S_ion: Array, Z_eff: float = 1.0
+) -> Array:
+    """Total radiation sink for energy equation [W/m³].
+
+    Combines bremsstrahlung, line radiation, and ionization energy loss.
+
+    Args:
+        Te: Electron temperature [J]
+        ne: Electron density [m⁻³]
+        ni: Ion density [m⁻³]
+        n_impurity: Impurity density [m⁻³]
+        S_ion: Mass ionization rate [kg/m³/s]
+        Z_eff: Effective charge
+
+    Returns:
+        Total power loss [W/m³]
+    """
+    P_brem = bremsstrahlung_loss(Te, ne, ni, Z_eff)
+    P_line = line_radiation_loss(Te, ne, n_impurity)
+    P_ion = ionization_energy_loss(S_ion)
+    return P_brem + P_line + P_ion

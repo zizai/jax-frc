@@ -156,3 +156,47 @@ class TestChargeExchangeRates:
         v_n = jnp.zeros((16, 32, 3))
         _, Q_cx = charge_exchange_rates(Ti, ni, nn, v_i, v_n)
         assert jnp.all(Q_cx > 0)
+
+
+class TestRadiationLoss:
+    """Tests for radiation loss terms."""
+
+    def test_bremsstrahlung_loss_exists(self):
+        """Function is importable."""
+        from jax_frc.models.atomic_rates import bremsstrahlung_loss
+        assert callable(bremsstrahlung_loss)
+
+    def test_bremsstrahlung_positive(self):
+        """Bremsstrahlung is always positive (energy sink)."""
+        from jax_frc.models.atomic_rates import bremsstrahlung_loss
+        Te = jnp.ones((16, 32)) * 100 * QE
+        ne = jnp.ones((16, 32)) * 1e19
+        ni = jnp.ones((16, 32)) * 1e19
+        P_brem = bremsstrahlung_loss(Te, ne, ni)
+        assert jnp.all(P_brem > 0)
+
+    def test_bremsstrahlung_scales_with_density_squared(self):
+        """P_brem ~ ne * ni."""
+        from jax_frc.models.atomic_rates import bremsstrahlung_loss
+        Te = 100 * QE
+        ne = 1e19
+        ni = 1e19
+        P1 = bremsstrahlung_loss(Te, ne, ni)
+        P2 = bremsstrahlung_loss(Te, 2*ne, 2*ni)
+        assert jnp.isclose(P2, 4*P1, rtol=1e-5)
+
+    def test_total_radiation_loss_exists(self):
+        """Function is importable."""
+        from jax_frc.models.atomic_rates import total_radiation_loss
+        assert callable(total_radiation_loss)
+
+    def test_total_radiation_positive(self):
+        """Total radiation is always positive."""
+        from jax_frc.models.atomic_rates import total_radiation_loss
+        Te = jnp.ones((16, 32)) * 100 * QE
+        ne = jnp.ones((16, 32)) * 1e19
+        ni = jnp.ones((16, 32)) * 1e19
+        n_imp = jnp.ones((16, 32)) * 1e17  # 1% impurity
+        S_ion = jnp.ones((16, 32)) * 1e10  # kg/m³/s
+        P_rad = total_radiation_loss(Te, ne, ni, n_imp, S_ion)
+        assert jnp.all(P_rad > 0)
