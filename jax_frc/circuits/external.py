@@ -1,10 +1,11 @@
 """External circuits with coils and drivers."""
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Callable, Optional
 
 import jax.numpy as jnp
-from jax import Array
+from jax import Array, vmap
 
 from jax_frc.circuits.state import CircuitParams
 from jax_frc.core.geometry import Geometry
@@ -37,10 +38,14 @@ class CircuitDriver:
     - "current": Target current waveform (requires high-bandwidth control)
     - "feedback": PID control based on plasma state
 
+    Note:
+        Only PI control is currently implemented. The Kd gain in
+        feedback_gains is accepted but unused.
+
     Attributes:
         mode: "voltage", "current", or "feedback"
         waveform: For voltage/current mode, callable(t) -> value
-        feedback_gains: For feedback mode, (Kp, Ki, Kd) gains
+        feedback_gains: For feedback mode, (Kp, Ki, Kd) gains (Kd unused)
         feedback_target: For feedback mode, callable(state) -> target value
         feedback_measure: For feedback mode, callable(state) -> measured value
     """
@@ -121,6 +126,19 @@ class ExternalCircuits:
         """Number of external circuits."""
         return len(self.circuits)
 
+    @cached_property
+    def _coil_params(self) -> tuple[Array, Array, Array, Array]:
+        """Pre-extract coil parameters as arrays for vectorized computation.
+
+        Returns:
+            Tuple of (z_centers, radii, lengths, n_turns) arrays.
+        """
+        z_centers = jnp.array([c.coil.z_center for c in self.circuits])
+        radii = jnp.array([c.coil.radius for c in self.circuits])
+        lengths = jnp.array([c.coil.length for c in self.circuits])
+        n_turns = jnp.array([c.coil.n_turns for c in self.circuits])
+        return z_centers, radii, lengths, n_turns
+
     def get_combined_params(self) -> CircuitParams:
         """Get combined circuit parameters as arrays."""
         L = jnp.array([c.params.L[0] for c in self.circuits])
@@ -131,7 +149,8 @@ class ExternalCircuits:
     def compute_b_field(self, I: Array, geometry: Geometry) -> Array:
         """Compute magnetic field from all external coil currents.
 
-        Uses a finite solenoid model for each coil.
+        Uses a finite solenoid model for each coil. This method is
+        JIT-compatible via vmap over pre-extracted coil parameters.
 
         Args:
             I: Current in each coil [A], shape (n_circuits,)
@@ -140,23 +159,26 @@ class ExternalCircuits:
         Returns:
             B: Magnetic field contribution (nr, nz, 3)
         """
-        B_total = jnp.zeros((geometry.nr, geometry.nz, 3))
+        if self.n_circuits == 0:
+            return jnp.zeros((geometry.nr, geometry.nz, 3))
 
-        for i, circuit in enumerate(self.circuits):
-            coil = circuit.coil
-            current = I[i]
+        z_centers, radii, lengths, n_turns = self._coil_params
 
-            B_coil = self._solenoid_field(
+        def single_coil_field(current, z_center, radius, length, n_turn):
+            return self._solenoid_field(
                 current=current,
-                z_center=coil.z_center,
-                radius=coil.radius,
-                length=coil.length,
-                n_turns=coil.n_turns,
+                z_center=z_center,
+                radius=radius,
+                length=length,
+                n_turns=n_turn,
                 geometry=geometry,
             )
-            B_total = B_total + B_coil
 
-        return B_total
+        # vmap over coil dimension: B_all has shape (n_circuits, nr, nz, 3)
+        B_all = vmap(single_coil_field)(I, z_centers, radii, lengths, n_turns)
+
+        # Sum over all coils
+        return jnp.sum(B_all, axis=0)
 
     def _solenoid_field(
         self,
