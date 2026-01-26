@@ -14,8 +14,8 @@ import logging
 from jax_frc.configurations.base import AbstractConfiguration
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
-from jax_frc.scenarios.phase import Phase, PhaseResult, PHASE_REGISTRY
-from jax_frc.scenarios.transitions import transition_from_spec
+from jax_frc.configurations.phase import Phase, PhaseResult, PHASE_REGISTRY
+from jax_frc.configurations.transitions import transition_from_spec
 from jax_frc.models.base import PhysicsModel
 from jax_frc.solvers.base import Solver
 from jax_frc.solvers.explicit import RK4Solver
