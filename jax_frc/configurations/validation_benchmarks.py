@@ -90,3 +90,89 @@ class CylindricalShockConfiguration(AbstractConfiguration):
     def default_runtime(self) -> dict:
         # t=0.1 in Alfven time units
         return {"t_end": 0.1, "dt": 1e-4}
+
+
+@dataclass
+class CylindricalVortexConfiguration(AbstractConfiguration):
+    """Orszag-Tang vortex adapted to cylindrical annulus.
+
+    Tests nonlinear MHD dynamics, current sheet formation.
+    Domain is an annulus to avoid axis singularity.
+    """
+
+    name: str = "cylindrical_vortex"
+    description: str = "Orszag-Tang vortex in cylindrical annulus"
+
+    # Grid parameters
+    nr: int = 256
+    nz: int = 256
+    r_min: float = 0.2
+    r_max: float = 1.2
+    z_min: float = 0.0
+    z_max: float = 2 * jnp.pi
+
+    # Physics parameters (Orszag-Tang standard)
+    v0: float = 1.0
+    B0: float = 1.0
+    rho0: float = 25.0 / (36.0 * jnp.pi)
+    p0: float = 5.0 / (12.0 * jnp.pi)
+    gamma: float = 5.0 / 3.0
+
+    def build_geometry(self) -> Geometry:
+        return Geometry(
+            coord_system="cylindrical",
+            r_min=self.r_min, r_max=self.r_max,
+            z_min=self.z_min, z_max=float(self.z_max),
+            nr=self.nr, nz=self.nz
+        )
+
+    def build_initial_state(self, geometry: Geometry) -> State:
+        r = geometry.r_grid
+        z = geometry.z_grid
+
+        # Normalized radial coordinate for patterns
+        r_norm = (r - self.r_min) / (self.r_max - self.r_min)
+
+        # Velocity: vr = -v0*sin(z), vz = v0*sin(2*pi*r_norm)
+        vr = -self.v0 * jnp.sin(z)
+        vz = self.v0 * jnp.sin(2 * jnp.pi * r_norm)
+        v = jnp.zeros((geometry.nr, geometry.nz, 3))
+        v = v.at[:, :, 0].set(vr)
+        v = v.at[:, :, 2].set(vz)
+
+        # Magnetic field: Br = -B0*sin(z), Bz = B0*sin(4*pi*r_norm)
+        Br = -self.B0 * jnp.sin(z)
+        Bz = self.B0 * jnp.sin(4 * jnp.pi * r_norm)
+        B = jnp.zeros((geometry.nr, geometry.nz, 3))
+        B = B.at[:, :, 0].set(Br)
+        B = B.at[:, :, 2].set(Bz)
+
+        # Uniform density and pressure
+        rho = jnp.ones((geometry.nr, geometry.nz)) * self.rho0
+        p = jnp.ones((geometry.nr, geometry.nz)) * self.p0
+        T = p / rho
+
+        return State(
+            psi=jnp.zeros((geometry.nr, geometry.nz)),
+            n=rho,
+            p=p,
+            T=T,
+            B=B,
+            E=jnp.zeros((geometry.nr, geometry.nz, 3)),
+            v=v,
+            particles=None,
+            time=0.0,
+            step=0
+        )
+
+    def build_model(self) -> ResistiveMHD:
+        return ResistiveMHD(
+            resistivity=SpitzerResistivity(eta_0=1e-6)
+        )
+
+    def build_boundary_conditions(self) -> list:
+        # Periodic in z handled by geometry, conducting at r boundaries
+        return []
+
+    def default_runtime(self) -> dict:
+        return {"t_end": 0.5, "dt": 1e-4}

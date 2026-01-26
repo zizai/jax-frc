@@ -39,6 +39,7 @@ from jax_frc.configurations.frc_merging import (
 from jax_frc.configurations.analytic import SlabDiffusionConfiguration
 from jax_frc.configurations.validation_benchmarks import (
     CylindricalShockConfiguration,
+    CylindricalVortexConfiguration,
 )
 
 # Import phases submodule to trigger registration
@@ -47,6 +48,7 @@ from jax_frc.configurations import phases
 CONFIGURATION_REGISTRY = {
     'SlabDiffusionConfiguration': SlabDiffusionConfiguration,
     'CylindricalShockConfiguration': CylindricalShockConfiguration,
+    'CylindricalVortexConfiguration': CylindricalVortexConfiguration,
     'LinearConfiguration': LinearConfiguration,
     'BelovaMergingConfiguration': BelovaMergingConfiguration,
     'BelovaCase1Configuration': BelovaCase1Configuration,
@@ -75,6 +77,7 @@ __all__ = [
     # Configuration implementations
     'SlabDiffusionConfiguration',
     'CylindricalShockConfiguration',
+    'CylindricalVortexConfiguration',
     'LinearConfiguration',
     'ConfigurationResult',
     'TransitionSpec',
