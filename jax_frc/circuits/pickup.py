@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 import jax.numpy as jnp
-from jax import Array
+from jax import Array, vmap
 
 from jax_frc.circuits.state import CircuitParams
 from jax_frc.core.geometry import Geometry
@@ -70,15 +70,8 @@ class PickupCoilArray:
 
             return n_turn * flux
 
-        # Vectorize over all coils
-        Psi = jnp.array(
-            [
-                flux_for_coil(z_coil, radius, n_turn)
-                for z_coil, radius, n_turn in zip(
-                    self.z_positions, self.radii, self.n_turns
-                )
-            ]
-        )
+        # Vectorize over all coils using vmap for JIT compatibility
+        Psi = vmap(flux_for_coil)(self.z_positions, self.radii, self.n_turns)
 
         return Psi
 
