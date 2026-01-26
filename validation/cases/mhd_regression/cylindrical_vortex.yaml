@@ -1,0 +1,40 @@
+# validation/cases/mhd_regression/cylindrical_vortex.yaml
+name: cylindrical_vortex
+description: "Orszag-Tang vortex in cylindrical annulus"
+
+configuration:
+  class: CylindricalVortexConfiguration
+  overrides:
+    nr: 256
+    nz: 256
+
+runtime:
+  t_end: 0.5
+  dt: 1e-4
+
+solver:
+  type: explicit
+
+acceptance:
+  quantitative:
+    - metric: conservation_drift
+      field: total_energy
+      threshold: 0.01
+      description: "Total energy conservation within 1%"
+    - metric: check_tolerance
+      name: peak_J_timing
+      expected: 0.48
+      tolerance: "10%"
+      description: "Time of peak current density within 10%"
+
+output:
+  plots:
+    - type: contour
+      name: current_density
+      field: J
+      times: [0.0, 0.25, 0.5]
+    - type: time_trace
+      name: energy_partition
+      fields: [magnetic_energy, kinetic_energy]
+  html_report: true
+  log_level: INFO

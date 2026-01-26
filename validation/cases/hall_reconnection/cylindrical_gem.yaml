@@ -1,0 +1,54 @@
+# validation/cases/hall_reconnection/cylindrical_gem.yaml
+name: cylindrical_gem
+description: "GEM magnetic reconnection challenge in cylindrical coordinates"
+
+configuration:
+  class: CylindricalGEMConfiguration
+  overrides:
+    nr: 256
+    nz: 512
+    lambda_: 0.5
+    psi1: 0.1
+
+runtime:
+  t_end: 25.0
+  dt: 0.01
+
+solver:
+  type: semi_implicit
+
+acceptance:
+  quantitative:
+    - metric: peak_reconnection_rate
+      expected: 0.1
+      tolerance: "10%"
+      description: "Peak reconnection rate ~0.1 B0*vA"
+    - metric: check_tolerance
+      name: time_to_peak
+      expected: 15.0
+      tolerance: "15%"
+      description: "Time to peak reconnection rate"
+    - metric: current_layer_thickness
+      expected: 1.0
+      tolerance: "20%"
+      description: "Current layer thickness ~d_i"
+  qualitative:
+    - name: hall_quadrupole
+      description: "Btheta shows quadrupole pattern"
+      criterion: "max(|Btheta|) > 0.05 * B0"
+
+output:
+  plots:
+    - type: contour
+      name: reconnected_flux
+      field: psi
+      times: [0, 10, 20, 25]
+    - type: contour
+      name: hall_quadrupole
+      field: B_theta
+      times: [15, 20, 25]
+    - type: time_trace
+      name: reconnection_rate
+      fields: [dpsi_dt_max]
+  html_report: true
+  log_level: INFO
