@@ -271,3 +271,81 @@ class TestThetaPinchArray:
 
         # Field should generally increase along z (acceleration direction)
         assert B_z[-1] > B_z[0]
+
+
+class TestFieldProperties:
+    """Property-based tests for all coil types."""
+
+    @pytest.mark.parametrize("CoilClass,kwargs", [
+        (Solenoid, {"length": 2.0, "radius": 0.3, "n_turns": 100, "current": 100.0}),
+        (MirrorCoil, {"z_position": 0.0, "radius": 0.3, "current": 100.0}),
+    ])
+    def test_divergence_free(self, CoilClass, kwargs):
+        """div(B) = 0 for all coil types (in cylindrical coords).
+
+        div(B) = (1/r) d(r*B_r)/dr + dB_z/dz = 0
+        """
+        coil = CoilClass(**kwargs)
+
+        # Test at several points away from axis and boundaries
+        r0, z0 = 0.1, 0.0
+        dr, dz = 1e-5, 1e-5
+
+        # Get field values for finite difference
+        r_arr = jnp.array([r0 - dr, r0, r0 + dr, r0, r0])
+        z_arr = jnp.array([z0, z0, z0, z0 - dz, z0 + dz])
+
+        B_r, B_z = coil.B_field(r_arr, z_arr, t=0.0)
+
+        # d(r*B_r)/dr using central difference
+        rBr_minus = (r0 - dr) * B_r[0]
+        rBr_plus = (r0 + dr) * B_r[2]
+        d_rBr_dr = (rBr_plus - rBr_minus) / (2 * dr)
+
+        # dB_z/dz using central difference
+        dBz_dz = (B_z[4] - B_z[3]) / (2 * dz)
+
+        # div(B) = (1/r) d(r*B_r)/dr + dB_z/dz
+        div_B = d_rBr_dr / r0 + dBz_dz
+
+        # Should be approximately zero
+        assert jnp.abs(div_B) < 1e-3, f"div(B) = {div_B}, expected ~0"
+
+    @pytest.mark.parametrize("CoilClass,kwargs", [
+        (Solenoid, {"length": 2.0, "radius": 0.3, "n_turns": 100, "current": 100.0}),
+        (MirrorCoil, {"z_position": 0.0, "radius": 0.3, "current": 100.0}),
+    ])
+    def test_axial_symmetry(self, CoilClass, kwargs):
+        """B_r = 0 on axis for all coil types."""
+        coil = CoilClass(**kwargs)
+
+        r = jnp.array([0.0, 0.0, 0.0, 0.0, 0.0])
+        z = jnp.array([-1.0, -0.5, 0.0, 0.5, 1.0])
+
+        B_r, _ = coil.B_field(r, z, t=0.0)
+
+        assert jnp.allclose(B_r, 0.0, atol=1e-10)
+
+    def test_theta_pinch_divergence_free(self):
+        """ThetaPinchArray also satisfies div(B) = 0."""
+        array = ThetaPinchArray(
+            coil_positions=jnp.array([-0.5, 0.0, 0.5]),
+            radii=jnp.array([0.3, 0.3, 0.3]),
+            currents=jnp.array([100.0, 200.0, 100.0])
+        )
+
+        r0, z0 = 0.15, 0.25
+        dr, dz = 1e-5, 1e-5
+
+        r_arr = jnp.array([r0 - dr, r0, r0 + dr, r0, r0])
+        z_arr = jnp.array([z0, z0, z0, z0 - dz, z0 + dz])
+
+        B_r, B_z = array.B_field(r_arr, z_arr, t=0.0)
+
+        rBr_minus = (r0 - dr) * B_r[0]
+        rBr_plus = (r0 + dr) * B_r[2]
+        d_rBr_dr = (rBr_plus - rBr_minus) / (2 * dr)
+        dBz_dz = (B_z[4] - B_z[3]) / (2 * dz)
+        div_B = d_rBr_dr / r0 + dBz_dz
+
+        assert jnp.abs(div_B) < 1e-3, f"div(B) = {div_B}, expected ~0"
