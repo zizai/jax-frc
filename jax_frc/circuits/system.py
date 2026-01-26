@@ -142,9 +142,10 @@ class CircuitSystem:
         Estimates circuit timescale tau = L/R and subdivides dt if needed
         to resolve the fastest timescale.
 
-        Uses a fixed number of substeps (MAX_SUBSTEPS) for JIT compatibility,
-        with dt_sub = dt / MAX_SUBSTEPS. This always fully resolves the
-        requested dt while maintaining numerical stability for fast circuits.
+        Uses MAX_SUBSTEPS iterations for JIT compatibility (lax.scan requires
+        static length), but computes n_sub dynamically based on L/R timescale.
+        Only the first n_sub iterations perform physics updates (with dt_sub = dt / n_sub),
+        while remaining iterations are effectively skipped.
 
         Args:
             state: Current circuit state
@@ -156,9 +157,11 @@ class CircuitSystem:
         Returns:
             State after dt
         """
-        # Always use MAX_SUBSTEPS for JIT stability
-        # The implicit midpoint method is stable, so this is more about accuracy
-        dt_sub = dt / MAX_SUBSTEPS
+        # Compute number of substeps based on L/R timescale
+        # We want dt_sub <= 0.1 * tau_min for stability
+        tau_min = self._estimate_min_timescale()
+        n_sub = jnp.clip(jnp.ceil(dt / (0.1 * tau_min)), 1, MAX_SUBSTEPS)
+        dt_sub = dt / n_sub
 
         # Pack all inputs needed for ODE step
         carry = (
@@ -169,21 +172,24 @@ class CircuitSystem:
         )
 
         # Closure over constant values
-        def body(carry, _):
+        def body(carry, i):
             I_pickup, Q_pickup, I_external, Q_external = carry
+
+            # Only apply dt_sub for iterations < n_sub, else dt_effective = 0
+            dt_effective = jnp.where(i < n_sub, dt_sub, 0.0)
 
             # Compute ODE step
             new_I_pickup, new_Q_pickup = self._ode_step_pickup(
-                I_pickup, Q_pickup, dPsi_pickup_dt, dt_sub
+                I_pickup, Q_pickup, dPsi_pickup_dt, dt_effective
             )
             new_I_external, new_Q_external = self._ode_step_external(
-                I_external, Q_external, dPsi_external_dt, V_source_external, dt_sub
+                I_external, Q_external, dPsi_external_dt, V_source_external, dt_effective
             )
 
             return (new_I_pickup, new_Q_pickup, new_I_external, new_Q_external), None
 
-        # Run scan over MAX_SUBSTEPS
-        final_carry, _ = lax.scan(body, carry, None, length=MAX_SUBSTEPS)
+        # Run scan over MAX_SUBSTEPS with iteration indices
+        final_carry, _ = lax.scan(body, carry, jnp.arange(MAX_SUBSTEPS))
 
         I_pickup, Q_pickup, I_external, Q_external = final_carry
 
@@ -277,16 +283,23 @@ class CircuitSystem:
         # Handle C = inf (no capacitor) case
         inv_C = jnp.where(jnp.isinf(C), 0.0, 1.0 / C)
 
+        # Use safe dt to avoid division by zero; result is masked below anyway
+        dt_safe = jnp.maximum(dt, 1e-30)
+
         # Coefficients
-        a = L / dt + R_eff / 2 + dt * inv_C / 4
-        b = V_ind - R_eff * I / 2 - Q * inv_C + L * I / dt - dt * I * inv_C / 4
+        a = L / dt_safe + R_eff / 2 + dt_safe * inv_C / 4
+        b = V_ind - R_eff * I / 2 - Q * inv_C + L * I / dt_safe - dt_safe * I * inv_C / 4
 
         # Solve for I_new
-        I_new = b / a
+        I_new_computed = b / a
 
         # Update Q
-        I_mid = (I + I_new) / 2
-        Q_new = Q + dt * I_mid
+        I_mid = (I + I_new_computed) / 2
+        Q_new_computed = Q + dt_safe * I_mid
+
+        # If dt == 0, return unchanged values (skip this iteration)
+        I_new = jnp.where(dt > 0, I_new_computed, I)
+        Q_new = jnp.where(dt > 0, Q_new_computed, Q)
 
         return I_new, Q_new
 
@@ -330,16 +343,23 @@ class CircuitSystem:
         # Handle C = inf (no capacitor) case
         inv_C = jnp.where(jnp.isinf(C), 0.0, 1.0 / C)
 
+        # Use safe dt to avoid division by zero; result is masked below anyway
+        dt_safe = jnp.maximum(dt, 1e-30)
+
         # Implicit midpoint coefficients (same derivation as pickup)
-        a = L / dt + R / 2 + dt * inv_C / 4
-        b = V_total - R * I / 2 - Q * inv_C + L * I / dt - dt * I * inv_C / 4
+        a = L / dt_safe + R / 2 + dt_safe * inv_C / 4
+        b = V_total - R * I / 2 - Q * inv_C + L * I / dt_safe - dt_safe * I * inv_C / 4
 
         # Solve for I_new
-        I_new = b / a
+        I_new_computed = b / a
 
         # Update Q
-        I_mid = (I + I_new) / 2
-        Q_new = Q + dt * I_mid
+        I_mid = (I + I_new_computed) / 2
+        Q_new_computed = Q + dt_safe * I_mid
+
+        # If dt == 0, return unchanged values (skip this iteration)
+        I_new = jnp.where(dt > 0, I_new_computed, I)
+        Q_new = jnp.where(dt > 0, Q_new_computed, Q)
 
         return I_new, Q_new
 
