@@ -13,17 +13,18 @@ The merging phase implements FRC collision physics including:
 ## Basic Usage
 
 ```python
-from examples.merging_examples import belova_case2
+from jax_frc.configurations.frc_merging import BelovaCase2Configuration
 
 # Run small FRC merging (complete merge expected)
-scenario = belova_case2()
-result = scenario.run()
+config = BelovaCase2Configuration()
+geometry = config.build_geometry()
+state = config.build_initial_state(geometry)
 
 # Access merging diagnostics
 from jax_frc.diagnostics.merging import MergingDiagnostics
 
 diag = MergingDiagnostics()
-metrics = diag.compute(result.final_state, scenario.geometry)
+metrics = diag.compute(state, geometry)
 print(f"Separation: {metrics['separation_dz']}")
 print(f"Reconnection rate: {metrics['reconnection_rate']}")
 ```
@@ -31,8 +32,8 @@ print(f"Reconnection rate: {metrics['reconnection_rate']}")
 ## MergingPhase Configuration
 
 ```python
-from jax_frc.scenarios.phases.merging import MergingPhase
-from jax_frc.scenarios.transitions import separation_below, timeout, any_of
+from jax_frc.configurations.phases.merging import MergingPhase
+from jax_frc.configurations.transitions import separation_below, timeout, any_of
 
 merge_phase = MergingPhase(
     name="frc_merge",
@@ -72,19 +73,26 @@ Based on Belova et al. experimental validation:
 ### Running Validation Cases
 
 ```python
-from examples.merging_examples import belova_case1, belova_case2, belova_case4
+from jax_frc.configurations.frc_merging import (
+    BelovaCase1Configuration,
+    BelovaCase2Configuration,
+    BelovaCase4Configuration,
+)
 
 # Case 1: Large FRC, no compression
-scenario1 = belova_case1()
-result1 = scenario1.run()
+config1 = BelovaCase1Configuration()
+geometry1 = config1.build_geometry()
+state1 = config1.build_initial_state(geometry1)
 
 # Case 2: Small FRC, no compression
-scenario2 = belova_case2()
-result2 = scenario2.run()
+config2 = BelovaCase2Configuration()
+geometry2 = config2.build_geometry()
+state2 = config2.build_initial_state(geometry2)
 
 # Case 4: Large FRC with compression
-scenario4 = belova_case4()
-result4 = scenario4.run()
+config4 = BelovaCase4Configuration()
+geometry4 = config4.build_geometry()
+state4 = config4.build_initial_state(geometry4)
 ```
 
 ## Merging Diagnostics
