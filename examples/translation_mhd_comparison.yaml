@@ -1,0 +1,96 @@
+# Translation Model Comparison
+# Compares resistive MHD, extended MHD, and coupled MHD
+
+name: translation_mhd_comparison
+description: |
+  Same initial conditions and coil fields, three MHD models.
+  Compares position, velocity, flux loss, and heating.
+
+  This benchmark tests how different physics approximations
+  affect FRC translation dynamics:
+  - Resistive MHD: One-fluid with Spitzer resistivity
+  - Extended MHD: Adds Hall term and electron pressure
+  - Coupled MHD: Includes plasma-neutral interactions
+
+validation:
+  type: translation
+  tier: 2  # model comparison
+
+models:
+  - type: resistive_mhd
+    name: "One-fluid Resistive"
+    resistivity:
+      type: spitzer
+  - type: extended_mhd
+    name: "Extended (Hall + e-pressure)"
+    resistivity:
+      type: spitzer
+    hall_parameter: 1.0
+    electron_pressure: true
+  - type: coupled_mhd
+    name: "Coupled (plasma + neutrals)"
+    resistivity:
+      type: spitzer
+    neutral_density: 1.0e18  # m^-3
+    charge_exchange_rate: 1.0e-14  # m^3/s
+
+geometry:
+  coord_system: cylindrical
+  nr: 48
+  nz: 96
+  r_min: 0.0
+  r_max: 0.5
+  z_min: -2.0
+  z_max: 2.0
+
+external_field:
+  type: mirror_coils
+  coil1:
+    z_position: -1.5
+    radius: 0.6
+    current: 15000.0
+  coil2:
+    z_position: 1.5
+    radius: 0.6
+    current: 15000.0
+
+initial_conditions:
+  type: single_frc
+  z_center: -0.5
+  frc_radius: 0.2
+  elongation: 2.5
+  peak_beta: 0.6
+  initial_velocity: 100.0  # m/s in +z direction
+
+runtime:
+  dt: 5.0e-9
+  t_end: 5.0e-5
+
+diagnostics:
+  - type: centroid_position
+    interval: 20
+  - type: flux_max
+    interval: 20
+  - type: energy_partition
+    interval: 50
+  - type: temperature_profile
+    interval: 100
+
+output:
+  format: npz
+  path: results/translation_mhd_comparison
+  save_interval: 200
+  save_history: true
+  print_summary: true
+  log_level: INFO
+
+comparison:
+  metrics:
+    - name: final_position
+      tolerance: 0.05  # m
+    - name: final_velocity
+      tolerance: 10.0  # m/s
+    - name: flux_loss_fraction
+      tolerance: 0.1
+    - name: temperature_rise
+      tolerance: 0.2  # fraction

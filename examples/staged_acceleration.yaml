@@ -1,0 +1,93 @@
+# Staged Acceleration with Theta-Pinch Array
+# Tests programmable coil timing
+
+name: staged_acceleration
+description: |
+  FRC accelerated through multiple theta-pinch stages.
+  Coils fire in traveling-wave sequence.
+
+  This configuration models staged magnetic acceleration
+  where sequential theta-pinch coils create a traveling
+  magnetic wave that accelerates the FRC. The coil timing
+  is synchronized to match the FRC velocity for continuous
+  acceleration.
+
+  Key physics:
+  - Traveling wave magnetic field
+  - Progressive velocity increase
+  - Adiabatic compression in each stage
+
+validation:
+  type: translation
+  tier: 3  # staged acceleration
+
+geometry:
+  coord_system: cylindrical
+  nr: 48
+  nz: 256
+  r_min: 0.0
+  r_max: 0.4
+  z_min: -0.5
+  z_max: 3.0
+
+external_field:
+  type: theta_pinch_array
+  coil_positions: [0.0, 0.5, 1.0, 1.5, 2.0]
+  radii: [0.3, 0.3, 0.3, 0.3, 0.3]
+  currents:
+    type: traveling_wave
+    peak_current: 50000.0
+    wave_speed: 1000.0  # m/s
+    pulse_width: 0.1  # s
+  timing:
+    trigger_mode: velocity_match
+    delay_per_stage: 5.0e-4  # s
+
+model:
+  type: resistive_mhd
+  resistivity:
+    type: spitzer
+
+initial_conditions:
+  type: single_frc
+  z_center: -0.2
+  frc_radius: 0.12
+  elongation: 2.0
+  peak_beta: 0.4
+  initial_velocity: 50.0  # m/s in +z direction
+
+runtime:
+  dt: 2.0e-9
+  t_end: 3.0e-3
+
+diagnostics:
+  - type: centroid_position
+    interval: 50
+  - type: centroid_velocity
+    interval: 50
+  - type: flux_max
+    interval: 50
+  - type: compression_ratio
+    interval: 100
+  - type: coil_currents
+    interval: 25
+
+output:
+  format: npz
+  path: results/staged_acceleration
+  save_interval: 500
+  save_history: true
+  print_summary: true
+  log_level: INFO
+
+acceleration_targets:
+  - stage: 1
+    exit_velocity: 200.0  # m/s
+  - stage: 2
+    exit_velocity: 400.0  # m/s
+  - stage: 3
+    exit_velocity: 650.0  # m/s
+  - stage: 4
+    exit_velocity: 900.0  # m/s
+  - stage: 5
+    exit_velocity: 1100.0  # m/s
