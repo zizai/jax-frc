@@ -1,9 +1,10 @@
 """Extended MHD physics model with Hall effect and energy equation."""
 
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Optional
+import jax
 import jax.numpy as jnp
-from jax import jit
 
 from jax_frc.models.base import PhysicsModel
 from jax_frc.models.resistivity import ResistivityModel, SpitzerResistivity
@@ -17,7 +18,7 @@ QE = 1.602e-19
 ME = 9.109e-31
 KB = 1.381e-23  # Boltzmann constant [J/K]
 
-@dataclass
+@dataclass(frozen=True)
 class HaloDensityModel:
     """Halo density model for vacuum region handling."""
     halo_density: float = 1e16      # Low density in vacuum region
@@ -32,26 +33,26 @@ class HaloDensityModel:
         return halo_mask * self.halo_density + (1 - halo_mask) * jnp.maximum(n, self.halo_density)
 
 
-@dataclass
+@dataclass(frozen=True)
 class TemperatureBoundaryCondition:
     """Temperature boundary condition settings.
 
     Supports:
     - Dirichlet: T = T_wall (fixed wall temperature)
-    - Neumann: ∂T/∂n = 0 (insulating wall, zero heat flux)
-    - Symmetry at axis: ∂T/∂r = 0 at r=0
+    - Neumann: dT/dn = 0 (insulating wall, zero heat flux)
+    - Symmetry at axis: dT/dr = 0 at r=0
 
     Attributes:
         bc_type: "dirichlet" or "neumann"
         T_wall: Wall temperature [eV] for Dirichlet BC
-        apply_axis_symmetry: If True, enforce ∂T/∂r = 0 at r=0
+        apply_axis_symmetry: If True, enforce dT/dr = 0 at r=0
     """
     bc_type: str = "neumann"  # "dirichlet" or "neumann"
     T_wall: float = 10.0      # Wall temperature [eV] for Dirichlet
     apply_axis_symmetry: bool = True
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExtendedMHD(PhysicsModel):
     """Two-fluid extended MHD model with Hall effect and energy equation.
 
@@ -67,6 +68,7 @@ class ExtendedMHD(PhysicsModel):
     thermal: Optional[ThermalTransport] = None  # None = no temperature evolution
     temperature_bc: Optional[TemperatureBoundaryCondition] = None  # None = default Neumann
 
+    @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
         """Compute dB/dt and optionally dT/dt from extended MHD equations."""
         dr, dz = geometry.dr, geometry.dz
