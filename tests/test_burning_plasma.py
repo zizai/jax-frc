@@ -242,3 +242,45 @@ class TestBurningPlasmaModel:
         # After 100 steps, total depletion ~4e14 is below float32 precision vs 1e20
         # So we verify depletion indirectly via ash accumulation
         assert jnp.mean(state.species.n_He4) > 0  # Ash produced = fuel consumed
+
+
+class TestEnergyConservation:
+    """Tests for energy conservation in burning plasma."""
+
+    def test_fusion_power_breakdown(self, geometry):
+        """P_fusion = P_alpha + P_neutron."""
+        from jax_frc.burn import BurnPhysics, ReactionRates
+
+        burn = BurnPhysics(fuels=("DT", "DD", "DHE3"))
+
+        rates = ReactionRates(
+            DT=jnp.ones((geometry.nr, geometry.nz)) * 1e18,
+            DD_T=jnp.ones((geometry.nr, geometry.nz)) * 5e17,
+            DD_HE3=jnp.ones((geometry.nr, geometry.nz)) * 5e17,
+            DHE3=jnp.ones((geometry.nr, geometry.nz)) * 2e17,
+        )
+
+        power = burn.power_sources(rates)
+
+        # P_fusion = P_charged + P_neutron (P_alpha = P_charged for instant therm)
+        total = power.P_alpha + power.P_neutron
+        assert jnp.allclose(power.P_fusion, total, rtol=1e-10)
+
+    def test_particle_balance_dt(self, geometry):
+        """D-T: 1 D + 1 T consumed, 1 He4 produced."""
+        from jax_frc.burn import SpeciesTracker, ReactionRates
+
+        tracker = SpeciesTracker()
+        rates = ReactionRates(
+            DT=jnp.ones((geometry.nr, geometry.nz)) * 1e18,
+            DD_T=jnp.zeros((geometry.nr, geometry.nz)),
+            DD_HE3=jnp.zeros((geometry.nr, geometry.nz)),
+            DHE3=jnp.zeros((geometry.nr, geometry.nz)),
+        )
+
+        sources = tracker.burn_sources(rates)
+
+        # Check stoichiometry
+        assert jnp.allclose(sources["D"], -rates.DT)
+        assert jnp.allclose(sources["T"], -rates.DT)
+        assert jnp.allclose(sources["He4"], rates.DT)
