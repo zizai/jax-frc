@@ -152,3 +152,56 @@ class BurningPlasmaModel:
             power=power,
             conversion=new_conversion,
         )
+
+    @classmethod
+    def from_config(cls, config: dict) -> "BurningPlasmaModel":
+        """Create BurningPlasmaModel from configuration dictionary.
+
+        Args:
+            config: Configuration dictionary with keys:
+                - mhd: MHD configuration (optional, defaults to Spitzer resistivity)
+                - fuels: List of fuel types, e.g. ["DT", "DD"] (optional)
+                - transport: Transport coefficients (optional)
+                - direct_conversion: Direct conversion parameters (optional)
+
+        Returns:
+            Configured BurningPlasmaModel instance
+        """
+        from jax_frc.models.resistive_mhd import ResistiveMHD
+
+        # MHD core
+        mhd_config = config.get("mhd", {"resistivity": {"type": "spitzer"}})
+        mhd_core = ResistiveMHD.from_config(mhd_config)
+
+        # Burn physics
+        fuels = tuple(config.get("fuels", ["DT"]))
+        burn = BurnPhysics(fuels=fuels)
+
+        # Species tracker
+        species_tracker = SpeciesTracker()
+
+        # Transport
+        transport_config = config.get("transport", {})
+        transport = TransportModel(
+            D_particle=transport_config.get("D_particle", 1.0),
+            chi_e=transport_config.get("chi_e", 5.0),
+            chi_i=transport_config.get("chi_i", 2.0),
+            v_pinch=transport_config.get("v_pinch", 0.0),
+        )
+
+        # Direct conversion
+        dc_config = config.get("direct_conversion", {})
+        conversion = DirectConversion(
+            coil_turns=dc_config.get("coil_turns", 100),
+            coil_radius=dc_config.get("coil_radius", 0.6),
+            circuit_resistance=dc_config.get("circuit_resistance", 0.1),
+            coupling_efficiency=dc_config.get("coupling_efficiency", 0.9),
+        )
+
+        return cls(
+            mhd_core=mhd_core,
+            burn=burn,
+            species_tracker=species_tracker,
+            transport=transport,
+            conversion=conversion,
+        )
