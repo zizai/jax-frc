@@ -255,5 +255,70 @@ class MirrorCoil:
 
 @dataclass
 class ThetaPinchArray:
-    """Placeholder for theta-pinch coil array model."""
-    pass
+    """Array of coaxial current loops (theta-pinch configuration).
+
+    Computes field as superposition of individual MirrorCoil fields.
+    Supports time-dependent currents for staged acceleration.
+
+    Args:
+        coil_positions: Axial positions of coils [m], shape (n_coils,)
+        radii: Radii of coils [m], shape (n_coils,) or scalar
+        currents: Currents [A], shape (n_coils,) or callable(t) -> array
+    """
+    coil_positions: jnp.ndarray
+    radii: Union[jnp.ndarray, float]
+    currents: Union[jnp.ndarray, Callable[[float], jnp.ndarray]]
+
+    def _get_currents(self, t: float) -> jnp.ndarray:
+        """Get currents at time t."""
+        if callable(self.currents):
+            return self.currents(t)
+        return jnp.asarray(self.currents)
+
+    def _get_radii(self) -> jnp.ndarray:
+        """Get radii array."""
+        radii = jnp.asarray(self.radii)
+        if radii.ndim == 0:
+            # Scalar radius - broadcast to all coils
+            return jnp.full_like(self.coil_positions, radii)
+        return radii
+
+    def B_field(self, r: jnp.ndarray, z: jnp.ndarray, t: float) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Compute total field as superposition of coil fields."""
+        currents = self._get_currents(t)
+        radii = self._get_radii()
+
+        B_r_total = jnp.zeros_like(r)
+        B_z_total = jnp.zeros_like(z)
+
+        # Sum contributions from each coil
+        # Note: Using Python loop here is fine since n_coils is typically small
+        # and this allows different radii per coil
+        for i in range(len(self.coil_positions)):
+            coil = MirrorCoil(
+                z_position=float(self.coil_positions[i]),
+                radius=float(radii[i]),
+                current=float(currents[i])
+            )
+            B_r_i, B_z_i = coil.B_field(r, z, t)
+            B_r_total = B_r_total + B_r_i
+            B_z_total = B_z_total + B_z_i
+
+        return B_r_total, B_z_total
+
+    def A_phi(self, r: jnp.ndarray, z: jnp.ndarray, t: float) -> jnp.ndarray:
+        """Compute total vector potential as superposition."""
+        currents = self._get_currents(t)
+        radii = self._get_radii()
+
+        A_total = jnp.zeros_like(r)
+
+        for i in range(len(self.coil_positions)):
+            coil = MirrorCoil(
+                z_position=float(self.coil_positions[i]),
+                radius=float(radii[i]),
+                current=float(currents[i])
+            )
+            A_total = A_total + coil.A_phi(r, z, t)
+
+        return A_total

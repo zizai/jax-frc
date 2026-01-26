@@ -164,3 +164,110 @@ class TestMirrorCoil:
 
         # A_phi should be positive for positive current (standard convention)
         assert jnp.all(A_off > 0.0)
+
+
+class TestThetaPinchArray:
+    """Tests for theta-pinch coil array."""
+
+    def test_single_coil_matches_mirror(self):
+        """Array with one coil matches MirrorCoil result."""
+        z_pos = 0.5
+        radius = 0.3
+        current = 500.0
+
+        mirror = MirrorCoil(z_position=z_pos, radius=radius, current=current)
+        array = ThetaPinchArray(
+            coil_positions=jnp.array([z_pos]),
+            radii=jnp.array([radius]),
+            currents=jnp.array([current])
+        )
+
+        r = jnp.array([0.1, 0.2])
+        z = jnp.array([0.0, 0.5])
+
+        B_r_mirror, B_z_mirror = mirror.B_field(r, z, t=0.0)
+        B_r_array, B_z_array = array.B_field(r, z, t=0.0)
+
+        assert jnp.allclose(B_r_mirror, B_r_array, rtol=1e-5)
+        assert jnp.allclose(B_z_mirror, B_z_array, rtol=1e-5)
+
+    def test_superposition(self):
+        """Array field is sum of individual coil fields."""
+        positions = jnp.array([-1.0, 0.0, 1.0])
+        radii = jnp.array([0.3, 0.3, 0.3])
+        currents = jnp.array([100.0, 200.0, 100.0])
+
+        array = ThetaPinchArray(
+            coil_positions=positions,
+            radii=radii,
+            currents=currents
+        )
+
+        # Manual sum
+        coil0 = MirrorCoil(z_position=-1.0, radius=0.3, current=100.0)
+        coil1 = MirrorCoil(z_position=0.0, radius=0.3, current=200.0)
+        coil2 = MirrorCoil(z_position=1.0, radius=0.3, current=100.0)
+
+        r = jnp.array([0.1])
+        z = jnp.array([0.25])
+
+        B_r0, B_z0 = coil0.B_field(r, z, t=0.0)
+        B_r1, B_z1 = coil1.B_field(r, z, t=0.0)
+        B_r2, B_z2 = coil2.B_field(r, z, t=0.0)
+
+        B_r_sum = B_r0 + B_r1 + B_r2
+        B_z_sum = B_z0 + B_z1 + B_z2
+
+        B_r_array, B_z_array = array.B_field(r, z, t=0.0)
+
+        assert jnp.allclose(B_r_sum, B_r_array, rtol=1e-5)
+        assert jnp.allclose(B_z_sum, B_z_array, rtol=1e-5)
+
+    def test_time_dependent_currents(self):
+        """Array with time-varying currents."""
+        positions = jnp.array([0.0, 1.0])
+        radii = jnp.array([0.3, 0.3])
+
+        def currents_func(t):
+            # First coil ramps up, second ramps down
+            return jnp.array([100.0 * t, 100.0 * (1.0 - t)])
+
+        array = ThetaPinchArray(
+            coil_positions=positions,
+            radii=radii,
+            currents=currents_func
+        )
+
+        r = jnp.array([0.0])
+        z = jnp.array([0.25])  # Sample closer to first coil to break symmetry
+
+        # At t=0: only second coil active
+        _, B_z_t0 = array.B_field(r, z, t=0.0)
+
+        # At t=1: only first coil active
+        _, B_z_t1 = array.B_field(r, z, t=1.0)
+
+        # Fields should be different (closer to first coil, so t=1 field stronger)
+        assert not jnp.allclose(B_z_t0, B_z_t1)
+
+    def test_staged_acceleration_pattern(self):
+        """Verify field gradient suitable for acceleration."""
+        # Create array with increasing currents (acceleration gradient)
+        positions = jnp.array([0.0, 0.5, 1.0, 1.5, 2.0])
+        radii = jnp.array([0.3, 0.3, 0.3, 0.3, 0.3])
+        currents = jnp.array([100.0, 200.0, 400.0, 800.0, 1600.0])
+
+        array = ThetaPinchArray(
+            coil_positions=positions,
+            radii=radii,
+            currents=currents
+        )
+
+        # Check field gradient along axis
+        r = jnp.zeros(5)
+        z = positions  # sample at coil positions
+
+        _, B_z = array.B_field(r, z, t=0.0)
+
+        # Field should generally increase along z (acceleration direction)
+        assert B_z[-1] > B_z[0]
