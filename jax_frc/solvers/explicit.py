@@ -1,18 +1,22 @@
 """Explicit time integration schemes."""
 
 from dataclasses import dataclass
+from functools import partial
+import jax
 import jax.numpy as jnp
+from jax import lax
 from jax_frc.solvers.base import Solver
 from jax_frc.core.state import State
 from jax_frc.models.base import PhysicsModel
 
-@dataclass
+@dataclass(frozen=True)
 class EulerSolver(Solver):
     """Simple forward Euler integration.
 
     Handles both psi-based (Resistive MHD) and B-based (Extended MHD) evolution.
     """
 
+    @partial(jax.jit, static_argnums=(0, 3, 4))  # self, model, geometry static
     def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         rhs = model.compute_rhs(state, geometry)
 
@@ -22,8 +26,12 @@ class EulerSolver(Solver):
         # Update B if RHS has non-zero B (Extended MHD)
         new_B = state.B + dt * rhs.B
 
-        # Update E if computed (Hybrid Kinetic)
-        new_E = rhs.E if jnp.any(rhs.E != 0) else state.E
+        # Update E if computed (Hybrid Kinetic) - use lax.cond for JIT compatibility
+        new_E = lax.cond(
+            jnp.any(rhs.E != 0),
+            lambda: rhs.E,
+            lambda: state.E
+        )
 
         new_state = state.replace(
             psi=new_psi,
@@ -34,13 +42,14 @@ class EulerSolver(Solver):
         )
         return model.apply_constraints(new_state, geometry)
 
-@dataclass
+@dataclass(frozen=True)
 class RK4Solver(Solver):
     """4th-order Runge-Kutta integration.
 
     Handles both psi-based (Resistive MHD) and B-based (Extended MHD) evolution.
     """
 
+    @partial(jax.jit, static_argnums=(0, 3, 4))  # self, model, geometry static
     def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         # k1
         k1 = model.compute_rhs(state, geometry)
@@ -70,8 +79,12 @@ class RK4Solver(Solver):
         new_psi = state.psi + (dt/6) * (k1.psi + 2*k2.psi + 2*k3.psi + k4.psi)
         new_B = state.B + (dt/6) * (k1.B + 2*k2.B + 2*k3.B + k4.B)
 
-        # Get E from final RHS (for Hybrid)
-        new_E = k4.E if jnp.any(k4.E != 0) else state.E
+        # Get E from final RHS (for Hybrid) - use lax.cond for JIT compatibility
+        new_E = lax.cond(
+            jnp.any(k4.E != 0),
+            lambda: k4.E,
+            lambda: state.E
+        )
 
         new_state = state.replace(
             psi=new_psi,
