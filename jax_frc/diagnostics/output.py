@@ -1,13 +1,20 @@
 """Output and checkpoint utilities for JAX-FRC simulation."""
 
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Union, Dict, Any, Optional
+from typing import Union, Dict, Any, Optional, TYPE_CHECKING
 import json
+import yaml
 import jax.numpy as jnp
 from jax import Array
 
 from jax_frc.core.state import State, ParticleState
 from jax_frc.core.geometry import Geometry
+
+if TYPE_CHECKING:
+    from jax_frc.core.state import State
+    from jax_frc.core.geometry import Geometry
 
 
 def save_checkpoint(state: State, geometry: Geometry, path: Union[str, Path],
@@ -225,3 +232,89 @@ def load_time_history(path: Union[str, Path]) -> Dict[str, Any]:
 
     else:
         raise ValueError(f"Unknown file format: {path.suffix}")
+
+
+@dataclass
+class OutputManager:
+    """Manages simulation output files.
+
+    Creates output directory structure:
+        {output_dir}/{example_name}_{timestamp}/
+            config.yaml
+            history.csv (or .json)
+            checkpoint_final.h5 (optional)
+            plots/
+                *.png
+
+    Attributes:
+        output_dir: Base directory for outputs
+        example_name: Name of the example being run
+        timestamp: Optional timestamp string (default: auto-generated)
+        save_checkpoint: Whether to save final checkpoint
+    """
+
+    output_dir: Path
+    example_name: str
+    timestamp: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%d_%H%M%S"))
+    save_checkpoint: bool = True
+
+    run_dir: Path = field(init=False)
+    _history_path: Optional[Path] = field(default=None, init=False)
+    _checkpoint_path: Optional[Path] = field(default=None, init=False)
+
+    def __post_init__(self):
+        self.output_dir = Path(self.output_dir)
+
+    def setup(self) -> None:
+        """Create output directory structure."""
+        self.run_dir = self.output_dir / f"{self.example_name}_{self.timestamp}"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        (self.run_dir / "plots").mkdir(exist_ok=True)
+
+    def save_config(self, config: Dict[str, Any]) -> Path:
+        """Save copy of configuration."""
+        path = self.run_dir / "config.yaml"
+        with open(path, 'w') as f:
+            yaml.safe_dump(config, f, default_flow_style=False)
+        return path
+
+    def save_history(self, history: Dict[str, Any], format: str = "csv") -> Path:
+        """Save time history data."""
+        ext = "csv" if format == "csv" else "json"
+        path = self.run_dir / f"history.{ext}"
+        save_time_history(history, path, format=format)
+        self._history_path = path
+        return path
+
+    def save_final_checkpoint(
+        self,
+        state: "State",
+        geometry: "Geometry",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Path]:
+        """Save final state checkpoint."""
+        if not self.save_checkpoint:
+            return None
+        path = self.run_dir / "checkpoint_final.h5"
+        save_checkpoint(state, geometry, path, metadata)
+        self._checkpoint_path = path
+        return path
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Get summary of saved outputs."""
+        summary = {
+            "run_dir": str(self.run_dir),
+        }
+        if self._history_path and self._history_path.exists():
+            summary["history"] = str(self._history_path)
+        if self._checkpoint_path and self._checkpoint_path.exists():
+            summary["checkpoint"] = str(self._checkpoint_path)
+
+        # List any plots
+        plots_dir = self.run_dir / "plots"
+        if plots_dir.exists():
+            plots = list(plots_dir.glob("*.png"))
+            if plots:
+                summary["plots"] = [str(p) for p in plots]
+
+        return summary
