@@ -1,0 +1,48 @@
+# validation/cases/analytic/cylindrical_shock.yaml
+name: cylindrical_shock
+description: "Brio-Wu MHD shock tube in cylindrical coordinates"
+
+configuration:
+  class: CylindricalShockConfiguration
+  overrides:
+    nz: 512
+    gamma: 2.0
+
+runtime:
+  t_end: 0.1
+  dt: 1e-4
+
+solver:
+  type: explicit
+
+acceptance:
+  quantitative:
+    - metric: shock_position_error
+      field: n
+      axis: z
+      expected: 0.45
+      tolerance: "5%"
+      description: "Fast shock position within 5%"
+    - metric: shock_position_error
+      field: n
+      axis: z
+      expected: 0.28
+      tolerance: "5%"
+      description: "Slow shock position within 5%"
+    - metric: conservation_drift
+      field: total_energy
+      threshold: 0.01
+      description: "Energy conservation within 1%"
+
+output:
+  plots:
+    - type: profiles
+      name: density_profile
+      axis: z
+      field: n
+    - type: profiles
+      name: Br_profile
+      axis: z
+      field: B_r
+  html_report: true
+  log_level: INFO
