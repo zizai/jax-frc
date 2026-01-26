@@ -85,8 +85,10 @@ def test_explicit_plus_implicit_equals_compute_rhs():
     combined = model.compute_rhs(state, geometry)
 
     # Sum should equal combined (within tolerance)
+    # Note: rtol=1e-5 is appropriate for float32 with JIT compilation
+    # JIT can reorder operations, causing small numerical differences
     sum_rhs = explicit.psi + implicit.psi
-    assert jnp.allclose(sum_rhs, combined.psi, rtol=1e-10)
+    assert jnp.allclose(sum_rhs, combined.psi, rtol=1e-5)
 
 
 def test_explicit_rhs_zero_velocity_gives_zero():

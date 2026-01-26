@@ -13,7 +13,7 @@ class ResistivityModel(ABC):
         """Compute resistivity field."""
         pass
 
-@dataclass
+@dataclass(frozen=True)
 class SpitzerResistivity(ResistivityModel):
     """Classical Spitzer resistivity."""
     eta_0: float = 1e-6
@@ -21,7 +21,7 @@ class SpitzerResistivity(ResistivityModel):
     def compute(self, j_phi: Array, **kwargs) -> Array:
         return jnp.full_like(j_phi, self.eta_0)
 
-@dataclass
+@dataclass(frozen=True)
 class ChoduraResistivity(ResistivityModel):
     """Anomalous resistivity for reconnection."""
     eta_0: float = 1e-6
