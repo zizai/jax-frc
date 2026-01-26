@@ -102,3 +102,44 @@ class TestEulerFlux:
         E = p / (5/3 - 1) + 0.5 * rho * v**2
         F_rho, F_mom, F_E = euler_flux_1d(rho, v, p, E)
         assert jnp.isclose(F_E, (E + p) * v)
+
+
+class TestHLLEFlux:
+    """Tests for HLLE approximate Riemann solver."""
+
+    def test_hlle_flux_exists(self):
+        """Function is importable."""
+        from jax_frc.models.neutral_fluid import hlle_flux_1d
+        assert callable(hlle_flux_1d)
+
+    def test_hlle_flux_uniform_state(self):
+        """HLLE returns physical flux for uniform state."""
+        from jax_frc.models.neutral_fluid import hlle_flux_1d, euler_flux_1d
+        rho = 1.0
+        v = 100.0
+        p = 1e5
+        E = p / (5/3 - 1) + 0.5 * rho * v**2
+
+        # Same state on left and right
+        F_hlle = hlle_flux_1d(rho, rho, v, v, p, p, E, E)
+        F_exact = euler_flux_1d(rho, v, p, E)
+
+        assert jnp.allclose(F_hlle[0], F_exact[0], rtol=1e-5)
+        assert jnp.allclose(F_hlle[1], F_exact[1], rtol=1e-5)
+        assert jnp.allclose(F_hlle[2], F_exact[2], rtol=1e-5)
+
+    def test_hlle_flux_supersonic_right(self):
+        """For supersonic flow to right, use left flux."""
+        from jax_frc.models.neutral_fluid import hlle_flux_1d, euler_flux_1d
+        # Supersonic flow: v >> c_s
+        rho = 1.0
+        v = 1000.0  # Much faster than sound speed ~300 m/s
+        p = 1e5
+        E = p / (5/3 - 1) + 0.5 * rho * v**2
+
+        # Slight perturbation on right
+        F_hlle = hlle_flux_1d(rho, rho*1.01, v, v, p, p*1.01, E, E*1.01)
+        F_left = euler_flux_1d(rho, v, p, E)
+
+        # Should be close to left flux
+        assert jnp.allclose(F_hlle[0], F_left[0], rtol=0.1)

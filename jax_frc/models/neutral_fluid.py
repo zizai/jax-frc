@@ -90,3 +90,66 @@ def euler_flux_1d(rho: Array, v: Array, p: Array, E: Array) -> Tuple[Array, Arra
     F_mom = rho * v**2 + p
     F_E = (E + p) * v
     return F_rho, F_mom, F_E
+
+
+@jit
+def hlle_flux_1d(
+    rho_L: Array, rho_R: Array,
+    v_L: Array, v_R: Array,
+    p_L: Array, p_R: Array,
+    E_L: Array, E_R: Array,
+    gamma: float = GAMMA
+) -> Tuple[Array, Array, Array]:
+    """HLLE approximate Riemann solver for 1D Euler equations.
+
+    Args:
+        rho_L, rho_R: Left/right densities
+        v_L, v_R: Left/right velocities (normal component)
+        p_L, p_R: Left/right pressures
+        E_L, E_R: Left/right total energies
+        gamma: Adiabatic index
+
+    Returns:
+        F_rho, F_mom, F_E: Numerical fluxes at interface
+    """
+    # Sound speeds
+    rho_L_safe = jnp.maximum(rho_L, 1e-20)
+    rho_R_safe = jnp.maximum(rho_R, 1e-20)
+    p_L_safe = jnp.maximum(p_L, 1e-10)
+    p_R_safe = jnp.maximum(p_R, 1e-10)
+
+    c_L = jnp.sqrt(gamma * p_L_safe / rho_L_safe)
+    c_R = jnp.sqrt(gamma * p_R_safe / rho_R_safe)
+
+    # Wave speed estimates (Davis)
+    S_L = jnp.minimum(v_L - c_L, v_R - c_R)
+    S_R = jnp.maximum(v_L + c_L, v_R + c_R)
+
+    # Physical fluxes
+    F_rho_L, F_mom_L, F_E_L = euler_flux_1d(rho_L, v_L, p_L, E_L)
+    F_rho_R, F_mom_R, F_E_R = euler_flux_1d(rho_R, v_R, p_R, E_R)
+
+    # Conserved variables
+    U_rho_L, U_rho_R = rho_L, rho_R
+    U_mom_L, U_mom_R = rho_L * v_L, rho_R * v_R
+    U_E_L, U_E_R = E_L, E_R
+
+    # Avoid division by zero
+    dS = S_R - S_L
+    dS_safe = jnp.where(jnp.abs(dS) < 1e-10, 1e-10, dS)
+
+    # HLLE flux formula
+    def hlle_component(F_L, F_R, U_L, U_R):
+        return jnp.where(
+            S_L >= 0, F_L,
+            jnp.where(
+                S_R <= 0, F_R,
+                (S_R * F_L - S_L * F_R + S_L * S_R * (U_R - U_L)) / dS_safe
+            )
+        )
+
+    F_rho = hlle_component(F_rho_L, F_rho_R, U_rho_L, U_rho_R)
+    F_mom = hlle_component(F_mom_L, F_mom_R, U_mom_L, U_mom_R)
+    F_E = hlle_component(F_E_L, F_E_R, U_E_L, U_E_R)
+
+    return F_rho, F_mom, F_E
