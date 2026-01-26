@@ -116,7 +116,9 @@ class BurnPhysics:
         # Kronecker delta for identical particles (DD reactions)
         kronecker = 1.0 if reaction in ("DD_T", "DD_HE3") else 0.0
 
-        return n1 * n2 * sigma_v / (1.0 + kronecker)
+        # Compute (n1 * sigma_v) * n2 to avoid overflow from n1 * n2
+        # since sigma_v is very small (~1e-22) and n can be large (~1e20)
+        return (n1 * sigma_v) * n2 / (1.0 + kronecker)
 
     def compute_rates(
         self, n_D: Array, n_T: Array, n_He3: Array, T_keV: Array

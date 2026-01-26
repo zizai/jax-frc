@@ -59,3 +59,96 @@ jax.tree_util.register_pytree_node(
     _burning_plasma_state_flatten,
     _burning_plasma_state_unflatten,
 )
+
+
+from jax_frc.transport import TransportModel
+from jax_frc.models.resistive_mhd import ResistiveMHD
+
+
+@dataclass
+class BurningPlasmaModel:
+    """Burning plasma model with fusion, transport, and energy recovery.
+
+    Orchestrates MHD core, burn physics, species tracking,
+    transport, and direct conversion modules.
+    """
+    mhd_core: ResistiveMHD
+    burn: BurnPhysics
+    species_tracker: SpeciesTracker
+    transport: TransportModel
+    conversion: DirectConversion
+
+    def step(
+        self,
+        state: BurningPlasmaState,
+        dt: float,
+        geometry: Geometry,
+    ) -> BurningPlasmaState:
+        """Advance burning plasma state by one timestep.
+
+        Args:
+            state: Current burning plasma state
+            dt: Timestep [s]
+            geometry: Computational geometry
+
+        Returns:
+            Updated BurningPlasmaState
+        """
+        # 1. Get temperature in keV from MHD state
+        T_keV = state.mhd.T  # Assuming T is already in keV
+
+        # 2. Compute fusion reaction rates
+        rates = self.burn.compute_rates(
+            n_D=state.species.n_D,
+            n_T=state.species.n_T,
+            n_He3=state.species.n_He3,
+            T_keV=T_keV,
+        )
+
+        # 3. Compute power sources
+        power = self.burn.power_sources(rates)
+
+        # 4. Compute burn source terms for species
+        burn_sources = self.species_tracker.burn_sources(rates)
+
+        # 5. Compute transport fluxes and divergences
+        transport_div = {}
+        for species_name, n in [
+            ("D", state.species.n_D),
+            ("T", state.species.n_T),
+            ("He3", state.species.n_He3),
+            ("He4", state.species.n_He4),
+            ("p", state.species.n_p),
+        ]:
+            Gamma_r, Gamma_z = self.transport.particle_flux(n, geometry)
+            div_Gamma = self.transport.flux_divergence(Gamma_r, Gamma_z, geometry)
+            transport_div[species_name] = -div_Gamma  # -div(Gamma) is source
+
+        # 6. Update species densities
+        new_species = self.species_tracker.advance(
+            state=state.species,
+            burn_sources=burn_sources,
+            transport_divergence=transport_div,
+            dt=dt,
+        )
+
+        # 7. Compute direct conversion power from B-field change
+        # (For now, use current B since MHD step not fully integrated)
+        new_conversion = self.conversion.compute_power(
+            B_old=state.mhd.B,
+            B_new=state.mhd.B,  # TODO: integrate with MHD step
+            dt=dt,
+            geometry=geometry,
+        )
+
+        # 8. Update MHD state (simplified - just pass through for now)
+        # Full integration would add alpha heating to energy equation
+        new_mhd = state.mhd
+
+        return BurningPlasmaState(
+            mhd=new_mhd,
+            species=new_species,
+            rates=rates,
+            power=power,
+            conversion=new_conversion,
+        )
