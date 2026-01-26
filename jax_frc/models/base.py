@@ -35,5 +35,8 @@ class PhysicsModel(ABC):
         elif model_type == "hybrid_kinetic":
             from jax_frc.models.hybrid_kinetic import HybridKinetic
             return HybridKinetic.from_config(config)
+        elif model_type == "burning_plasma":
+            from jax_frc.models.burning_plasma import BurningPlasmaModel
+            return BurningPlasmaModel.from_config(config)
         else:
             raise ValueError(f"Unknown model type: {model_type}")

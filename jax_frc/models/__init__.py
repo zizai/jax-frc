@@ -10,6 +10,7 @@ from jax_frc.models.resistivity import SpitzerResistivity, ChoduraResistivity
 from jax_frc.models.protocols import SplitRHS, SourceTerms
 from jax_frc.models.coupled import CoupledState, CoupledModel, CoupledModelConfig, SourceRates
 from jax_frc.models.atomic_coupling import AtomicCoupling, AtomicCouplingConfig
+from jax_frc.models.burning_plasma import BurningPlasmaModel, BurningPlasmaState
 
 __all__ = [
     "PhysicsModel",
@@ -28,4 +29,6 @@ __all__ = [
     "SourceRates",
     "AtomicCoupling",
     "AtomicCouplingConfig",
+    "BurningPlasmaModel",
+    "BurningPlasmaState",
 ]
