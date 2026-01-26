@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, List
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
-from jax_frc.scenarios.transitions import Transition
+from jax_frc.configurations.transitions import Transition
 
 
 @dataclass

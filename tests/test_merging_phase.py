@@ -4,8 +4,8 @@ import pytest
 import jax.numpy as jnp
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
-from jax_frc.scenarios.phases.merging import MergingPhase
-from jax_frc.scenarios.transitions import timeout
+from jax_frc.configurations.phases.merging import MergingPhase
+from jax_frc.configurations import timeout
 
 
 class TestMergingPhase:
