@@ -4,9 +4,11 @@ Implements Euler equations for neutral gas with atomic source terms.
 """
 
 from dataclasses import dataclass
+from typing import Tuple
+
 import jax
 import jax.numpy as jnp
-from jax import Array
+from jax import Array, jit
 
 from jax_frc.constants import MI
 
@@ -67,3 +69,24 @@ def _neutral_state_unflatten(aux_data, children):
 jax.tree_util.register_pytree_node(
     NeutralState, _neutral_state_flatten, _neutral_state_unflatten
 )
+
+
+@jit
+def euler_flux_1d(rho: Array, v: Array, p: Array, E: Array) -> Tuple[Array, Array, Array]:
+    """Compute 1D Euler fluxes.
+
+    Args:
+        rho: Mass density [kg/m³]
+        v: Velocity component in flux direction [m/s]
+        p: Pressure [Pa]
+        E: Total energy density [J/m³]
+
+    Returns:
+        F_rho: Mass flux [kg/m²/s]
+        F_mom: Momentum flux [Pa]
+        F_E: Energy flux [W/m²]
+    """
+    F_rho = rho * v
+    F_mom = rho * v**2 + p
+    F_E = (E + p) * v
+    return F_rho, F_mom, F_E

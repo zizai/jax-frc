@@ -63,3 +63,42 @@ class TestNeutralState:
 
         result = get_density(state)
         assert result.shape == (16, 32)
+
+
+class TestEulerFlux:
+    """Tests for Euler flux computations."""
+
+    def test_euler_flux_exists(self):
+        """Function is importable."""
+        from jax_frc.models.neutral_fluid import euler_flux_1d
+        assert callable(euler_flux_1d)
+
+    def test_euler_flux_mass(self):
+        """Mass flux = rho * v."""
+        from jax_frc.models.neutral_fluid import euler_flux_1d
+        rho = 1.0
+        v = 100.0
+        p = 1e5
+        E = p / (5/3 - 1) + 0.5 * rho * v**2
+        F_rho, F_mom, F_E = euler_flux_1d(rho, v, p, E)
+        assert jnp.isclose(F_rho, rho * v)
+
+    def test_euler_flux_momentum(self):
+        """Momentum flux = rho * v² + p."""
+        from jax_frc.models.neutral_fluid import euler_flux_1d
+        rho = 1.0
+        v = 100.0
+        p = 1e5
+        E = p / (5/3 - 1) + 0.5 * rho * v**2
+        F_rho, F_mom, F_E = euler_flux_1d(rho, v, p, E)
+        assert jnp.isclose(F_mom, rho * v**2 + p)
+
+    def test_euler_flux_energy(self):
+        """Energy flux = (E + p) * v."""
+        from jax_frc.models.neutral_fluid import euler_flux_1d
+        rho = 1.0
+        v = 100.0
+        p = 1e5
+        E = p / (5/3 - 1) + 0.5 * rho * v**2
+        F_rho, F_mom, F_E = euler_flux_1d(rho, v, p, E)
+        assert jnp.isclose(F_E, (E + p) * v)
