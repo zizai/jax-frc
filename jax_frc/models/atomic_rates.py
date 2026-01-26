@@ -137,11 +137,11 @@ def charge_exchange_rates(
     """Charge exchange momentum and energy transfer rates.
 
     R_cx: Momentum transfer to plasma [N/m^3] (add to plasma, subtract from neutrals)
-    Q_cx: Energy transfer to plasma [W/m^3] (add to plasma, subtract from neutrals)
+    Q_cx: Energy loss rate from plasma [W/m^3]
 
-    For cold neutrals (T_n << T_i), energy flows from ions to neutrals,
-    so Q_cx represents energy gained by plasma from neutrals (negative for hot plasma).
-    Convention: positive Q_cx means plasma gains energy.
+    For cold neutrals (T_n << T_i), energy flows from ions to neutrals.
+    Convention: positive Q_cx means plasma LOSES energy (to neutrals).
+    This represents the rate of thermal energy transfer from plasma to neutrals.
 
     Args:
         Ti: Ion temperature [J]
