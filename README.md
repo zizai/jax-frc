@@ -6,9 +6,12 @@ A JAX-based GPU-accelerated implementation of plasma physics models for Field-Re
 
 ## Key Features
 
-- **Three Physics Models**: Resistive MHD, Extended MHD, and Hybrid Kinetic
+- **Five Physics Models**: Resistive MHD, Extended MHD, Hybrid Kinetic, Neutral Fluid, Burning Plasma
+- **Fusion Burn Physics**: D-T/D-D/D-He3 reactions with Bosch-Hale rates
+- **Anomalous Transport**: Configurable particle and energy diffusion
 - **Multi-Phase Scenarios**: Automatic phase transitions for complex simulations
 - **FRC Merging**: Two-FRC collision with Belova et al. validation
+- **Direct Energy Conversion**: Induction-based power recovery modeling
 - **Property-Based Testing**: Physics invariant validation
 
 ## Quick Start
@@ -37,20 +40,23 @@ final_state = sim.run_steps(100)
 Full documentation is available in the [docs/](docs/index.md) directory:
 
 - [Getting Started](docs/getting-started.md) - Installation and usage
-- [Physics Models](docs/models/index.md) - Resistive MHD, Extended MHD, Hybrid Kinetic
+- [Physics Models](docs/models/index.md) - Resistive MHD, Extended MHD, Hybrid Kinetic, Neutral Fluid, Burning Plasma
+- [Supporting Modules](docs/modules/burn.md) - Burn physics, transport, comparisons
+- [Developer Guide](docs/developer/architecture.md) - Architecture, JAX patterns, extending the code
 - [API Reference](docs/api/index.md) - Core, Solvers, Boundaries, Diagnostics
-- [Scenarios](docs/scenarios/index.md) - Multi-phase simulations and FRC merging
 - [Testing](docs/testing/index.md) - Test suite and physics invariants
-- [Reference](docs/reference/index.md) - Physics concepts and model comparison
 
 ## Commands
 
 ```bash
 # Run examples
-python examples.py
+python run_example.py examples/merging.yaml
 
 # Run tests
 py -m pytest tests/ -v
+
+# Run tests (skip slow physics tests)
+py -m pytest tests/ -k "not slow"
 ```
 
 ## Project Structure
@@ -58,13 +64,21 @@ py -m pytest tests/ -v
 ```
 jax-frc/
 ├── jax_frc/           # Main package
+│   ├── models/        # Physics models
+│   ├── solvers/       # Time integration
+│   ├── burn/          # Fusion burn physics
+│   ├── transport/     # Anomalous transport
+│   ├── comparisons/   # Literature validation
+│   └── ...
 ├── tests/             # Test suite with invariants
-├── examples/          # Example scenarios
+├── examples/          # Example configurations
 ├── docs/              # Documentation
-├── resistive_mhd.py   # Standalone models
-├── extended_mhd.py
-└── hybrid_kinetic.py
+└── CONTRIBUTING.md    # Contribution guidelines
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and PR workflow.
 
 ## License
 
