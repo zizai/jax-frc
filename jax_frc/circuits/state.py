@@ -92,3 +92,22 @@ jax.tree_util.register_pytree_node(
     _circuit_state_flatten,
     _circuit_state_unflatten,
 )
+
+
+# Register CircuitParams as JAX pytree
+def _circuit_params_flatten(params):
+    children = (params.L, params.R, params.C)
+    aux_data = None
+    return children, aux_data
+
+
+def _circuit_params_unflatten(aux_data, children):
+    L, R, C = children
+    return CircuitParams(L=L, R=R, C=C)
+
+
+jax.tree_util.register_pytree_node(
+    CircuitParams,
+    _circuit_params_flatten,
+    _circuit_params_unflatten,
+)
