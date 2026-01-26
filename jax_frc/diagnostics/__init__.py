@@ -15,6 +15,7 @@ from jax_frc.diagnostics.output import (
     save_time_history,
 )
 from jax_frc.diagnostics.merging import MergingDiagnostics
+from jax_frc.diagnostics.energy import EnergyDiagnostics
 from jax_frc.diagnostics.plotting import (
     plot_overview,
     plot_time_traces,
@@ -32,6 +33,7 @@ __all__ = [
     "SeparatrixProbe",
     "DiagnosticSet",
     "MergingDiagnostics",
+    "EnergyDiagnostics",
     "save_checkpoint",
     "load_checkpoint",
     "save_time_history",
