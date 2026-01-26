@@ -33,6 +33,35 @@ def conservation_drift(initial: float, final: float) -> float:
     return float(jnp.abs(final - initial) / jnp.abs(initial))
 
 
+def shock_position(profile: jnp.ndarray, axis: jnp.ndarray) -> float:
+    """Find position of steepest gradient (shock location).
+
+    Args:
+        profile: 1D array of field values (e.g., density)
+        axis: 1D array of positions along which to search
+
+    Returns:
+        Position of maximum |gradient|
+    """
+    grad = jnp.abs(jnp.diff(profile))
+    idx = jnp.argmax(grad)
+    # Interpolate to midpoint between cells
+    return float((axis[idx] + axis[idx + 1]) / 2)
+
+
+def shock_position_error(
+    profile: jnp.ndarray,
+    axis: jnp.ndarray,
+    expected: float
+) -> float:
+    """Compute relative error in shock position.
+
+    Returns: |detected - expected| / |expected|
+    """
+    detected = shock_position(profile, axis)
+    return float(jnp.abs(detected - expected) / jnp.abs(expected))
+
+
 def check_tolerance(
     value: float,
     expected: float,
@@ -73,4 +102,6 @@ METRIC_FUNCTIONS = {
     'linf_error': linf_error,
     'rmse_curve': rmse_curve,
     'conservation_drift': conservation_drift,
+    'shock_position': shock_position,
+    'shock_position_error': shock_position_error,
 }

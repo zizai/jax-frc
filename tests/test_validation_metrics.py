@@ -49,3 +49,28 @@ def test_check_tolerance_absolute():
 
     result = check_tolerance(value=1.05, expected=1.0, tolerance=0.1)
     assert result['pass'] is True
+
+
+def test_shock_position_finds_discontinuity():
+    """shock_position detects steepest gradient location."""
+    from jax_frc.validation.metrics import shock_position
+    import jax.numpy as jnp
+
+    # Profile with sharp jump at z=0.3
+    z = jnp.linspace(0, 1, 100)
+    rho = jnp.where(z < 0.3, 1.0, 0.125)
+
+    position = shock_position(rho, z)
+    assert abs(position - 0.3) < 0.02  # Within 2 grid cells
+
+
+def test_shock_position_error_computes_relative():
+    """shock_position_error returns relative error vs expected."""
+    from jax_frc.validation.metrics import shock_position_error
+    import jax.numpy as jnp
+
+    z = jnp.linspace(0, 1, 100)
+    rho = jnp.where(z < 0.32, 1.0, 0.125)  # Shock at 0.32
+
+    error = shock_position_error(rho, z, expected=0.3)
+    assert abs(error - 0.0667) < 0.01  # (0.32 - 0.3) / 0.3 ≈ 0.067
