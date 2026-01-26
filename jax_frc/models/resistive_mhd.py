@@ -86,6 +86,68 @@ class ResistiveMHD(PhysicsModel):
         delta_star = self._laplace_star(psi, geometry.dr, geometry.dz, geometry.r_grid)
         return -delta_star / (MU0 * geometry.r_grid)
 
+    def explicit_rhs(self, state: State, geometry: Geometry, t: float = 0.0) -> State:
+        """Advection term only: -v . grad(psi).
+
+        This is the explicit part for IMEX splitting.
+        """
+        psi = state.psi
+        v_r = state.v[:, :, 0]
+        v_z = state.v[:, :, 2]
+        dr, dz = geometry.dr, geometry.dz
+
+        # Compute gradient of psi using central differences (consistent with compute_rhs)
+        dpsi_dr = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
+        dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
+
+        # Advection: -v . grad(psi)
+        advection = -(v_r * dpsi_dr + v_z * dpsi_dz)
+
+        return state.replace(psi=advection)
+
+    def implicit_rhs(self, state: State, geometry: Geometry, t: float = 0.0) -> State:
+        """Diffusion term only: (eta/mu0) * Delta*psi.
+
+        This is the implicit part for IMEX splitting.
+        """
+        psi = state.psi
+        dr, dz = geometry.dr, geometry.dz
+        r = geometry.r_grid
+
+        # Compute Delta*psi
+        delta_star_psi = self._laplace_star(psi, dr, dz, r)
+
+        # Get resistivity
+        j_phi = -delta_star_psi / (MU0 * r)
+        eta = self.resistivity.compute(j_phi)
+
+        # Diffusion: (eta/mu_0)*Delta*psi
+        diffusion = (eta / MU0) * delta_star_psi
+
+        return state.replace(psi=diffusion)
+
+    def apply_implicit_operator(
+        self, state: State, geometry: Geometry, dt: float, theta: float
+    ) -> State:
+        """Apply (I - theta*dt*L) where L is diffusion operator.
+
+        Used for matrix-free CG solve.
+        """
+        psi = state.psi
+        dr, dz = geometry.dr, geometry.dz
+        r = geometry.r_grid
+
+        # Compute diffusion operator L*psi = (eta/mu0) * Delta*psi
+        delta_star_psi = self._laplace_star(psi, dr, dz, r)
+        j_phi = -delta_star_psi / (MU0 * r)
+        eta = self.resistivity.compute(j_phi)
+        L_psi = (eta / MU0) * delta_star_psi
+
+        # Apply (I - theta*dt*L)
+        new_psi = psi - theta * dt * L_psi
+
+        return state.replace(psi=new_psi)
+
     @classmethod
     def from_config(cls, config: dict) -> "ResistiveMHD":
         """Create from configuration dictionary."""
