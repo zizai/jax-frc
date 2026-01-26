@@ -1,0 +1,39 @@
+# Belova Comparison: Resistive MHD vs Hybrid Kinetic
+# Runs both models and generates comparison report
+# Reference: Belova et al. 2025, arXiv:2501.03425
+
+name: belova_comparison
+description: |
+  Compare resistive MHD and hybrid kinetic models for FRC merging.
+  Based on Belova et al. 2025 methodology.
+
+  This configuration runs both models with identical initial conditions
+  and compares key diagnostics including:
+    - Null point separation vs time
+    - Reconnection rate evolution
+    - Energy partition between thermal and magnetic
+    - Total merge time
+
+comparison:
+  type: belova_merging
+  cases:
+    - examples/belova_case1_resistive.yaml
+    - examples/belova_case1_hybrid.yaml
+
+  metrics:
+    - null_separation_vs_time
+    - reconnection_rate_vs_time
+    - energy_partition
+    - merge_time
+
+runtime:
+  # Uses runtime from individual cases
+  parallel: false  # Run sequentially for memory constraints
+
+output:
+  report_format: markdown
+  plot_format: png
+  path: results/belova_comparison
+  save_history: true
+  print_summary: true
+  log_level: INFO

@@ -1,0 +1,62 @@
+# Belova Case 1: FRC Merging with Hybrid Kinetic Model
+# Reference: Belova et al. 2025, arXiv:2501.03425
+
+name: belova_case1_hybrid
+description: |
+  FRC merging simulation using hybrid kinetic model with
+  particle ions and fluid electrons.
+  Parameters based on Belova et al. 2025 for comparison with
+  resistive MHD results.
+
+  Parameters:
+    S* = 25.6, E = 2.9, xs = 0.69, beta_s = 0.2
+    Initial separation: dZ = 180 (normalized)
+    Initial velocity: Vz = 0.2 vA
+
+  Expected outcome: Partial merge, doublet configuration
+  (kinetic effects may modify reconnection dynamics)
+
+configuration:
+  class: BelovaCase1Configuration
+  overrides:
+    model_type: hybrid_kinetic
+
+geometry:
+  coord_system: cylindrical
+  nr: 64
+  nz: 128
+  r_min: 0.0
+  r_max: 0.5
+  z_min: -2.0
+  z_max: 2.0
+
+model:
+  type: hybrid_kinetic
+  n_particles: 100000
+  ion_species: deuterium
+
+initial_conditions:
+  type: two_frc_merging
+  separation: 2.0  # m
+  initial_velocity: 0.0  # m/s
+  frc_elongation: 3.0
+  frc_radius: 0.2  # m
+  peak_beta: 1.0
+
+runtime:
+  t_end: 30.0
+  dt: 0.001
+
+diagnostics:
+  - type: merging
+    interval: 100  # steps between diagnostics
+  - type: energy_partition
+    interval: 100
+
+output:
+  format: npz
+  path: results/belova_case1_hybrid
+  save_interval: 1000
+  save_history: true
+  print_summary: true
+  log_level: INFO
