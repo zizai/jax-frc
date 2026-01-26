@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from jax import Array
 
 
-@dataclass
+@dataclass(frozen=True)
 class ThermalTransport:
     """Anisotropic thermal transport model for magnetized plasma.
 

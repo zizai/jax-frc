@@ -1,7 +1,9 @@
 """Resistive MHD physics model."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from functools import partial
 from typing import Union, Optional
+import jax
 import jax.numpy as jnp
 from jax import jit
 
@@ -13,7 +15,7 @@ from jax_frc.fields import CoilField
 
 MU0 = 1.2566e-6
 
-@dataclass
+@dataclass(frozen=True)
 class ResistiveMHD(PhysicsModel):
     """Single-fluid resistive MHD model.
 
@@ -72,6 +74,7 @@ class ResistiveMHD(PhysicsModel):
 
         return B_r, B_z
 
+    @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
         """Compute d(psi)/dt from Grad-Shafranov evolution."""
         psi = state.psi
@@ -90,13 +93,13 @@ class ResistiveMHD(PhysicsModel):
         # Diffusion: (eta/mu_0)*Delta*psi
         d_psi = (eta / MU0) * delta_star_psi
 
-        # Advection: -v*grad(psi) (if velocity present)
+        # Advection: -v*grad(psi)
+        # Always compute advection term (costs nothing when v=0, avoids tracing issues)
         v_r = state.v[:, :, 0]
         v_z = state.v[:, :, 2]
-        if jnp.any(v_r != 0) or jnp.any(v_z != 0):
-            dpsi_dr = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
-            dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
-            d_psi = d_psi - (v_r * dpsi_dr + v_z * dpsi_dz)
+        dpsi_dr = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
+        dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
+        d_psi = d_psi - (v_r * dpsi_dr + v_z * dpsi_dz)
 
         # Return state with d_psi as the RHS (stored in psi temporarily)
         return state.replace(psi=d_psi)

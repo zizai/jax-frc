@@ -12,6 +12,8 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from jax_frc.configurations import CONFIGURATION_REGISTRY
+from jax_frc.diagnostics.output import OutputManager
+from jax_frc.diagnostics.progress import ProgressReporter
 
 
 def find_example_file(name: str, base_dir: Path) -> Path:
@@ -73,14 +75,15 @@ def list_examples(base_dir: Path) -> list:
     return sorted(examples)
 
 
-def run_example(yaml_path: Path):
+def run_example(yaml_path: Path, args):
     """Run a single example from YAML.
 
     Args:
         yaml_path: Path to example YAML file
+        args: Parsed command-line arguments
 
     Returns:
-        ConfigurationResult from running the example
+        Tuple of (ConfigurationResult, OutputManager) from running the example
     """
     with open(yaml_path) as f:
         config = yaml.safe_load(f)
@@ -102,34 +105,63 @@ def run_example(yaml_path: Path):
         if 'dt' in config['runtime']:
             configuration.dt = config['runtime']['dt']
 
+    # Setup output manager
+    output_manager = OutputManager(
+        output_dir=args.output_dir,
+        example_name=yaml_path.stem,
+        save_checkpoint=args.checkpoint,
+    )
+    output_manager.setup()
+    output_manager.save_config(config)
+
+    # Setup progress reporter
+    if args.progress:
+        progress_reporter = ProgressReporter(
+            t_end=configuration.timeout,
+            enabled=True,
+        )
+        configuration.progress_reporter = progress_reporter
+
     # Print header
     print(f"\n{'='*60}")
     print(f"Running: {config['name']}")
-    print(f"{'='*60}")
-    if config.get('description'):
-        for line in config['description'].strip().split('\n'):
-            print(f"  {line}")
-    print(f"\nConfiguration: {class_name}")
-    print(f"Model: {configuration.model_type}")
-    print(f"Runtime: t_end={configuration.timeout}, dt={configuration.dt}")
+    print(f"Output: {output_manager.run_dir}")
     print(f"{'='*60}\n")
 
     # Run simulation
     result = configuration.run()
 
-    # Print summary
+    # Collect and save history
+    combined_history = {"time": []}
+    for pr in result.phase_results:
+        if pr.history:
+            for key, values in pr.history.items():
+                if key not in combined_history:
+                    combined_history[key] = []
+                combined_history[key].extend(values)
+
+    if combined_history["time"]:
+        output_manager.save_history(combined_history, format=args.history_format)
+
+    # Save final checkpoint
+    if args.checkpoint:
+        geometry = configuration.build_geometry()
+        output_manager.save_final_checkpoint(
+            result.final_state,
+            geometry,
+            metadata={"example": config['name'], "success": result.success},
+        )
+
+    # Print summary and outputs
     print(f"\n{'='*60}")
     print(f"Result: {'SUCCESS' if result.success else 'FAILED'}")
-    print(f"{'='*60}")
-    for pr in result.phase_results:
-        print(f"  Phase '{pr.name}':")
-        print(f"    Termination: {pr.termination}")
-        print(f"    End time: {pr.end_time:.4f}")
-        if hasattr(pr, 'steps') and pr.steps is not None:
-            print(f"    Steps: {pr.steps}")
+    summary = output_manager.get_summary()
+    print("Outputs saved:")
+    for key, value in summary.items():
+        print(f"  {key}: {value}")
     print()
 
-    return result
+    return result, output_manager
 
 
 def main():
@@ -151,6 +183,24 @@ Examples:
     parser.add_argument('--list', action='store_true', help="List available examples")
     parser.add_argument('--log-level', default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
+
+    # New output options
+    parser.add_argument('--output-dir', type=Path, default=Path('outputs'),
+                        help="Base directory for outputs (default: outputs/)")
+    parser.add_argument('--progress', dest='progress', action='store_true', default=True,
+                        help="Show progress bar (default)")
+    parser.add_argument('--no-progress', dest='progress', action='store_false',
+                        help="Disable progress bar")
+    parser.add_argument('--plots', dest='plots', action='store_true', default=True,
+                        help="Generate plots (default)")
+    parser.add_argument('--no-plots', dest='plots', action='store_false',
+                        help="Skip plot generation")
+    parser.add_argument('--checkpoint', dest='checkpoint', action='store_true', default=True,
+                        help="Save final checkpoint (default)")
+    parser.add_argument('--no-checkpoint', dest='checkpoint', action='store_false',
+                        help="Skip final checkpoint")
+    parser.add_argument('--history-format', choices=['csv', 'json'], default='csv',
+                        help="Format for history output (default: csv)")
 
     args = parser.parse_args()
 
@@ -196,8 +246,8 @@ Examples:
     results = []
     for example_file in example_files:
         try:
-            result = run_example(example_file)
-            results.append((example_file.stem, result))
+            result, output_mgr = run_example(example_file, args)
+            results.append((example_file.stem, result, output_mgr))
             if not result.success:
                 all_success = False
         except Exception as e:
@@ -209,7 +259,7 @@ Examples:
         print(f"\n{'='*60}")
         print("Summary")
         print(f"{'='*60}")
-        for name, result in results:
+        for name, result, output_mgr in results:
             status = "SUCCESS" if result.success else "FAILED"
             print(f"  {name}: {status}")
         print()
