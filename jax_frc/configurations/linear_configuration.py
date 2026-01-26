@@ -12,6 +12,7 @@ from typing import List, Optional, Dict, Any, TYPE_CHECKING
 import logging
 
 from jax_frc.configurations.base import AbstractConfiguration
+from jax_frc.diagnostics.progress import ProgressReporter
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
 from jax_frc.configurations.phase import Phase, PhaseResult, PHASE_REGISTRY
@@ -149,6 +150,9 @@ class LinearConfiguration(AbstractConfiguration):
 
     # Diagnostics (runtime, not serialized)
     diagnostics: List["Probe"] = field(default_factory=list)
+
+    # Progress reporting (optional)
+    progress_reporter: Optional[ProgressReporter] = None
 
     @abstractmethod
     def build_phase_specs(self) -> List[PhaseSpec]:
@@ -288,6 +292,15 @@ class LinearConfiguration(AbstractConfiguration):
                 for probe in self.diagnostics:
                     history[probe.name].append(probe.measure(state, geometry))
 
+                # Report progress
+                if self.progress_reporter is not None:
+                    self.progress_reporter.report(
+                        t=t,
+                        step=int(state.step),
+                        dt=self.dt,
+                        phase_name=phase.name,
+                    )
+
             # Apply step hook (time-varying BCs, etc.)
             state = phase.step_hook(state, geometry, t)
 
@@ -297,6 +310,10 @@ class LinearConfiguration(AbstractConfiguration):
 
         # Cleanup
         state = phase.on_complete(state, geometry)
+
+        # Finish progress line
+        if self.progress_reporter is not None:
+            self.progress_reporter.finish()
 
         return PhaseResult(
             name=phase.name,
