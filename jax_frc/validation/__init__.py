@@ -3,10 +3,31 @@ from .metrics import l2_error, linf_error, rmse_curve, check_tolerance, METRIC_F
 from .references import ReferenceManager, ReferenceData
 from .result import ValidationResult, MetricResult
 from .runner import ValidationRunner
+from .translation import (
+    AnalyticTrajectory,
+    TranslationResult,
+    TranslationBenchmark,
+    ModelComparisonResult,
+    compute_field_gradient_at_point,
+    create_mirror_push_benchmark,
+    create_uniform_gradient_benchmark,
+    create_staged_acceleration_benchmark,
+    traveling_wave_timing,
+)
 
 __all__ = [
     'l2_error', 'linf_error', 'rmse_curve', 'check_tolerance', 'METRIC_FUNCTIONS',
     'ReferenceManager', 'ReferenceData',
     'ValidationResult', 'MetricResult',
-    'ValidationRunner'
+    'ValidationRunner',
+    # Translation validation
+    'AnalyticTrajectory',
+    'TranslationResult',
+    'TranslationBenchmark',
+    'ModelComparisonResult',
+    'compute_field_gradient_at_point',
+    'create_mirror_push_benchmark',
+    'create_uniform_gradient_benchmark',
+    'create_staged_acceleration_benchmark',
+    'traveling_wave_timing',
 ]
