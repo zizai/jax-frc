@@ -10,6 +10,12 @@ from jax_frc.circuits.waveforms import (
     make_constant,
     waveform_from_config,
 )
+from jax_frc.circuits.external import (
+    CoilGeometry,
+    CircuitDriver,
+    ExternalCircuit,
+    ExternalCircuits,
+)
 
 __all__ = [
     "CircuitState",
@@ -21,4 +27,8 @@ __all__ = [
     "make_pulse",
     "make_constant",
     "waveform_from_config",
+    "CoilGeometry",
+    "CircuitDriver",
+    "ExternalCircuit",
+    "ExternalCircuits",
 ]
