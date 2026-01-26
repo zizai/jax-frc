@@ -6,6 +6,7 @@ Implements Bosch-Hale parameterization for D-T, D-D, and D-3He reactions.
 from dataclasses import dataclass
 from typing import Literal
 
+import jax
 import jax.numpy as jnp
 from jax import Array, jit
 
@@ -177,3 +178,39 @@ class BurnPhysics:
             P_neutron=P_neutron,
             P_charged=P_charged,
         )
+
+
+# Register ReactionRates as JAX pytree
+def _reaction_rates_flatten(state):
+    children = (state.DT, state.DD_T, state.DD_HE3, state.DHE3)
+    aux_data = None
+    return children, aux_data
+
+
+def _reaction_rates_unflatten(aux_data, children):
+    DT, DD_T, DD_HE3, DHE3 = children
+    return ReactionRates(DT=DT, DD_T=DD_T, DD_HE3=DD_HE3, DHE3=DHE3)
+
+
+jax.tree_util.register_pytree_node(
+    ReactionRates, _reaction_rates_flatten, _reaction_rates_unflatten
+)
+
+
+# Register PowerSources as JAX pytree
+def _power_sources_flatten(state):
+    children = (state.P_fusion, state.P_alpha, state.P_neutron, state.P_charged)
+    aux_data = None
+    return children, aux_data
+
+
+def _power_sources_unflatten(aux_data, children):
+    P_fusion, P_alpha, P_neutron, P_charged = children
+    return PowerSources(
+        P_fusion=P_fusion, P_alpha=P_alpha, P_neutron=P_neutron, P_charged=P_charged
+    )
+
+
+jax.tree_util.register_pytree_node(
+    PowerSources, _power_sources_flatten, _power_sources_unflatten
+)

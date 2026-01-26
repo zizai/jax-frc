@@ -5,6 +5,7 @@ Computes electrical power recovery from time-varying magnetic flux.
 
 from dataclasses import dataclass
 
+import jax
 import jax.numpy as jnp
 from jax import Array
 
@@ -108,3 +109,20 @@ class DirectConversion:
             Power that should be subtracted from plasma energy [W]
         """
         return state.P_electric
+
+
+# Register ConversionState as JAX pytree
+def _conversion_state_flatten(state):
+    children = (state.P_electric, state.V_induced, state.dPsi_dt)
+    aux_data = None
+    return children, aux_data
+
+
+def _conversion_state_unflatten(aux_data, children):
+    P_electric, V_induced, dPsi_dt = children
+    return ConversionState(P_electric=P_electric, V_induced=V_induced, dPsi_dt=dPsi_dt)
+
+
+jax.tree_util.register_pytree_node(
+    ConversionState, _conversion_state_flatten, _conversion_state_unflatten
+)
