@@ -24,7 +24,8 @@ class TestBurningPlasmaState:
         """Can create BurningPlasmaState."""
         from jax_frc.models.burning_plasma import BurningPlasmaState
         from jax_frc.core.state import State
-        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources, ConversionState
+        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources
+        from jax_frc.circuits import CircuitState
 
         mhd = State.zeros(geometry.nr, geometry.nz)
         species = SpeciesState(
@@ -46,14 +47,14 @@ class TestBurningPlasmaState:
             P_neutron=jnp.zeros((geometry.nr, geometry.nz)),
             P_charged=jnp.zeros((geometry.nr, geometry.nz)),
         )
-        conversion = ConversionState(P_electric=0.0, V_induced=0.0, dPsi_dt=0.0)
+        circuits = CircuitState.zeros(n_pickup=1, n_external=0)
 
         state = BurningPlasmaState(
             mhd=mhd,
             species=species,
             rates=rates,
             power=power,
-            conversion=conversion,
+            circuits=circuits,
         )
 
         assert state.mhd is not None
@@ -63,7 +64,8 @@ class TestBurningPlasmaState:
         """BurningPlasmaState works with JAX transformations."""
         from jax_frc.models.burning_plasma import BurningPlasmaState
         from jax_frc.core.state import State
-        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources, ConversionState
+        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources
+        from jax_frc.circuits import CircuitState
 
         mhd = State.zeros(geometry.nr, geometry.nz)
         species = SpeciesState(
@@ -85,10 +87,10 @@ class TestBurningPlasmaState:
             P_neutron=jnp.zeros((geometry.nr, geometry.nz)),
             P_charged=jnp.zeros((geometry.nr, geometry.nz)),
         )
-        conversion = ConversionState(P_electric=0.0, V_induced=0.0, dPsi_dt=0.0)
+        circuits = CircuitState.zeros(n_pickup=1, n_external=0)
 
         state = BurningPlasmaState(
-            mhd=mhd, species=species, rates=rates, power=power, conversion=conversion,
+            mhd=mhd, species=species, rates=rates, power=power, circuits=circuits,
         )
 
         @jax.jit
@@ -107,18 +109,37 @@ class TestBurningPlasmaModel:
         from jax_frc.models.burning_plasma import BurningPlasmaModel
         from jax_frc.models.resistive_mhd import ResistiveMHD
         from jax_frc.models.resistivity import SpitzerResistivity
-        from jax_frc.burn import BurnPhysics, SpeciesTracker, DirectConversion
+        from jax_frc.burn import BurnPhysics, SpeciesTracker
         from jax_frc.transport import TransportModel
+        from jax_frc.circuits import (
+            CircuitSystem, CircuitParams, PickupCoilArray,
+            ExternalCircuits, FluxCoupling,
+        )
+
+        # Create circuit system
+        pickup = PickupCoilArray(
+            z_positions=jnp.array([0.0]),
+            radii=jnp.array([0.6]),
+            n_turns=jnp.array([100]),
+            params=CircuitParams(
+                L=jnp.array([1e-3]),
+                R=jnp.array([0.1]),
+                C=jnp.array([jnp.inf]),
+            ),
+            load_resistance=jnp.array([0.1]),
+        )
+        circuits = CircuitSystem(
+            pickup=pickup,
+            external=ExternalCircuits(circuits=()),
+            flux_coupling=FluxCoupling(),
+        )
 
         model = BurningPlasmaModel(
             mhd_core=ResistiveMHD(resistivity=SpitzerResistivity(eta_0=1e-6)),
             burn=BurnPhysics(fuels=("DT",)),
             species_tracker=SpeciesTracker(),
             transport=TransportModel(D_particle=1.0, chi_e=5.0, chi_i=2.0),
-            conversion=DirectConversion(
-                coil_turns=100, coil_radius=0.6,
-                circuit_resistance=0.1, coupling_efficiency=0.9
-            ),
+            circuits=circuits,
         )
         assert model.burn.fuels == ("DT",)
 
@@ -127,20 +148,39 @@ class TestBurningPlasmaModel:
         from jax_frc.models.burning_plasma import BurningPlasmaModel, BurningPlasmaState
         from jax_frc.models.resistive_mhd import ResistiveMHD
         from jax_frc.models.resistivity import SpitzerResistivity
-        from jax_frc.burn import BurnPhysics, SpeciesTracker, DirectConversion
-        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources, ConversionState
+        from jax_frc.burn import BurnPhysics, SpeciesTracker
+        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources
         from jax_frc.transport import TransportModel
         from jax_frc.core.state import State
+        from jax_frc.circuits import (
+            CircuitSystem, CircuitState, CircuitParams, PickupCoilArray,
+            ExternalCircuits, FluxCoupling,
+        )
+
+        # Create circuit system
+        pickup = PickupCoilArray(
+            z_positions=jnp.array([0.0]),
+            radii=jnp.array([0.6]),
+            n_turns=jnp.array([100]),
+            params=CircuitParams(
+                L=jnp.array([1e-3]),
+                R=jnp.array([0.1]),
+                C=jnp.array([jnp.inf]),
+            ),
+            load_resistance=jnp.array([0.1]),
+        )
+        circuits = CircuitSystem(
+            pickup=pickup,
+            external=ExternalCircuits(circuits=()),
+            flux_coupling=FluxCoupling(),
+        )
 
         model = BurningPlasmaModel(
             mhd_core=ResistiveMHD(resistivity=SpitzerResistivity(eta_0=1e-6)),
             burn=BurnPhysics(fuels=("DT",)),
             species_tracker=SpeciesTracker(),
             transport=TransportModel(D_particle=1.0, chi_e=5.0, chi_i=2.0),
-            conversion=DirectConversion(
-                coil_turns=100, coil_radius=0.6,
-                circuit_resistance=0.1, coupling_efficiency=0.9
-            ),
+            circuits=circuits,
         )
 
         # Create initial state
@@ -172,7 +212,7 @@ class TestBurningPlasmaModel:
                 P_neutron=jnp.zeros((geometry.nr, geometry.nz)),
                 P_charged=jnp.zeros((geometry.nr, geometry.nz)),
             ),
-            conversion=ConversionState(P_electric=0.0, V_induced=0.0, dPsi_dt=0.0),
+            circuits=CircuitState.zeros(n_pickup=1, n_external=0),
         )
 
         dt = 1e-9
@@ -188,20 +228,39 @@ class TestBurningPlasmaModel:
         from jax_frc.models.burning_plasma import BurningPlasmaModel, BurningPlasmaState
         from jax_frc.models.resistive_mhd import ResistiveMHD
         from jax_frc.models.resistivity import SpitzerResistivity
-        from jax_frc.burn import BurnPhysics, SpeciesTracker, DirectConversion
-        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources, ConversionState
+        from jax_frc.burn import BurnPhysics, SpeciesTracker
+        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources
         from jax_frc.transport import TransportModel
         from jax_frc.core.state import State
+        from jax_frc.circuits import (
+            CircuitSystem, CircuitState, CircuitParams, PickupCoilArray,
+            ExternalCircuits, FluxCoupling,
+        )
+
+        # Create circuit system
+        pickup = PickupCoilArray(
+            z_positions=jnp.array([0.0]),
+            radii=jnp.array([0.6]),
+            n_turns=jnp.array([100]),
+            params=CircuitParams(
+                L=jnp.array([1e-3]),
+                R=jnp.array([0.1]),
+                C=jnp.array([jnp.inf]),
+            ),
+            load_resistance=jnp.array([0.1]),
+        )
+        circuits = CircuitSystem(
+            pickup=pickup,
+            external=ExternalCircuits(circuits=()),
+            flux_coupling=FluxCoupling(),
+        )
 
         model = BurningPlasmaModel(
             mhd_core=ResistiveMHD(resistivity=SpitzerResistivity(eta_0=1e-6)),
             burn=BurnPhysics(fuels=("DT",)),
             species_tracker=SpeciesTracker(),
             transport=TransportModel(D_particle=0.0, chi_e=0.0, chi_i=0.0),  # No transport
-            conversion=DirectConversion(
-                coil_turns=100, coil_radius=0.6,
-                circuit_resistance=0.1, coupling_efficiency=0.9
-            ),
+            circuits=circuits,
         )
 
         mhd = State.zeros(geometry.nr, geometry.nz)
@@ -229,7 +288,7 @@ class TestBurningPlasmaModel:
                 P_neutron=jnp.zeros((geometry.nr, geometry.nz)),
                 P_charged=jnp.zeros((geometry.nr, geometry.nz)),
             ),
-            conversion=ConversionState(P_electric=0.0, V_induced=0.0, dPsi_dt=0.0),
+            circuits=CircuitState.zeros(n_pickup=1, n_external=0),
         )
 
         # Take many steps
@@ -294,7 +353,8 @@ class TestIntegration:
         """Run a short burn simulation end-to-end."""
         from jax_frc.models.burning_plasma import BurningPlasmaModel, BurningPlasmaState
         from jax_frc.core.state import State
-        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources, ConversionState
+        from jax_frc.burn import SpeciesState, ReactionRates, PowerSources
+        from jax_frc.circuits import CircuitState
 
         config = {
             "fuels": ["DT"],
@@ -326,6 +386,7 @@ class TestIntegration:
             n_p=jnp.zeros((geometry.nr, geometry.nz)),
         )
 
+        # Use CircuitState now (legacy config still creates CircuitSystem internally)
         state = BurningPlasmaState(
             mhd=mhd,
             species=species,
@@ -341,7 +402,7 @@ class TestIntegration:
                 P_neutron=jnp.zeros((geometry.nr, geometry.nz)),
                 P_charged=jnp.zeros((geometry.nr, geometry.nz)),
             ),
-            conversion=ConversionState(P_electric=0.0, V_induced=0.0, dPsi_dt=0.0),
+            circuits=CircuitState.zeros(n_pickup=1, n_external=0),
         )
 
         # Run simulation
