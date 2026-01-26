@@ -78,3 +78,72 @@ class TestSolenoid:
 
         assert jnp.abs(B_z_zero) < 1e-10
         assert jnp.abs(B_z_max) > 1e-6
+
+
+class TestMirrorCoil:
+    """Tests for single current loop (mirror coil) field model."""
+
+    def test_on_axis_field(self):
+        """B_z on axis matches analytical formula."""
+        radius = 0.5  # m
+        current = 1000.0  # A
+        z_pos = 0.0
+
+        coil = MirrorCoil(z_position=z_pos, radius=radius, current=current)
+
+        # On-axis field: B_z = mu0 * I * a^2 / (2 * (a^2 + z^2)^(3/2))
+        # At coil plane (z=0): B_z = mu0 * I / (2 * a)
+        r = jnp.array([0.0])
+        z = jnp.array([0.0])
+        B_r, B_z = coil.B_field(r, z, t=0.0)
+
+        expected = 1.25663706212e-6 * current / (2 * radius)
+        assert jnp.allclose(B_z, expected, rtol=1e-3)
+        assert jnp.allclose(B_r, 0.0, atol=1e-10)
+
+    def test_on_axis_decay(self):
+        """Field decays as expected along axis."""
+        coil = MirrorCoil(z_position=0.0, radius=0.5, current=1000.0)
+
+        r = jnp.array([0.0, 0.0, 0.0])
+        z = jnp.array([0.0, 0.5, 1.0])
+        _, B_z = coil.B_field(r, z, t=0.0)
+
+        # Field should decrease with distance
+        assert B_z[0] > B_z[1] > B_z[2]
+
+        # Check specific ratio at z = a (radius)
+        # B(z=a) / B(z=0) = 1 / (2^(3/2)) ≈ 0.354
+        ratio = B_z[1] / B_z[0]
+        expected_ratio = 1.0 / (2.0 ** 1.5)
+        assert jnp.allclose(ratio, expected_ratio, rtol=0.01)
+
+    def test_radial_field_zero_on_axis(self):
+        """B_r = 0 on axis by symmetry."""
+        coil = MirrorCoil(z_position=0.0, radius=0.5, current=1000.0)
+
+        r = jnp.array([0.0, 0.0, 0.0])
+        z = jnp.array([-1.0, 0.0, 1.0])
+        B_r, _ = coil.B_field(r, z, t=0.0)
+
+        assert jnp.allclose(B_r, 0.0, atol=1e-10)
+
+    def test_mirror_pair_creates_minimum(self):
+        """Two coils create field minimum at midpoint."""
+        coil1 = MirrorCoil(z_position=-1.0, radius=0.5, current=1000.0)
+        coil2 = MirrorCoil(z_position=1.0, radius=0.5, current=1000.0)
+
+        r = jnp.array([0.0])
+        z_points = jnp.linspace(-1.5, 1.5, 31)
+
+        B_z_total = jnp.zeros_like(z_points)
+        for i, z_val in enumerate(z_points):
+            z_arr = jnp.array([z_val])
+            _, B_z1 = coil1.B_field(r, z_arr, t=0.0)
+            _, B_z2 = coil2.B_field(r, z_arr, t=0.0)
+            B_z_total = B_z_total.at[i].set(B_z1[0] + B_z2[0])
+
+        # Field at center should be local minimum
+        center_idx = 15
+        assert B_z_total[center_idx] < B_z_total[center_idx - 5]
+        assert B_z_total[center_idx] < B_z_total[center_idx + 5]

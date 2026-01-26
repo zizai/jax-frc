@@ -112,10 +112,145 @@ class Solenoid:
         return 0.5 * B_z * r
 
 
+def _elliptic_k(m: jnp.ndarray) -> jnp.ndarray:
+    """Complete elliptic integral of first kind K(m).
+
+    Uses polynomial approximation valid for 0 <= m < 1.
+    """
+    # Abramowitz & Stegun approximation
+    m1 = 1.0 - m
+    m1 = jnp.maximum(m1, 1e-10)  # avoid log(0)
+
+    a0 = 1.38629436112
+    a1 = 0.09666344259
+    a2 = 0.03590092383
+    a3 = 0.03742563713
+    a4 = 0.01451196212
+
+    b0 = 0.5
+    b1 = 0.12498593597
+    b2 = 0.06880248576
+    b3 = 0.03328355346
+    b4 = 0.00441787012
+
+    K = (a0 + a1*m1 + a2*m1**2 + a3*m1**3 + a4*m1**4 +
+         (b0 + b1*m1 + b2*m1**2 + b3*m1**3 + b4*m1**4) * (-jnp.log(m1)))
+
+    return K
+
+
+def _elliptic_e(m: jnp.ndarray) -> jnp.ndarray:
+    """Complete elliptic integral of second kind E(m).
+
+    Uses polynomial approximation valid for 0 <= m < 1.
+    """
+    m1 = 1.0 - m
+    m1 = jnp.maximum(m1, 1e-10)
+
+    a1 = 0.44325141463
+    a2 = 0.06260601220
+    a3 = 0.04757383546
+    a4 = 0.01736506451
+
+    b1 = 0.24998368310
+    b2 = 0.09200180037
+    b3 = 0.04069697526
+    b4 = 0.00526449639
+
+    E = (1.0 + a1*m1 + a2*m1**2 + a3*m1**3 + a4*m1**4 +
+         (b1*m1 + b2*m1**2 + b3*m1**3 + b4*m1**4) * (-jnp.log(m1)))
+
+    return E
+
+
 @dataclass
 class MirrorCoil:
-    """Placeholder for magnetic mirror coil pair model."""
-    pass
+    """Single circular current loop (mirror coil).
+
+    Computes exact field using elliptic integrals.
+
+    Args:
+        z_position: Axial position of coil center [m]
+        radius: Coil radius [m]
+        current: Current [A] or callable(t) -> current
+    """
+    z_position: float
+    radius: float
+    current: Union[float, Callable[[float], float]]
+
+    def _get_current(self, t: float) -> float:
+        """Get current at time t."""
+        if callable(self.current):
+            return self.current(t)
+        return self.current
+
+    def B_field(self, r: jnp.ndarray, z: jnp.ndarray, t: float) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Compute magnetic field of current loop using elliptic integrals.
+
+        Uses exact expressions from Jackson, Classical Electrodynamics.
+        """
+        I = self._get_current(t)
+        a = self.radius
+        z_rel = z - self.z_position
+
+        # Handle on-axis case separately for numerical stability
+        r_safe = jnp.maximum(r, 1e-10)
+
+        # Elliptic integral parameter
+        alpha2 = a**2 + r_safe**2 + z_rel**2 - 2*a*r_safe
+        beta2 = a**2 + r_safe**2 + z_rel**2 + 2*a*r_safe
+        beta = jnp.sqrt(jnp.maximum(beta2, 1e-20))
+
+        m = 1.0 - alpha2 / beta2
+        m = jnp.clip(m, 0.0, 1.0 - 1e-10)
+
+        K = _elliptic_k(m)
+        E = _elliptic_e(m)
+
+        # Prefactor
+        C = MU0 * I / jnp.pi
+
+        # Axial field B_z
+        B_z = C / (2.0 * beta) * (K + (a**2 - r_safe**2 - z_rel**2) / alpha2 * E)
+
+        # Radial field B_r
+        B_r = C * z_rel / (2.0 * beta * r_safe) * (-K + (a**2 + r_safe**2 + z_rel**2) / alpha2 * E)
+
+        # On axis, B_r = 0 by symmetry
+        on_axis = r < 1e-10
+        B_r = jnp.where(on_axis, 0.0, B_r)
+
+        # On axis, use simple formula for B_z
+        B_z_axis = MU0 * I * a**2 / (2.0 * (a**2 + z_rel**2)**1.5)
+        B_z = jnp.where(on_axis, B_z_axis, B_z)
+
+        return B_r, B_z
+
+    def A_phi(self, r: jnp.ndarray, z: jnp.ndarray, t: float) -> jnp.ndarray:
+        """Compute vector potential using elliptic integrals."""
+        I = self._get_current(t)
+        a = self.radius
+        z_rel = z - self.z_position
+
+        r_safe = jnp.maximum(r, 1e-10)
+
+        beta2 = a**2 + r_safe**2 + z_rel**2 + 2*a*r_safe
+        beta = jnp.sqrt(jnp.maximum(beta2, 1e-20))
+        alpha2 = a**2 + r_safe**2 + z_rel**2 - 2*a*r_safe
+
+        m = 1.0 - alpha2 / beta2
+        m = jnp.clip(m, 0.0, 1.0 - 1e-10)
+
+        K = _elliptic_k(m)
+        E = _elliptic_e(m)
+
+        A = MU0 * I * a / (jnp.pi * beta) * ((1.0 - m/2.0) * K - E)
+
+        # On axis A_phi = 0
+        on_axis = r < 1e-10
+        A = jnp.where(on_axis, 0.0, A)
+
+        return A
 
 
 @dataclass
