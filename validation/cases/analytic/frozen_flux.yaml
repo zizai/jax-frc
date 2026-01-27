@@ -1,0 +1,38 @@
+# validation/cases/analytic/frozen_flux.yaml
+name: frozen_flux
+description: "Frozen-in magnetic flux advection (Rm >> 1)"
+
+configuration:
+  class: FrozenFluxConfiguration
+  overrides:
+    model_type: resistive_mhd
+    B_phi_0: 1.0
+    v_r: 0.1
+    eta: 1.0e-8
+
+runtime:
+  t_end: 1.0
+  dt: 1.0e-3
+
+reference:
+  type: analytic
+  description: "Flux conservation: B_φ(t) = B₀ · r₀/(r₀ + v_r·t)"
+
+acceptance:
+  quantitative:
+    - metric: l2_error
+      field: B_phi
+      threshold: 0.05
+      description: "Relative L2 error vs analytic solution"
+    - metric: flux_conservation
+      threshold: 0.01
+      description: "Toroidal flux conserved within 1%"
+
+output:
+  plots:
+    - type: profiles
+      name: Bphi_evolution
+      axis: r
+      field: B_phi
+  html_report: true
+  log_level: INFO

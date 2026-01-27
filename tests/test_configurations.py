@@ -43,12 +43,12 @@ def test_abstract_configuration_importable_from_package():
     assert AbstractConfiguration is not None
 
 
-# SlabDiffusionConfiguration tests
-def test_slab_diffusion_builds_geometry():
-    """SlabDiffusionConfiguration creates valid geometry."""
-    from jax_frc.configurations.analytic import SlabDiffusionConfiguration
+# MagneticDiffusionConfiguration tests
+def test_magnetic_diffusion_builds_geometry():
+    """MagneticDiffusionConfiguration creates valid geometry."""
+    from jax_frc.configurations import MagneticDiffusionConfiguration
 
-    config = SlabDiffusionConfiguration()
+    config = MagneticDiffusionConfiguration()
     geometry = config.build_geometry()
 
     assert geometry.nr > 0
@@ -56,46 +56,92 @@ def test_slab_diffusion_builds_geometry():
     assert geometry.coord_system == "cylindrical"
 
 
-def test_slab_diffusion_builds_initial_state():
-    """SlabDiffusionConfiguration creates state with Gaussian temperature."""
-    from jax_frc.configurations.analytic import SlabDiffusionConfiguration
+def test_magnetic_diffusion_builds_initial_state():
+    """MagneticDiffusionConfiguration creates state with Gaussian B_z."""
+    from jax_frc.configurations import MagneticDiffusionConfiguration
     import jax.numpy as jnp
 
-    config = SlabDiffusionConfiguration()
+    config = MagneticDiffusionConfiguration()
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
 
-    # Temperature should have Gaussian profile (peak in center)
+    # B_z should have Gaussian profile (peak in center)
     center_idx = geometry.nz // 2
-    assert state.T[geometry.nr // 2, center_idx] > state.T[geometry.nr // 2, 0]
+    assert state.B[geometry.nr // 2, center_idx, 2] > state.B[geometry.nr // 2, 0, 2]
 
 
-def test_slab_diffusion_builds_model():
-    """SlabDiffusionConfiguration creates ExtendedMHD with thermal transport."""
-    from jax_frc.configurations.analytic import SlabDiffusionConfiguration
-    from jax_frc.models.extended_mhd import ExtendedMHD
+def test_magnetic_diffusion_builds_model():
+    """MagneticDiffusionConfiguration creates ResistiveMHD model."""
+    from jax_frc.configurations import MagneticDiffusionConfiguration
+    from jax_frc.models.resistive_mhd import ResistiveMHD
 
-    config = SlabDiffusionConfiguration()
+    config = MagneticDiffusionConfiguration()
     model = config.build_model()
 
-    assert isinstance(model, ExtendedMHD)
-    assert model.thermal is not None
+    assert isinstance(model, ResistiveMHD)
+
+
+# FrozenFluxConfiguration tests
+def test_frozen_flux_builds_geometry():
+    """FrozenFluxConfiguration creates valid geometry."""
+    from jax_frc.configurations import FrozenFluxConfiguration
+
+    config = FrozenFluxConfiguration()
+    geometry = config.build_geometry()
+
+    assert geometry.nr > 0
+    assert geometry.nz > 0
+    assert geometry.coord_system == "cylindrical"
+
+
+def test_frozen_flux_builds_initial_state():
+    """FrozenFluxConfiguration creates state with uniform B_phi and v_r."""
+    from jax_frc.configurations import FrozenFluxConfiguration
+    import jax.numpy as jnp
+
+    config = FrozenFluxConfiguration()
+    geometry = config.build_geometry()
+    state = config.build_initial_state(geometry)
+
+    # B_phi should be uniform
+    assert jnp.allclose(state.B[:, :, 1], config.B_phi_0)
+    # v_r should be uniform
+    assert jnp.allclose(state.v[:, :, 0], config.v_r)
+
+
+def test_frozen_flux_builds_model():
+    """FrozenFluxConfiguration creates ResistiveMHD model."""
+    from jax_frc.configurations import FrozenFluxConfiguration
+    from jax_frc.models.resistive_mhd import ResistiveMHD
+
+    config = FrozenFluxConfiguration()
+    model = config.build_model()
+
+    assert isinstance(model, ResistiveMHD)
 
 
 # Configuration Registry tests
-def test_configuration_registry_has_slab_diffusion():
-    """Registry contains SlabDiffusionConfiguration."""
+def test_configuration_registry_has_magnetic_diffusion():
+    """Registry contains MagneticDiffusionConfiguration."""
     from jax_frc.configurations import CONFIGURATION_REGISTRY
 
-    assert 'SlabDiffusionConfiguration' in CONFIGURATION_REGISTRY
-    assert CONFIGURATION_REGISTRY['SlabDiffusionConfiguration'] is not None
+    assert 'MagneticDiffusionConfiguration' in CONFIGURATION_REGISTRY
+    assert CONFIGURATION_REGISTRY['MagneticDiffusionConfiguration'] is not None
+
+
+def test_configuration_registry_has_frozen_flux():
+    """Registry contains FrozenFluxConfiguration."""
+    from jax_frc.configurations import CONFIGURATION_REGISTRY
+
+    assert 'FrozenFluxConfiguration' in CONFIGURATION_REGISTRY
+    assert CONFIGURATION_REGISTRY['FrozenFluxConfiguration'] is not None
 
 
 def test_configuration_registry_creates_instance():
     """Registry can create configuration instances."""
     from jax_frc.configurations import CONFIGURATION_REGISTRY
 
-    ConfigClass = CONFIGURATION_REGISTRY['SlabDiffusionConfiguration']
+    ConfigClass = CONFIGURATION_REGISTRY['MagneticDiffusionConfiguration']
     config = ConfigClass()
 
-    assert config.name == "slab_diffusion"
+    assert config.name == "magnetic_diffusion"

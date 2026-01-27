@@ -13,7 +13,7 @@ def validation_case(tmp_path):
         'name': 'integration_test',
         'description': 'Integration test case',
         'configuration': {
-            'class': 'SlabDiffusionConfiguration',
+            'class': 'MagneticDiffusionConfiguration',
             'overrides': {
                 'nr': 4,
                 'nz': 16,  # Small grid for fast testing
@@ -27,7 +27,7 @@ def validation_case(tmp_path):
             'quantitative': [
                 {
                     'metric': 'l2_error',
-                    'field': 'T',
+                    'field': 'B_z',
                     'threshold': 1.0,  # Very permissive for integration test
                     'description': 'Integration test metric'
                 }

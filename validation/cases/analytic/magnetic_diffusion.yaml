@@ -1,0 +1,35 @@
+# validation/cases/analytic/magnetic_diffusion.yaml
+name: magnetic_diffusion
+description: "1D magnetic field diffusion (Rm << 1)"
+
+configuration:
+  class: MagneticDiffusionConfiguration
+  overrides:
+    model_type: resistive_mhd
+    B_peak: 1.0
+    sigma: 0.3
+    eta: 1.0e-2
+
+runtime:
+  t_end: 0.5e-3
+  dt: 1.0e-5
+
+reference:
+  type: analytic
+  description: "Spreading Gaussian: B_z(z,t) = B_peak * sqrt(σ²/(σ² + 2ηt)) * exp(-z²/(2(σ² + 2ηt)))"
+
+acceptance:
+  quantitative:
+    - metric: l2_error
+      field: B_z
+      threshold: 0.05
+      description: "Relative L2 error vs analytic solution"
+
+output:
+  plots:
+    - type: profiles
+      name: Bz_evolution
+      axis: z
+      field: B_z
+  html_report: true
+  log_level: INFO

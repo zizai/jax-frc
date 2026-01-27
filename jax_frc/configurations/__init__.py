@@ -36,7 +36,8 @@ from jax_frc.configurations.frc_merging import (
     BelovaCase2Configuration,
     BelovaCase4Configuration,
 )
-from jax_frc.configurations.analytic import SlabDiffusionConfiguration
+from jax_frc.configurations.magnetic_diffusion import MagneticDiffusionConfiguration
+from jax_frc.configurations.frozen_flux import FrozenFluxConfiguration
 from jax_frc.configurations.validation_benchmarks import (
     CylindricalShockConfiguration,
     CylindricalVortexConfiguration,
@@ -47,7 +48,8 @@ from jax_frc.configurations.validation_benchmarks import (
 from jax_frc.configurations import phases
 
 CONFIGURATION_REGISTRY = {
-    'SlabDiffusionConfiguration': SlabDiffusionConfiguration,
+    'MagneticDiffusionConfiguration': MagneticDiffusionConfiguration,
+    'FrozenFluxConfiguration': FrozenFluxConfiguration,
     'CylindricalShockConfiguration': CylindricalShockConfiguration,
     'CylindricalVortexConfiguration': CylindricalVortexConfiguration,
     'CylindricalGEMConfiguration': CylindricalGEMConfiguration,
@@ -77,7 +79,8 @@ __all__ = [
     'velocity_below',
     'transition_from_spec',
     # Configuration implementations
-    'SlabDiffusionConfiguration',
+    'MagneticDiffusionConfiguration',
+    'FrozenFluxConfiguration',
     'CylindricalShockConfiguration',
     'CylindricalVortexConfiguration',
     'CylindricalGEMConfiguration',

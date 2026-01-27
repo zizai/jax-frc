@@ -14,7 +14,7 @@ def test_runner_loads_yaml_config(tmp_path):
         'name': 'test_case',
         'description': 'Test case',
         'configuration': {
-            'class': 'SlabDiffusionConfiguration',
+            'class': 'MagneticDiffusionConfiguration',
         },
         'runtime': {'t_end': 1e-6},
         'acceptance': {'quantitative': []}
@@ -23,19 +23,19 @@ def test_runner_loads_yaml_config(tmp_path):
     runner = ValidationRunner(case_yaml, tmp_path / "output")
 
     assert runner.config['name'] == 'test_case'
-    assert runner.config['configuration']['class'] == 'SlabDiffusionConfiguration'
+    assert runner.config['configuration']['class'] == 'MagneticDiffusionConfiguration'
 
 
 def test_runner_instantiates_configuration(tmp_path):
     """ValidationRunner creates Configuration from registry."""
     from jax_frc.validation.runner import ValidationRunner
-    from jax_frc.configurations.analytic import SlabDiffusionConfiguration
+    from jax_frc.configurations import MagneticDiffusionConfiguration
 
     case_yaml = tmp_path / "test_case.yaml"
     case_yaml.write_text(yaml.dump({
         'name': 'test_case',
         'description': 'Test',
-        'configuration': {'class': 'SlabDiffusionConfiguration'},
+        'configuration': {'class': 'MagneticDiffusionConfiguration'},
         'runtime': {'t_end': 1e-6},
         'acceptance': {'quantitative': []}
     }))
@@ -43,7 +43,7 @@ def test_runner_instantiates_configuration(tmp_path):
     runner = ValidationRunner(case_yaml, tmp_path / "output")
     config = runner._build_configuration()
 
-    assert isinstance(config, SlabDiffusionConfiguration)
+    assert isinstance(config, MagneticDiffusionConfiguration)
 
 
 def test_runner_instantiates_configuration_with_overrides(tmp_path):
@@ -55,11 +55,11 @@ def test_runner_instantiates_configuration_with_overrides(tmp_path):
         'name': 'test_case',
         'description': 'Test',
         'configuration': {
-            'class': 'SlabDiffusionConfiguration',
+            'class': 'MagneticDiffusionConfiguration',
             'overrides': {
                 'nr': 16,
                 'nz': 128,
-                'T_peak': 300.0
+                'B_peak': 2.0
             }
         },
         'runtime': {'t_end': 1e-6},
@@ -71,7 +71,7 @@ def test_runner_instantiates_configuration_with_overrides(tmp_path):
 
     assert config.nr == 16
     assert config.nz == 128
-    assert config.T_peak == 300.0
+    assert config.B_peak == 2.0
 
 
 def test_runner_raises_for_unknown_configuration(tmp_path):
@@ -101,7 +101,7 @@ def test_runner_creates_output_directory(tmp_path):
     case_yaml.write_text(yaml.dump({
         'name': 'test_case',
         'description': 'Test',
-        'configuration': {'class': 'SlabDiffusionConfiguration'},
+        'configuration': {'class': 'MagneticDiffusionConfiguration'},
         'runtime': {'t_end': 1e-6},
         'acceptance': {'quantitative': []}
     }))
@@ -122,7 +122,7 @@ def test_runner_dry_run(tmp_path):
     case_yaml.write_text(yaml.dump({
         'name': 'dry_test',
         'description': 'Test',
-        'configuration': {'class': 'SlabDiffusionConfiguration'},
+        'configuration': {'class': 'MagneticDiffusionConfiguration'},
         'runtime': {'t_end': 1e-6},
         'acceptance': {'quantitative': []}
     }))
@@ -143,7 +143,7 @@ def test_runner_computes_metrics(tmp_path):
     case_yaml.write_text(yaml.dump({
         'name': 'metric_test',
         'description': 'Test',
-        'configuration': {'class': 'SlabDiffusionConfiguration'},
+        'configuration': {'class': 'MagneticDiffusionConfiguration'},
         'runtime': {'t_end': 1e-6},
         'acceptance': {
             'quantitative': [
@@ -160,8 +160,8 @@ def test_runner_computes_metrics(tmp_path):
     runner = ValidationRunner(case_yaml, tmp_path / "output")
 
     # Build minimal state for metric computation
-    from jax_frc.configurations.analytic import SlabDiffusionConfiguration
-    config = SlabDiffusionConfiguration()
+    from jax_frc.configurations import MagneticDiffusionConfiguration
+    config = MagneticDiffusionConfiguration()
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
 
@@ -179,7 +179,7 @@ def test_runner_metric_failure(tmp_path):
     case_yaml.write_text(yaml.dump({
         'name': 'fail_test',
         'description': 'Test',
-        'configuration': {'class': 'SlabDiffusionConfiguration'},
+        'configuration': {'class': 'MagneticDiffusionConfiguration'},
         'runtime': {'t_end': 1e-6},
         'acceptance': {
             'quantitative': [
