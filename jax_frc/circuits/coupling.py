@@ -40,7 +40,7 @@ class FluxCoupling:
         on PickupCoilArray and computes flux for external circuits.
 
         Args:
-            B_plasma: Plasma magnetic field (nr, nz, 3) with (Br, Bphi, Bz)
+            B_plasma: Plasma magnetic field (nx, ny, nz, 3) with (Bx, By, Bz)
             geometry: Computational geometry
             pickup: Pickup coil array
             external: External circuits
@@ -76,9 +76,10 @@ class FluxCoupling:
         if external.n_circuits == 0:
             return jnp.array([])
 
-        Bz = B[:, :, 2]  # Axial component
-        r = geometry.r
-        dr = geometry.dr
+        y_mid = B.shape[1] // 2
+        Bz = B[:, y_mid, :, 2]  # Axial component at midplane
+        r = geometry.x
+        dr = geometry.dx
 
         # Extract coil parameters
         z_centers, radii, lengths, n_turns = external._get_coil_params()

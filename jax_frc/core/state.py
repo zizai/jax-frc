@@ -31,6 +31,8 @@ class State:
     Te: Optional[Array] = None # Electron temp [J], shape (nx, ny, nz)
     Ti: Optional[Array] = None # Ion temp [J], shape (nx, ny, nz)
     particles: Optional[ParticleState] = None
+    time: float = 0.0
+    step: int = 0
 
     @classmethod
     def zeros(cls, nx: int, ny: int, nz: int) -> "State":
@@ -40,6 +42,8 @@ class State:
             E=jnp.zeros((nx, ny, nz, 3)),
             n=jnp.zeros((nx, ny, nz)),
             p=jnp.zeros((nx, ny, nz)),
+            time=0.0,
+            step=0,
         )
 
     def replace(self, **kwargs) -> "State":
@@ -50,14 +54,36 @@ class State:
 
 # Register as JAX pytree
 def _state_flatten(state):
-    children = (state.B, state.E, state.n, state.p, state.v, state.Te, state.Ti, state.particles)
+    children = (
+        state.B,
+        state.E,
+        state.n,
+        state.p,
+        state.v,
+        state.Te,
+        state.Ti,
+        state.particles,
+        state.time,
+        state.step,
+    )
     aux_data = None
     return children, aux_data
 
 
 def _state_unflatten(aux_data, children):
-    B, E, n, p, v, Te, Ti, particles = children
-    return State(B=B, E=E, n=n, p=p, v=v, Te=Te, Ti=Ti, particles=particles)
+    B, E, n, p, v, Te, Ti, particles, time, step = children
+    return State(
+        B=B,
+        E=E,
+        n=n,
+        p=p,
+        v=v,
+        Te=Te,
+        Ti=Ti,
+        particles=particles,
+        time=time,
+        step=step,
+    )
 
 
 jax.tree_util.register_pytree_node(State, _state_flatten, _state_unflatten)

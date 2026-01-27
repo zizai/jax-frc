@@ -42,16 +42,17 @@ class PickupCoilArray:
         grid points.
 
         Args:
-            B: Magnetic field (nr, nz, 3) with components (Br, Bphi, Bz)
+            B: Magnetic field (nx, ny, nz, 3) with components (Bx, By, Bz)
             geometry: Computational geometry
 
         Returns:
             Psi: Flux linkage for each coil [Wb], shape (n_coils,)
         """
-        Bz = B[:, :, 2]  # Axial component
-        r = geometry.r  # 1D radial coordinates
+        y_mid = B.shape[1] // 2
+        Bz = B[:, y_mid, :, 2]  # Axial component at midplane
+        r = geometry.x  # 1D x coordinates (radial proxy)
         z = geometry.z  # 1D axial coordinates
-        dr = geometry.dr
+        dr = geometry.dx
 
         def flux_for_coil(z_coil, radius, n_turn):
             # Find z index (interpolate between grid points)

@@ -6,12 +6,11 @@ from typing import Literal
 from jax_frc.core.geometry import Geometry
 from jax_frc.core.state import State
 from jax_frc.models.resistive_mhd import ResistiveMHD
-from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+from jax_frc.models.extended_mhd import ExtendedMHD
 from jax_frc.models.hybrid_kinetic import HybridKinetic, RigidRotorEquilibrium
 from jax_frc.models.coupled import CoupledModel, CoupledModelConfig
 from jax_frc.models.neutral_fluid import NeutralFluid
 from jax_frc.models.atomic_coupling import AtomicCoupling
-from jax_frc.models.resistivity import SpitzerResistivity
 from .base import AbstractConfiguration
 
 
@@ -20,7 +19,7 @@ ModelType = Literal["resistive_mhd", "extended_mhd", "plasma_neutral", "hybrid_k
 
 @dataclass
 class FrozenFluxConfiguration(AbstractConfiguration):
-    """Frozen-in flux test (Rm >> 1).
+    """Frozen-in flux test (Rm >> 1) in 3D Cartesian geometry.
 
     Physics: ∂B/∂t ≈ ∇×(v×B) (ideal MHD, flux frozen to plasma)
 
@@ -28,9 +27,9 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     is much greater than 1. The magnetic field is "frozen" into the plasma
     and moves with it.
 
-    Setup: Radial geometry with uniform expansion v_r = v₀
-    Initial: Uniform B_φ in annular region
-    Analytic: B_φ(t) = B₀ · r₀/(r₀ + v₀t) from flux conservation
+    Setup: Cartesian slab with uniform expansion v_x = v₀
+    Initial: Uniform B_y field (maps to B_φ)
+    Analytic: B_y(t) = B₀ · x₀/(x₀ + v₀t) from flux conservation
 
     The toroidal flux Φ = ∫B_φ dr is conserved. As the plasma expands
     radially, B_φ decreases to maintain constant flux.
@@ -41,12 +40,13 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     name: str = "frozen_flux"
     description: str = "Frozen-in magnetic flux advection (Rm >> 1)"
 
-    # Grid parameters (annular to avoid axis singularity)
-    nr: int = 64         # High radial resolution for flux advection
-    nz: int = 8          # Minimal axial (uniform in z)
-    r_min: float = 0.2   # Inner radius [m]
-    r_max: float = 1.0   # Outer radius [m]
-    z_extent: float = 0.5  # Domain: z ∈ [-z_extent, z_extent]
+    # Grid parameters (thin-y slab for 2D-like behavior)
+    nx: int = 64         # X resolution
+    ny: int = 4          # Y resolution (thin periodic)
+    nz: int = 8          # Z resolution
+    r_min: float = 0.2   # X minimum [m] (legacy name for radial coordinate)
+    r_max: float = 1.0   # X maximum [m]
+    z_extent: float = 0.5  # Domain: y,z ∈ [-z_extent, z_extent]
 
     # Physics parameters
     B_phi_0: float = 1.0     # Initial B_φ [T]
@@ -61,59 +61,50 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     model_type: ModelType = "resistive_mhd"
 
     def build_geometry(self) -> Geometry:
-        """Annular cylindrical geometry, high r resolution."""
+        """3D Cartesian geometry."""
         return Geometry(
-            coord_system="cylindrical",
-            r_min=self.r_min,
-            r_max=self.r_max,
+            nx=self.nx,
+            ny=self.ny,
+            nz=self.nz,
+            x_min=self.r_min,
+            x_max=self.r_max,
+            y_min=-self.z_extent,
+            y_max=self.z_extent,
             z_min=-self.z_extent,
             z_max=self.z_extent,
-            nr=self.nr,
-            nz=self.nz,
+            bc_x="neumann",
+            bc_y="periodic",
+            bc_z="neumann",
         )
 
     def build_initial_state(self, geometry: Geometry) -> State:
-        """Uniform B_φ with prescribed radial velocity v_r."""
-        # Uniform toroidal field B_φ
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 1].set(self.B_phi_0)  # B_φ component (index 1 in cylindrical)
+        """Uniform B_y with prescribed x-velocity v_x."""
+        # Uniform toroidal field mapped to B_y
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 1].set(self.B_phi_0)
 
-        # Uniform radial expansion velocity
-        v = jnp.zeros((geometry.nr, geometry.nz, 3))
-        v = v.at[:, :, 0].set(self.v_r)  # v_r component
+        # Uniform expansion velocity mapped to v_x
+        v = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        v = v.at[:, :, :, 0].set(self.v_r)
 
         return State(
-            psi=jnp.zeros((geometry.nr, geometry.nz)),
-            n=jnp.ones((geometry.nr, geometry.nz)) * self.n0,
-            p=jnp.ones((geometry.nr, geometry.nz)) * self.n0 * self.T0,  # p = nT
-            T=jnp.ones((geometry.nr, geometry.nz)) * self.T0,
             B=B,
-            E=jnp.zeros((geometry.nr, geometry.nz, 3)),
+            E=jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3)),
+            n=jnp.ones((geometry.nx, geometry.ny, geometry.nz)) * self.n0,
+            p=jnp.ones((geometry.nx, geometry.ny, geometry.nz)) * self.n0 * self.T0,
             v=v,
-            particles=None,
-            time=0.0,
-            step=0,
         )
 
     def build_model(self):
         """Build physics model with minimal resistivity (Rm >> 1)."""
-        resistivity = SpitzerResistivity(eta_0=self.eta)
-
         if self.model_type == "resistive_mhd":
-            return ResistiveMHD(resistivity=resistivity)
+            return ResistiveMHD(eta=self.eta)
 
         elif self.model_type == "extended_mhd":
-            return ExtendedMHD(
-                resistivity=resistivity,
-                halo_model=HaloDensityModel(
-                    halo_density=self.n0,
-                    core_density=self.n0,
-                ),
-                thermal=None,  # No thermal transport for this test
-            )
+            return ExtendedMHD(eta=self.eta)
 
         elif self.model_type == "plasma_neutral":
-            plasma_model = ResistiveMHD(resistivity=resistivity)
+            plasma_model = ResistiveMHD(eta=self.eta)
             neutral_model = NeutralFluid()
             coupling = AtomicCoupling()
             return CoupledModel(

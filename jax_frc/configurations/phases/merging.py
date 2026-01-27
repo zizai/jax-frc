@@ -40,16 +40,13 @@ class MergingPhase(Phase):
         separation = config.get("separation", self.separation)
         velocity = config.get("initial_velocity", self.initial_velocity)
 
-        # Mirror-flip to create two FRCs
-        psi = self._create_two_frc_psi(state.psi, geometry, separation)
+        # Create two-FRC fields by mirroring and shifting
+        n = self._create_two_frc_scalar(state.n, geometry, separation)
+        p = self._create_two_frc_scalar(state.p, geometry, separation)
+        B = self._create_two_frc_vector(state.B, geometry, separation)
 
         # Create antisymmetric velocity field
         v = self._create_velocity_field(state.v, geometry, velocity)
-
-        # Mirror other fields
-        n = self._mirror_flip(state.n)
-        p = self._mirror_flip(state.p)
-        B = self._mirror_flip_vector(state.B)
         E = state.E  # Keep E as is initially
 
         # Setup compression BC if configured
@@ -62,7 +59,7 @@ class MergingPhase(Phase):
                 profile=compression_config.get("profile", "cosine"),
             )
 
-        return state.replace(psi=psi, n=n, p=p, B=B, E=E, v=v)
+        return state.replace(n=n, p=p, B=B, E=E, v=v)
 
     def step_hook(self, state: State, geometry: Geometry, t: float) -> State:
         """Apply compression BC if configured."""
@@ -70,10 +67,11 @@ class MergingPhase(Phase):
             state = self._compression_bc.apply(state, geometry)
         return state
 
-    def _create_two_frc_psi(self, psi: jnp.ndarray, geometry: Geometry,
-                           separation: float) -> jnp.ndarray:
-        """Create two-FRC psi by mirror-flipping and shifting."""
-        nz = psi.shape[1]
+    def _create_two_frc_scalar(
+        self, field: jnp.ndarray, geometry: Geometry, separation: float
+    ) -> jnp.ndarray:
+        """Create two-FRC scalar field by mirror-flipping and shifting."""
+        nz = field.shape[2]
         dz = geometry.dz
 
         # Compute shift in grid points (at least 1)
@@ -81,14 +79,28 @@ class MergingPhase(Phase):
         shift_points = max(1, min(shift_points, nz // 4))  # At least 1, no more than nz//4
 
         # Create shifted versions
-        psi_left = jnp.roll(psi, -shift_points, axis=1)
-        psi_mirrored = jnp.flip(psi, axis=1)
-        psi_right = jnp.roll(psi_mirrored, shift_points, axis=1)
+        left = jnp.roll(field, -shift_points, axis=2)
+        mirrored = jnp.flip(field, axis=2)
+        right = jnp.roll(mirrored, shift_points, axis=2)
 
-        # Combine
-        psi_combined = psi_left + psi_right
+        return left + right
 
-        return psi_combined
+    def _create_two_frc_vector(
+        self, field: jnp.ndarray, geometry: Geometry, separation: float
+    ) -> jnp.ndarray:
+        """Create two-FRC vector field by mirror-flipping and shifting."""
+        nz = field.shape[2]
+        dz = geometry.dz
+
+        shift_points = int(separation / (2 * dz))
+        shift_points = max(1, min(shift_points, nz // 4))
+
+        left = jnp.roll(field, -shift_points, axis=2)
+        mirrored = jnp.flip(field, axis=2)
+        mirrored = mirrored.at[:, :, :, 2].set(-mirrored[:, :, :, 2])
+        right = jnp.roll(mirrored, shift_points, axis=2)
+
+        return left + right
 
     def _create_velocity_field(self, v: jnp.ndarray, geometry: Geometry,
                               velocity: float) -> jnp.ndarray:
@@ -100,16 +112,8 @@ class MergingPhase(Phase):
         vz_profile = -velocity * jnp.tanh(z_normalized * 2)
 
         # Set Vz component
-        v_new = v.at[:, :, 2].set(vz_profile)
+        if v is None:
+            v = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        v_new = v.at[:, :, :, 2].set(vz_profile)
 
         return v_new
-
-    def _mirror_flip(self, field: jnp.ndarray) -> jnp.ndarray:
-        """Mirror-flip a scalar field and add to original."""
-        return field + jnp.flip(field, axis=1)
-
-    def _mirror_flip_vector(self, field: jnp.ndarray) -> jnp.ndarray:
-        """Mirror-flip a vector field (flip z-component sign)."""
-        flipped = jnp.flip(field, axis=1)
-        flipped = flipped.at[:, :, 2].set(-flipped[:, :, 2])
-        return field + flipped

@@ -10,10 +10,9 @@ import jax.numpy as jnp
 from jax_frc.configurations.linear_configuration import (
     LinearConfiguration, PhaseSpec, TransitionSpec, ConfigurationResult
 )
-from jax_frc.core.geometry import Geometry
 from jax_frc.core.state import State
 from jax_frc.models.resistive_mhd import ResistiveMHD
-from jax_frc.models.resistivity import SpitzerResistivity
+from tests.utils.cartesian import make_geometry
 from jax_frc.diagnostics.progress import ProgressReporter
 
 
@@ -26,21 +25,17 @@ class SimpleTestConfiguration(LinearConfiguration):
     dt: float = 1e-6
     model_type: str = "resistive_mhd"
 
-    def build_geometry(self) -> Geometry:
-        return Geometry(
-            coord_system="cylindrical",
-            nr=8, nz=16,
-            r_min=0.1, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-        )
+    def build_geometry(self):
+        return make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
-    def build_initial_state(self, geometry: Geometry) -> State:
-        state = State.zeros(geometry.nr, geometry.nz)
-        r = geometry.r_grid
-        return state.replace(psi=jnp.exp(-r**2))
+    def build_initial_state(self, geometry) -> State:
+        state = State.zeros(geometry.nx, geometry.ny, geometry.nz)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(jnp.exp(-geometry.x_grid**2))
+        return state.replace(B=B)
 
     def build_model(self):
-        return ResistiveMHD(resistivity=SpitzerResistivity())
+        return ResistiveMHD(eta=1e-6)
 
     def build_boundary_conditions(self):
         return []

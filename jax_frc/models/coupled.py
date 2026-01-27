@@ -16,7 +16,7 @@ class SourceRates:
     All rates use SI units.
     """
     mass: Array      # kg/m^3/s
-    momentum: Array  # N/m^3 (vector, shape nr,nz,3)
+    momentum: Array  # N/m^3 (vector, shape nx,ny,nz,3)
     energy: Array    # W/m^3
 
 
@@ -92,8 +92,12 @@ class CoupledModel(PhysicsModel):
 
     def explicit_rhs(self, state: CoupledState, geometry: Any, t: float) -> CoupledState:
         """Explicit terms: advection for both fluids."""
-        # Plasma advection
-        d_plasma = self.plasma.explicit_rhs(state.plasma, geometry, t)
+        # Plasma advection (fallback to compute_rhs for non-IMEX models)
+        explicit_fn = getattr(self.plasma, "explicit_rhs", None)
+        if callable(explicit_fn):
+            d_plasma = explicit_fn(state.plasma, geometry, t)
+        else:
+            d_plasma = self.plasma.compute_rhs(state.plasma, geometry)
 
         # Neutral flux divergence
         d_rho, d_mom, d_E = self.neutral.compute_flux_divergence(state.neutral, geometry)
@@ -103,7 +107,12 @@ class CoupledModel(PhysicsModel):
 
     def implicit_rhs(self, state: CoupledState, geometry: Any, t: float) -> CoupledState:
         """Implicit terms: resistive diffusion."""
-        d_plasma = self.plasma.implicit_rhs(state.plasma, geometry, t)
+        implicit_fn = getattr(self.plasma, "implicit_rhs", None)
+        if callable(implicit_fn):
+            d_plasma = implicit_fn(state.plasma, geometry, t)
+        else:
+            nx, ny, nz = state.plasma.n.shape
+            d_plasma = State.zeros(nx, ny, nz)
 
         # Neutrals: no implicit terms (explicit HLLE is stable)
         d_neutral = NeutralState(
@@ -122,8 +131,8 @@ class CoupledModel(PhysicsModel):
 
         # Create derivative states from source rates
         # For now, just store the mass source directly in n field
-        nr, nz = state.plasma.psi.shape
-        d_plasma = State.zeros(nr, nz)
+        nx, ny, nz = state.plasma.n.shape
+        d_plasma = State.zeros(nx, ny, nz)
         d_plasma = d_plasma.replace(n=plasma_src.mass)
 
         d_neutral = NeutralState(
@@ -138,9 +147,11 @@ class CoupledModel(PhysicsModel):
         self, state: CoupledState, geometry: Any, dt: float, theta: float
     ) -> CoupledState:
         """Apply implicit operator for CG solve."""
-        new_plasma = self.plasma.apply_implicit_operator(
-            state.plasma, geometry, dt, theta
-        )
+        apply_fn = getattr(self.plasma, "apply_implicit_operator", None)
+        if callable(apply_fn):
+            new_plasma = apply_fn(state.plasma, geometry, dt, theta)
+        else:
+            new_plasma = state.plasma
         return CoupledState(plasma=new_plasma, neutral=state.neutral)
 
     def compute_rhs(self, state: CoupledState, geometry: Any) -> CoupledState:
@@ -152,7 +163,7 @@ class CoupledModel(PhysicsModel):
         # Add all contributions
         return CoupledState(
             plasma=exp.plasma.replace(
-                psi=exp.plasma.psi + imp.plasma.psi,
+                B=exp.plasma.B + imp.plasma.B,
                 n=exp.plasma.n + src.plasma.n
             ),
             neutral=NeutralState(

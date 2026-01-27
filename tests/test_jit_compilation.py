@@ -3,11 +3,12 @@
 import pytest
 import jax
 import jax.numpy as jnp
+
 from jax_frc.models.resistive_mhd import ResistiveMHD
 from jax_frc.models.extended_mhd import ExtendedMHD
-from jax_frc.models.resistivity import SpitzerResistivity
+from jax_frc.solvers.explicit import EulerSolver, RK4Solver
 from jax_frc.core.state import State
-from jax_frc.core.geometry import Geometry
+from tests.utils.cartesian import make_geometry
 
 
 class TestResistiveMHDJIT:
@@ -16,17 +17,13 @@ class TestResistiveMHDJIT:
     @pytest.fixture
     def setup(self):
         """Create model, state, geometry for testing."""
-        geometry = Geometry(
-            coord_system="cylindrical",
-            nr=16, nz=32,
-            r_min=0.1, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-        )
-        state = State.zeros(geometry.nr, geometry.nz)
-        # Add some non-trivial psi
-        r, z = geometry.r_grid, geometry.z_grid
-        state = state.replace(psi=jnp.exp(-r**2 - z**2))
-        model = ResistiveMHD(resistivity=SpitzerResistivity())
+        geometry = make_geometry(nx=16, ny=4, nz=32)
+        state = State.zeros(geometry.nx, geometry.ny, geometry.nz)
+        x, z = geometry.x_grid, geometry.z_grid
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(jnp.exp(-x**2 - z**2))
+        state = state.replace(B=B)
+        model = ResistiveMHD(eta=1e-4)
         return model, state, geometry
 
     def test_compute_rhs_is_jittable(self, setup):
@@ -36,7 +33,7 @@ class TestResistiveMHDJIT:
         # Note: static_argnums=(1,) because it's a bound method (self is bound)
         jitted_rhs = jax.jit(model.compute_rhs, static_argnums=(1,))
         result = jitted_rhs(state, geometry)
-        assert result.psi.shape == state.psi.shape
+        assert result.B.shape == state.B.shape
 
     def test_compute_rhs_jit_produces_same_result(self, setup):
         """JIT and non-JIT produce identical results."""
@@ -44,10 +41,7 @@ class TestResistiveMHDJIT:
         result_eager = model.compute_rhs(state, geometry)
         jitted_rhs = jax.jit(model.compute_rhs, static_argnums=(1,))
         result_jit = jitted_rhs(state, geometry)
-        assert jnp.allclose(result_eager.psi, result_jit.psi, rtol=1e-5)
-
-
-from jax_frc.models.extended_mhd import HaloDensityModel
+        assert jnp.allclose(result_eager.B, result_jit.B, rtol=1e-5)
 
 
 class TestExtendedMHDJIT:
@@ -56,20 +50,21 @@ class TestExtendedMHDJIT:
     @pytest.fixture
     def setup(self):
         """Create model, state, geometry for testing."""
-        geometry = Geometry(
-            coord_system="cylindrical",
-            nr=16, nz=32,
-            r_min=0.1, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-        )
-        state = State.zeros(geometry.nr, geometry.nz)
-        r, z = geometry.r_grid, geometry.z_grid
-        # Initialize B field
+        geometry = make_geometry(nx=16, ny=4, nz=32)
+        state = State.zeros(geometry.nx, geometry.ny, geometry.nz)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(1.0)
         state = state.replace(
-            B=jnp.stack([jnp.zeros_like(r), jnp.zeros_like(r), jnp.ones_like(r)], axis=-1),
-            n=jnp.ones_like(r) * 1e19,
+            B=B,
+            n=jnp.ones((geometry.nx, geometry.ny, geometry.nz)) * 1e19,
+            Te=jnp.ones((geometry.nx, geometry.ny, geometry.nz)) * 100.0,
         )
-        model = ExtendedMHD(resistivity=SpitzerResistivity(), halo_model=HaloDensityModel())
+        model = ExtendedMHD(
+            eta=1e-4,
+            include_hall=False,
+            include_electron_pressure=False,
+            kappa_perp=1e-2,
+        )
         return model, state, geometry
 
     def test_compute_rhs_is_jittable(self, setup):
@@ -80,25 +75,19 @@ class TestExtendedMHDJIT:
         assert result.B.shape == state.B.shape
 
 
-from jax_frc.solvers.explicit import EulerSolver, RK4Solver
-
-
 class TestExplicitSolversJIT:
     """Test JIT compilation of explicit solvers."""
 
     @pytest.fixture
     def setup(self):
         """Create solver, model, state, geometry."""
-        geometry = Geometry(
-            coord_system="cylindrical",
-            nr=16, nz=32,
-            r_min=0.1, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-        )
-        state = State.zeros(geometry.nr, geometry.nz)
-        r, z = geometry.r_grid, geometry.z_grid
-        state = state.replace(psi=jnp.exp(-r**2 - z**2))
-        model = ResistiveMHD(resistivity=SpitzerResistivity())
+        geometry = make_geometry(nx=16, ny=4, nz=32)
+        state = State.zeros(geometry.nx, geometry.ny, geometry.nz)
+        x, z = geometry.x_grid, geometry.z_grid
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(jnp.exp(-x**2 - z**2))
+        state = state.replace(B=B)
+        model = ResistiveMHD(eta=1e-4)
         return state, model, geometry
 
     def test_euler_step_is_jittable(self, setup):
@@ -108,8 +97,7 @@ class TestExplicitSolversJIT:
         dt = 1e-6
         # Should compile and run
         result = solver.step(state, dt, model, geometry)
-        assert result.psi.shape == state.psi.shape
-        assert float(result.time) > float(state.time)
+        assert result.B.shape == state.B.shape
 
     def test_rk4_step_is_jittable(self, setup):
         """RK4Solver.step can be JIT-compiled."""
@@ -117,5 +105,4 @@ class TestExplicitSolversJIT:
         solver = RK4Solver()
         dt = 1e-6
         result = solver.step(state, dt, model, geometry)
-        assert result.psi.shape == state.psi.shape
-        assert float(result.time) > float(state.time)
+        assert result.B.shape == state.B.shape

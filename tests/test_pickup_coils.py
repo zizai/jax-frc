@@ -9,13 +9,18 @@ from jax_frc.core.geometry import Geometry
 @pytest.fixture
 def geometry():
     return Geometry(
-        coord_system="cylindrical",
-        nr=16,
+        nx=16,
+        ny=4,
         nz=32,
-        r_min=0.1,
-        r_max=0.5,
+        x_min=0.1,
+        x_max=0.5,
+        y_min=0.0,
+        y_max=2 * jnp.pi,
         z_min=-1.0,
         z_max=1.0,
+        bc_x="neumann",
+        bc_y="periodic",
+        bc_z="neumann",
     )
 
 
@@ -60,8 +65,8 @@ class TestPickupCoilArray:
         )
 
         # Uniform Bz = 1 T field
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 2].set(1.0)  # Bz = 1 T
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(1.0)  # Bz = 1 T
 
         Psi = pickup.compute_flux_linkages(B, geometry)
 
@@ -92,10 +97,10 @@ class TestPickupCoilArray:
         )
 
         # Bz varies with z: stronger at z > 0
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
         z_grid = geometry.z_grid
         Bz = jnp.where(z_grid > 0, 2.0, 1.0)
-        B = B.at[:, :, 2].set(Bz)
+        B = B.at[:, :, :, 2].set(Bz)
 
         Psi = pickup.compute_flux_linkages(B, geometry)
 

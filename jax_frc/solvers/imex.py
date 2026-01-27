@@ -76,43 +76,23 @@ class ImexSolver(Solver):
 
     def _explicit_half_step(self, state: State, dt: float,
                             model: PhysicsModel, geometry: Geometry) -> State:
-        """Advance explicit terms (advection, ideal MHD) by dt.
-
-        This handles:
-        - Advection: -v*grad(psi) for psi
-        - Lorentz force: (JxB)/rho for velocity (if evolved)
-        - Ideal induction: curl(v x B) for B (if B-based model)
-
-        Note: Resistive diffusion is NOT included here (done implicitly).
-        """
-        # Apply constraints first
+        """Advance explicit terms by dt for B-based models."""
         state = model.apply_constraints(state, geometry)
+        rhs = model.compute_rhs(state, geometry)
 
-        # For IMEX, compute only advective RHS (no diffusion)
-        # Advection: -v*grad(psi)
-        psi = state.psi
-        v_r = state.v[:, :, 0]
-        v_z = state.v[:, :, 2]
-        dr, dz = geometry.dr, geometry.dz
+        new_B = state.B + dt * rhs.B
 
-        # Compute gradient of psi (central differences)
-        dpsi_dr = jnp.zeros_like(psi)
-        dpsi_dr = dpsi_dr.at[1:-1, :].set(
-            (psi[2:, :] - psi[:-2, :]) / (2 * dr)
-        )
-        dpsi_dz = jnp.zeros_like(psi)
-        dpsi_dz = dpsi_dz.at[:, 1:-1].set(
-            (psi[:, 2:] - psi[:, :-2]) / (2 * dz)
+        new_E = jnp.where(
+            jnp.any(rhs.E != 0),
+            rhs.E,
+            state.E,
         )
 
-        # Advection term: -v*grad(psi)
-        advection = -(v_r * dpsi_dr + v_z * dpsi_dz)
+        new_Te = None
+        if state.Te is not None and rhs.Te is not None:
+            new_Te = state.Te + dt * rhs.Te
 
-        # Update psi with advection only (no diffusion)
-        new_psi = state.psi + dt * advection
-
-        new_state = state.replace(psi=new_psi)
-
+        new_state = state.replace(B=new_B, E=new_E, Te=new_Te)
         return model.apply_constraints(new_state, geometry)
 
     def _implicit_diffusion(self, state: State, dt: float,
@@ -128,35 +108,27 @@ class ImexSolver(Solver):
         For backward Euler (theta=1): (I - dt*D)·B^{n+1} = B^n
         For Crank-Nicolson (theta=0.5): (I - 0.5*dt*D)·B^{n+1} = (I + 0.5*dt*D)·B^n
         """
-        # Get resistivity from model
-        if hasattr(model, 'resistivity'):
-            # For resistive MHD, compute J to get eta
-            j_phi = model._compute_j_phi(state.psi, geometry)
-            eta = model.resistivity.compute(j_phi)
-        else:
-            # Default uniform resistivity
-            eta = jnp.ones((geometry.nr, geometry.nz)) * 1e-6
+        # Get resistivity from model (uniform for now)
+        eta_value = float(getattr(model, "eta", 1e-6))
+        eta = jnp.ones((geometry.nx, geometry.nz)) * eta_value
 
         theta = self.config.theta
-
-        # Solve implicit diffusion for psi (primary equation in resistive MHD)
-        new_psi = self._solve_psi_diffusion(state.psi, dt, eta, geometry)
 
         # Solve for each B component
         B_new = jnp.zeros_like(state.B)
 
-        for i, comp in enumerate(['r', 'theta', 'z']):
-            B_comp = state.B[:, :, i]
+        for i in range(3):
+            B_comp = state.B[:, :, :, i]
 
             # Build operator and preconditioner
-            operator, diag = self._build_diffusion_operator(geometry, dt, eta, comp)
+            operator, diag = self._build_diffusion_operator(geometry, dt, eta, f"comp{i}")
             precond = jacobi_preconditioner(diag)
 
             # Build RHS: B^n + (1-theta)*dt*D·B^n
             if theta < 1.0:
                 # Compute explicit diffusion term
                 D = eta / MU0
-                lap = self._laplacian(B_comp, geometry.dr, geometry.dz)
+                lap = self._laplacian(B_comp, geometry.dx, geometry.dz)
                 rhs = B_comp + (1 - theta) * dt * D * lap
             else:
                 # Backward Euler: RHS is just B^n
@@ -171,9 +143,9 @@ class ImexSolver(Solver):
                 max_iter=self.config.cg_max_iter
             )
 
-            B_new = B_new.at[:, :, i].set(result.x)
+            B_new = B_new.at[:, :, :, i].set(result.x)
 
-        return state.replace(psi=new_psi, B=B_new)
+        return state.replace(B=B_new)
 
     def _solve_psi_diffusion(self, psi: Array, dt: float, eta: Array,
                              geometry: Geometry) -> Array:
@@ -240,18 +212,18 @@ class ImexSolver(Solver):
 
         return result.x
 
-    def _laplacian(self, f: Array, dr: float, dz: float) -> Array:
-        """Compute 2D Laplacian nabla^2 f = d^2f/dr^2 + d^2f/dz^2."""
+    def _laplacian(self, f: Array, dx: float, dz: float) -> Array:
+        """Compute 2D Laplacian in x-z for each y slice."""
         lap = jnp.zeros_like(f)
 
-        # d^2f/dr^2 (interior)
-        lap = lap.at[1:-1, :].add(
-            (f[2:, :] - 2*f[1:-1, :] + f[:-2, :]) / dr**2
+        # d^2f/dx^2 (interior)
+        lap = lap.at[1:-1, :, :].add(
+            (f[2:, :, :] - 2*f[1:-1, :, :] + f[:-2, :, :]) / dx**2
         )
 
         # d^2f/dz^2 (interior)
-        lap = lap.at[:, 1:-1].add(
-            (f[:, 2:] - 2*f[:, 1:-1] + f[:, :-2]) / dz**2
+        lap = lap.at[:, :, 1:-1].add(
+            (f[:, :, 2:] - 2*f[:, :, 1:-1] + f[:, :, :-2]) / dz**2
         )
 
         return lap
@@ -270,18 +242,19 @@ class ImexSolver(Solver):
         Returns:
             (operator, diagonal) where operator is A(x) and diagonal for preconditioner
         """
-        dr, dz = geometry.dr, geometry.dz
-        r = geometry.r_grid
+        dx, dz = geometry.dx, geometry.dz
         theta = self.config.theta
 
         # Diffusion coefficient: D = eta/mu_0
         D = eta / MU0
+        if D.ndim == 2:
+            D = D[:, None, :]
 
         # For Cartesian-like Laplacian: nabla^2 B = d^2B/dr^2 + d^2B/dz^2
         # (Ignoring 1/r terms for B_z, which is approximately valid away from axis)
 
         # Diagonal of implicit operator: 1 + theta*dt*D*(2/dr^2 + 2/dz^2)
-        diag = 1.0 + theta * dt * D * (2.0/dr**2 + 2.0/dz**2)
+        diag = 1.0 + theta * dt * D * (2.0/dx**2 + 2.0/dz**2)
 
         def operator(B: Array) -> Array:
             """Apply (I - theta*dt*D*nabla^2) to B field component."""
@@ -289,14 +262,14 @@ class ImexSolver(Solver):
             # Interior only; boundaries handled separately
             lap = jnp.zeros_like(B)
 
-            # d^2B/dr^2
-            lap = lap.at[1:-1, :].add(
-                (B[2:, :] - 2*B[1:-1, :] + B[:-2, :]) / dr**2
+            # d^2B/dx^2
+            lap = lap.at[1:-1, :, :].add(
+                (B[2:, :, :] - 2*B[1:-1, :, :] + B[:-2, :, :]) / dx**2
             )
 
             # d^2B/dz^2
-            lap = lap.at[:, 1:-1].add(
-                (B[:, 2:] - 2*B[:, 1:-1] + B[:, :-2]) / dz**2
+            lap = lap.at[:, :, 1:-1].add(
+                (B[:, :, 2:] - 2*B[:, :, 1:-1] + B[:, :, :-2]) / dz**2
             )
 
             # (I - theta*dt*D*nabla^2)B

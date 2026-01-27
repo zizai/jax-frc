@@ -4,19 +4,14 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from jax_frc.core.geometry import Geometry
+from tests.utils.cartesian import make_geometry
 
 jax.config.update("jax_enable_x64", True)
 
 
 @pytest.fixture
 def geometry():
-    return Geometry(
-        coord_system="cylindrical",
-        nr=16, nz=32,
-        r_min=0.1, r_max=0.5,
-        z_min=-1.0, z_max=1.0,
-    )
+    return make_geometry(nx=16, ny=1, nz=32, extent=1.0)
 
 
 class TestConversionState:
@@ -58,11 +53,11 @@ class TestDirectConversion:
         )
 
         # B decreasing (plasma expanding against field)
-        B_old = jnp.ones((geometry.nr, geometry.nz, 3)) * 1.0
-        B_old = B_old.at[:, :, 2].set(1.0)  # Bz = 1 T
+        B_old = jnp.ones((geometry.nx, geometry.ny, geometry.nz, 3)) * 1.0
+        B_old = B_old.at[:, :, :, 2].set(1.0)  # Bz = 1 T
 
-        B_new = jnp.ones((geometry.nr, geometry.nz, 3)) * 1.0
-        B_new = B_new.at[:, :, 2].set(0.9)  # Bz decreased
+        B_new = jnp.ones((geometry.nx, geometry.ny, geometry.nz, 3)) * 1.0
+        B_new = B_new.at[:, :, :, 2].set(0.9)  # Bz decreased
 
         dt = 1e-6
         state = dc.compute_power(B_old, B_new, dt, geometry)
@@ -82,8 +77,8 @@ class TestDirectConversion:
             coupling_efficiency=1.0,
         )
 
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 2].set(1.0)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(1.0)
 
         dt = 1e-6
         state = dc.compute_power(B, B, dt, geometry)
@@ -94,10 +89,10 @@ class TestDirectConversion:
         """Power ~ N^2 (voltage ~ N, power ~ V^2)."""
         from jax_frc.burn.conversion import DirectConversion
 
-        B_old = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B_old = B_old.at[:, :, 2].set(1.0)
-        B_new = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B_new = B_new.at[:, :, 2].set(0.9)
+        B_old = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B_old = B_old.at[:, :, :, 2].set(1.0)
+        B_new = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B_new = B_new.at[:, :, :, 2].set(0.9)
         dt = 1e-6
 
         dc1 = DirectConversion(coil_turns=100, coil_radius=0.6,

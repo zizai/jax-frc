@@ -23,16 +23,28 @@ class Simulation:
     state: Optional[State] = None
 
     def initialize(self, initial_state: Optional[State] = None,
-                   psi_init: Optional[Callable] = None) -> None:
+                   psi_init: Optional[Callable] = None,
+                   B_init: Optional[Callable] = None) -> None:
         """Initialize simulation state."""
         if initial_state is not None:
             self.state = initial_state
-        elif psi_init is not None:
-            state = State.zeros(self.geometry.nr, self.geometry.nz)
-            psi = psi_init(self.geometry.r_grid, self.geometry.z_grid)
-            self.state = state.replace(psi=psi)
-        else:
-            self.state = State.zeros(self.geometry.nr, self.geometry.nz)
+            return
+
+        state = State.zeros(self.geometry.nx, self.geometry.ny, self.geometry.nz)
+
+        if B_init is not None:
+            B = B_init(self.geometry.x_grid, self.geometry.y_grid, self.geometry.z_grid)
+            self.state = state.replace(B=B)
+            return
+
+        if psi_init is not None:
+            psi = psi_init(self.geometry.x_grid[:, 0, :], self.geometry.z_grid[:, 0, :])
+            B = jnp.zeros((self.geometry.nx, self.geometry.ny, self.geometry.nz, 3))
+            B = B.at[:, :, :, 2].set(jnp.repeat(psi[:, None, :], self.geometry.ny, axis=1))
+            self.state = state.replace(B=B)
+            return
+
+        self.state = state
 
     def step(self) -> State:
         """Advance simulation by one timestep."""

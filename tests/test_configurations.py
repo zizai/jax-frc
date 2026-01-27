@@ -43,6 +43,14 @@ def test_abstract_configuration_importable_from_package():
     assert AbstractConfiguration is not None
 
 
+def test_cartesian_helper_geometry():
+    from tests.utils.cartesian import make_geometry
+
+    geom = make_geometry(nx=4, ny=1, nz=8)
+
+    assert geom.nx == 4 and geom.ny == 1 and geom.nz == 8
+
+
 # MagneticDiffusionConfiguration tests
 def test_magnetic_diffusion_builds_geometry():
     """MagneticDiffusionConfiguration creates valid 3D Cartesian geometry."""
@@ -60,9 +68,10 @@ def test_magnetic_diffusion_builds_initial_state():
     """MagneticDiffusionConfiguration creates state with Gaussian B_z in x-z plane."""
     from jax_frc.configurations import MagneticDiffusionConfiguration
     import jax.numpy as jnp
+    from tests.utils.cartesian import make_geometry
 
     config = MagneticDiffusionConfiguration()
-    geometry = config.build_geometry()
+    geometry = make_geometry(nx=8, ny=1, nz=8)
     state = config.build_initial_state(geometry)
 
     # B_z should have Gaussian profile (peak in center)
@@ -95,24 +104,25 @@ def test_frozen_flux_builds_geometry():
     config = FrozenFluxConfiguration()
     geometry = config.build_geometry()
 
-    assert geometry.nr > 0
+    assert geometry.nx > 0
+    assert geometry.ny > 0
     assert geometry.nz > 0
-    assert geometry.coord_system == "cylindrical"
 
 
 def test_frozen_flux_builds_initial_state():
     """FrozenFluxConfiguration creates state with uniform B_phi and v_r."""
     from jax_frc.configurations import FrozenFluxConfiguration
     import jax.numpy as jnp
+    from tests.utils.cartesian import make_geometry
 
     config = FrozenFluxConfiguration()
-    geometry = config.build_geometry()
+    geometry = make_geometry(nx=8, ny=1, nz=8)
     state = config.build_initial_state(geometry)
 
     # B_phi should be uniform
-    assert jnp.allclose(state.B[:, :, 1], config.B_phi_0)
+    assert jnp.allclose(state.B[:, :, :, 1], config.B_phi_0)
     # v_r should be uniform
-    assert jnp.allclose(state.v[:, :, 0], config.v_r)
+    assert jnp.allclose(state.v[:, :, :, 0], config.v_r)
 
 
 def test_frozen_flux_builds_model():

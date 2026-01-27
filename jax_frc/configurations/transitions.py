@@ -117,16 +117,16 @@ def separation_below(threshold: float, geometry: "Geometry") -> Transition:
         Transition that triggers when dZ < threshold
     """
     def check(state: State, t: float) -> bool:
-        psi = state.psi
+        B_z = state.B[:, state.B.shape[1] // 2, :, 2]
 
         # Find null positions (local maxima of psi along z at each r)
         # Simplified: find z indices of max psi in each half of domain
-        nz = psi.shape[1]
+        nz = B_z.shape[1]
         mid = nz // 2
 
         # Find max in each half
-        left_half = psi[:, :mid]
-        right_half = psi[:, mid:]
+        left_half = B_z[:, :mid]
+        right_half = B_z[:, mid:]
 
         left_max_z = jnp.argmax(jnp.max(left_half, axis=0))
         right_max_z = mid + jnp.argmax(jnp.max(right_half, axis=0))
@@ -173,7 +173,7 @@ def flux_below(threshold: float) -> Transition:
         Transition that triggers when max(psi) < threshold
     """
     def check(state: State, t: float) -> bool:
-        return float(jnp.max(state.psi)) < threshold
+        return float(jnp.max(jnp.abs(state.B[:, :, :, 2]))) < threshold
 
     return condition(check)
 
@@ -190,6 +190,8 @@ def velocity_below(threshold: float) -> Transition:
         Transition that triggers when max(|v|) < threshold
     """
     def check(state: State, t: float) -> bool:
+        if state.v is None:
+            return True
         v_mag = jnp.sqrt(jnp.sum(state.v**2, axis=-1))
         return float(jnp.max(v_mag)) < threshold
 

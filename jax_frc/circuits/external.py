@@ -155,10 +155,10 @@ class ExternalCircuits:
             geometry: Computational geometry
 
         Returns:
-            B: Magnetic field contribution (nr, nz, 3)
+            B: Magnetic field contribution (nx, ny, nz, 3)
         """
         if self.n_circuits == 0:
-            return jnp.zeros((geometry.nr, geometry.nz, 3))
+            return jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
 
         z_centers, radii, lengths, n_turns = self._get_coil_params()
 
@@ -200,12 +200,12 @@ class ExternalCircuits:
             geometry: Computational geometry
 
         Returns:
-            B: Magnetic field (nr, nz, 3)
+            B: Magnetic field (nx, ny, nz, 3)
         """
         n = n_turns / length  # Turns per meter
         B0 = MU0 * n * current  # Infinite solenoid field
 
-        r_grid = geometry.r_grid
+        r_grid = jnp.abs(geometry.x_grid)
         z_grid = geometry.z_grid
 
         # Relative positions from solenoid ends
@@ -230,8 +230,8 @@ class ExternalCircuits:
         Br = -0.5 * r_grid * dBz_dz
 
         # Assemble B vector
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 0].set(Br)
-        B = B.at[:, :, 2].set(Bz)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 0].set(Br)
+        B = B.at[:, :, :, 2].set(Bz)
 
         return B

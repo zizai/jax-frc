@@ -26,20 +26,25 @@ from jax_frc.comparisons.belova_merging import (
 def sample_geometry():
     """Create a small test geometry."""
     return Geometry(
-        coord_system="cylindrical",
-        nr=16,
+        nx=16,
+        ny=4,
         nz=32,
-        r_min=0.01,
-        r_max=0.5,
+        x_min=0.01,
+        x_max=0.5,
+        y_min=0.0,
+        y_max=2 * jnp.pi,
         z_min=-1.0,
         z_max=1.0,
+        bc_x="neumann",
+        bc_y="periodic",
+        bc_z="neumann",
     )
 
 
 @pytest.fixture
 def sample_state():
     """Create a minimal test state."""
-    return State.zeros(nr=16, nz=32)
+    return State.zeros(nx=16, ny=4, nz=32)
 
 
 @pytest.fixture
@@ -334,8 +339,10 @@ class TestBelovaComparisonSuite:
         # Check grid defaults
         assert suite.nr == 64
         assert suite.nz == 128
+        assert suite.ny == 4
         assert suite.r_min == 0.01
         assert suite.r_max == 0.5
+        assert suite.y_min == 0.0
         assert suite.z_min == -2.0
         assert suite.z_max == 2.0
 
@@ -350,6 +357,7 @@ class TestBelovaComparisonSuite:
         assert suite.initial_separation == 1.5
         assert suite.nr == 32
         assert suite.nz == 64
+        assert suite.ny == 4
 
     def test_create_geometry(self):
         """create_geometry returns valid Geometry."""
@@ -357,9 +365,9 @@ class TestBelovaComparisonSuite:
         geometry = suite.create_geometry()
 
         assert isinstance(geometry, Geometry)
-        assert geometry.nr == 32
+        assert geometry.nx == 32
+        assert geometry.ny == 4
         assert geometry.nz == 64
-        assert geometry.coord_system == "cylindrical"
 
     def test_collect_diagnostics(self, sample_state, sample_geometry):
         """collect_diagnostics returns expected keys."""
