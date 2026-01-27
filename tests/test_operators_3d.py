@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 import pytest
-from jax_frc.operators import gradient_3d, divergence_3d, curl_3d
+from jax_frc.operators import gradient_3d, divergence_3d, curl_3d, laplacian_3d
 from jax_frc.core.geometry import Geometry
 
 
@@ -149,3 +149,45 @@ class TestCurl3D:
         assert jnp.allclose(curl_F[1:-1, 1:-1, :, 0], 0.0, atol=1e-10)
         assert jnp.allclose(curl_F[1:-1, 1:-1, :, 1], 0.0, atol=1e-10)
         assert jnp.allclose(curl_F[1:-1, 1:-1, :, 2], 2.0, atol=1e-6)
+
+
+class TestLaplacian3D:
+    """Test 3D Laplacian operator."""
+
+    def test_laplacian_constant(self):
+        """Laplacian of constant should be zero."""
+        f = jnp.ones((8, 8, 8)) * 7.0
+        geom = Geometry(nx=8, ny=8, nz=8)
+        lap_f = laplacian_3d(f, geom)
+        assert lap_f.shape == (8, 8, 8)
+        assert jnp.allclose(lap_f, 0.0, atol=1e-10)
+
+    def test_laplacian_quadratic(self):
+        """Laplacian of f = x^2 + y^2 + z^2 should be 6."""
+        geom = Geometry(
+            nx=16, ny=16, nz=16,
+            x_min=-1.0, x_max=1.0,
+            y_min=-1.0, y_max=1.0,
+            z_min=-1.0, z_max=1.0,
+        )
+        f = geom.x_grid**2 + geom.y_grid**2 + geom.z_grid**2
+        lap_f = laplacian_3d(f, geom)
+        # d^2(x^2)/dx^2 = 2, same for y and z, total = 6
+        # Interior points only (boundaries have wrapping artifacts)
+        interior = lap_f[2:-2, 2:-2, 2:-2]
+        assert jnp.allclose(interior, 6.0, atol=1e-4)
+
+    def test_laplacian_is_div_grad(self):
+        """Laplacian should equal divergence of gradient.
+
+        Note: The direct Laplacian uses a 3-point stencil while div(grad)
+        uses a 5-point stencil, so they differ by O(dx^2) truncation error.
+        We check relative tolerance rather than absolute.
+        """
+        geom = Geometry(nx=16, ny=16, nz=16)
+        f = jnp.sin(2 * jnp.pi * geom.x_grid) * jnp.cos(2 * jnp.pi * geom.y_grid)
+        lap_f = laplacian_3d(f, geom)
+        grad_f = gradient_3d(f, geom)
+        div_grad_f = divergence_3d(grad_f, geom)
+        # Different stencils give ~15% relative difference at this resolution
+        assert jnp.allclose(lap_f, div_grad_f, rtol=0.2, atol=1e-6)

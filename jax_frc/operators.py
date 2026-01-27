@@ -295,8 +295,8 @@ def laplacian_2d(f: Array, dx: float, dy: float) -> Array:
 
 
 @jit
-def laplacian_3d(f: Array, dx: float, dy: float, dz: float) -> Array:
-    """Compute 3D Laplacian using central differences.
+def laplacian_3d_explicit(f: Array, dx: float, dy: float, dz: float) -> Array:
+    """Compute 3D Laplacian using central differences (explicit grid spacing).
 
     Args:
         f: 3D scalar field of shape (nx, ny, nz)
@@ -310,6 +310,29 @@ def laplacian_3d(f: Array, dx: float, dy: float, dz: float) -> Array:
     d2f_dx2 = (jnp.roll(f, -1, axis=0) - 2 * f + jnp.roll(f, 1, axis=0)) / (dx**2)
     d2f_dy2 = (jnp.roll(f, -1, axis=1) - 2 * f + jnp.roll(f, 1, axis=1)) / (dy**2)
     d2f_dz2 = (jnp.roll(f, -1, axis=2) - 2 * f + jnp.roll(f, 1, axis=2)) / (dz**2)
+    return d2f_dx2 + d2f_dy2 + d2f_dz2
+
+
+@jit(static_argnums=(1,))
+def laplacian_3d(f: Array, geometry: "Geometry") -> Array:
+    """Compute Laplacian of scalar field in 3D Cartesian coordinates.
+
+    Uses central differences with periodic wrapping via jnp.roll.
+    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+
+    Args:
+        f: Scalar field, shape (nx, ny, nz)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Laplacian scalar field, shape (nx, ny, nz)
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+
+    d2f_dx2 = (jnp.roll(f, -1, axis=0) - 2*f + jnp.roll(f, 1, axis=0)) / dx**2
+    d2f_dy2 = (jnp.roll(f, -1, axis=1) - 2*f + jnp.roll(f, 1, axis=1)) / dy**2
+    d2f_dz2 = (jnp.roll(f, -1, axis=2) - 2*f + jnp.roll(f, 1, axis=2)) / dz**2
+
     return d2f_dx2 + d2f_dy2 + d2f_dz2
 
 
