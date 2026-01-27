@@ -1,11 +1,11 @@
 """Particle pushing algorithms for hybrid kinetic simulations."""
 
+from typing import TYPE_CHECKING
 import jax.numpy as jnp
-from jax import jit
+from jax import jit, Array
 
-MU0 = 1.2566e-6
-QE = 1.602e-19
-MI = 1.673e-27
+if TYPE_CHECKING:
+    from jax_frc.core.geometry import Geometry
 
 
 @jit
@@ -102,6 +102,73 @@ def interpolate_field_to_particles(field, x, geometry_params):
     return result
 
 
+@jit(static_argnums=(2,))
+def interpolate_field_to_particles_3d(
+    field: Array, x: Array, geometry: "Geometry"
+) -> Array:
+    """Trilinear interpolation of 3D field to particle positions.
+
+    Args:
+        field: Field values, shape (nx, ny, nz, ncomp) or (nx, ny, nz)
+        x: Particle positions, shape (n_particles, 3) as (x, y, z)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Field at particle positions, shape (n_particles, ncomp) or (n_particles,)
+    """
+    nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+
+    # Normalized coordinates (0 to n-1)
+    xn = (x[:, 0] - geometry.x_min - dx / 2) / dx
+    yn = (x[:, 1] - geometry.y_min - dy / 2) / dy
+    zn = (x[:, 2] - geometry.z_min - dz / 2) / dz
+
+    # Integer indices and fractions
+    i0 = jnp.floor(xn).astype(int)
+    j0 = jnp.floor(yn).astype(int)
+    k0 = jnp.floor(zn).astype(int)
+
+    fx = xn - i0
+    fy = yn - j0
+    fz = zn - k0
+
+    # Wrap indices for periodic
+    i0 = i0 % nx
+    j0 = j0 % ny
+    k0 = k0 % nz
+    i1 = (i0 + 1) % nx
+    j1 = (j0 + 1) % ny
+    k1 = (k0 + 1) % nz
+
+    # 8 corners of cell
+    f000 = field[i0, j0, k0]
+    f001 = field[i0, j0, k1]
+    f010 = field[i0, j1, k0]
+    f011 = field[i0, j1, k1]
+    f100 = field[i1, j0, k0]
+    f101 = field[i1, j0, k1]
+    f110 = field[i1, j1, k0]
+    f111 = field[i1, j1, k1]
+
+    # Trilinear interpolation
+    # Handle both vector (nx, ny, nz, 3) and scalar (nx, ny, nz) fields
+    if field.ndim == 4:
+        fx = fx[:, None]
+        fy = fy[:, None]
+        fz = fz[:, None]
+
+    c00 = f000 * (1 - fx) + f100 * fx
+    c01 = f001 * (1 - fx) + f101 * fx
+    c10 = f010 * (1 - fx) + f110 * fx
+    c11 = f011 * (1 - fx) + f111 * fx
+
+    c0 = c00 * (1 - fy) + c10 * fy
+    c1 = c01 * (1 - fy) + c11 * fy
+
+    return c0 * (1 - fz) + c1 * fz
+
+
 def deposit_particles_to_grid(values, weights, x, geometry_params):
     """Deposit particle quantities to grid using CIC (Cloud-In-Cell).
 
@@ -158,5 +225,86 @@ def deposit_particles_to_grid(values, weights, x, geometry_params):
             grid = grid.at[r_i, z_i + 1, c].add(w01 * weighted_values[:, c])
             grid = grid.at[r_i + 1, z_i, c].add(w10 * weighted_values[:, c])
             grid = grid.at[r_i + 1, z_i + 1, c].add(w11 * weighted_values[:, c])
+
+    return grid
+
+
+@jit(static_argnums=(3,))
+def deposit_particles_to_grid_3d(
+    values: Array, weights: Array, x: Array, geometry: "Geometry"
+) -> Array:
+    """Deposit particle quantities to 3D grid using CIC (Cloud-In-Cell).
+
+    Uses trilinear interpolation for deposition with periodic boundaries.
+
+    Args:
+        values: Values to deposit, shape (n_particles,) or (n_particles, 3)
+        weights: Particle weights, shape (n_particles,)
+        x: Particle positions, shape (n_particles, 3) as (x, y, z)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Grid values, shape (nx, ny, nz) or (nx, ny, nz, 3)
+    """
+    nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+
+    # Normalized coordinates (0 to n-1)
+    xn = (x[:, 0] - geometry.x_min - dx / 2) / dx
+    yn = (x[:, 1] - geometry.y_min - dy / 2) / dy
+    zn = (x[:, 2] - geometry.z_min - dz / 2) / dz
+
+    # Integer indices and fractions
+    i0 = jnp.floor(xn).astype(int)
+    j0 = jnp.floor(yn).astype(int)
+    k0 = jnp.floor(zn).astype(int)
+
+    fx = xn - i0
+    fy = yn - j0
+    fz = zn - k0
+
+    # Wrap indices for periodic
+    i0 = i0 % nx
+    j0 = j0 % ny
+    k0 = k0 % nz
+    i1 = (i0 + 1) % nx
+    j1 = (j0 + 1) % ny
+    k1 = (k0 + 1) % nz
+
+    # CIC weights for 8 corners
+    w000 = (1 - fx) * (1 - fy) * (1 - fz)
+    w001 = (1 - fx) * (1 - fy) * fz
+    w010 = (1 - fx) * fy * (1 - fz)
+    w011 = (1 - fx) * fy * fz
+    w100 = fx * (1 - fy) * (1 - fz)
+    w101 = fx * (1 - fy) * fz
+    w110 = fx * fy * (1 - fz)
+    w111 = fx * fy * fz
+
+    if values.ndim == 1:
+        # Scalar deposition
+        weighted_values = values * weights
+        grid = jnp.zeros((nx, ny, nz))
+        grid = grid.at[i0, j0, k0].add(w000 * weighted_values)
+        grid = grid.at[i0, j0, k1].add(w001 * weighted_values)
+        grid = grid.at[i0, j1, k0].add(w010 * weighted_values)
+        grid = grid.at[i0, j1, k1].add(w011 * weighted_values)
+        grid = grid.at[i1, j0, k0].add(w100 * weighted_values)
+        grid = grid.at[i1, j0, k1].add(w101 * weighted_values)
+        grid = grid.at[i1, j1, k0].add(w110 * weighted_values)
+        grid = grid.at[i1, j1, k1].add(w111 * weighted_values)
+    else:
+        # Vector deposition (n_particles, 3)
+        weighted_values = values * weights[:, None]
+        grid = jnp.zeros((nx, ny, nz, 3))
+        for c in range(3):
+            grid = grid.at[i0, j0, k0, c].add(w000 * weighted_values[:, c])
+            grid = grid.at[i0, j0, k1, c].add(w001 * weighted_values[:, c])
+            grid = grid.at[i0, j1, k0, c].add(w010 * weighted_values[:, c])
+            grid = grid.at[i0, j1, k1, c].add(w011 * weighted_values[:, c])
+            grid = grid.at[i1, j0, k0, c].add(w100 * weighted_values[:, c])
+            grid = grid.at[i1, j0, k1, c].add(w101 * weighted_values[:, c])
+            grid = grid.at[i1, j1, k0, c].add(w110 * weighted_values[:, c])
+            grid = grid.at[i1, j1, k1, c].add(w111 * weighted_values[:, c])
 
     return grid
