@@ -54,8 +54,8 @@ class DirectConversion:
         """Compute induced power from magnetic field change.
 
         Args:
-            B_old: Magnetic field at previous timestep (nr, nz, 3)
-            B_new: Magnetic field at current timestep (nr, nz, 3)
+            B_old: Magnetic field at previous timestep (nx, ny, nz, 3)
+            B_new: Magnetic field at current timestep (nx, ny, nz, 3)
             dt: Timestep [s]
             geometry: Computational geometry
 
@@ -84,21 +84,24 @@ class DirectConversion:
     def _flux_integral(self, B: Array, geometry: Geometry) -> float:
         """Integrate Bz over area within coil radius.
 
-        Psi = integral(Bz * 2*pi*r * dr) for r < coil_radius
+        Psi = integral(Bz * dA) for r < coil_radius at z midplane
         """
-        r = geometry.r_grid
-        Bz = B[:, :, 2]  # Axial component
+        x = geometry.x_grid
+        y = geometry.y_grid
+        Bz = B[:, :, :, 2]  # Axial component
 
         # Sum over midplane (z=0, or just average over z)
         # For simplicity, take flux at z midpoint
         nz_mid = geometry.nz // 2
-        Bz_mid = Bz[:, nz_mid]
-        r_mid = r[:, nz_mid]
+        Bz_mid = Bz[:, :, nz_mid]
+        x_mid = x[:, :, nz_mid]
+        y_mid = y[:, :, nz_mid]
+        r_mid = jnp.sqrt(x_mid**2 + y_mid**2)
         mask_mid = r_mid < self.coil_radius
 
-        # Flux = integral(Bz * 2*pi*r * dr)
-        dr = geometry.dr
-        flux = jnp.sum(Bz_mid * 2 * jnp.pi * r_mid * dr * mask_mid)
+        # Flux = integral(Bz * dA) over midplane
+        dA = geometry.dx * geometry.dy
+        flux = jnp.sum(Bz_mid * dA * mask_mid)
 
         return float(flux)
 

@@ -39,6 +39,8 @@ class EulerSolver(Solver):
             B=new_B,
             E=new_E,
             Te=new_Te,
+            time=state.time + dt,
+            step=state.step + 1,
         )
         return model.apply_constraints(new_state, geometry)
 
@@ -79,5 +81,7 @@ class RK4Solver(Solver):
         new_state = state.replace(
             B=new_B,
             E=new_E,
+            time=state.time + dt,
+            step=state.step + 1,
         )
         return model.apply_constraints(new_state, geometry)

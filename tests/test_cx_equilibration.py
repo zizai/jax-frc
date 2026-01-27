@@ -4,10 +4,10 @@
 import jax.numpy as jnp
 import jax.lax as lax
 from jax_frc.core.state import State
-from jax_frc.core.geometry import Geometry
 from jax_frc.models.neutral_fluid import NeutralState
 from jax_frc.models.atomic_coupling import AtomicCoupling, AtomicCouplingConfig
 from jax_frc.constants import MI, QE
+from tests.utils.cartesian import make_geometry
 
 
 def test_cx_velocity_relaxation():
@@ -38,26 +38,21 @@ def test_cx_velocity_relaxation():
     # Effective timescale for relative velocity relaxation
     tau_eff = 1.0 / ((n_n + n_i) * sigma_cx * v_thermal)
 
-    geometry = Geometry(
-        coord_system="cylindrical",
-        nr=4, nz=4,  # Small grid, uniform conditions
-        r_min=0.01, r_max=0.1,
-        z_min=-0.1, z_max=0.1
-    )
+    geometry = make_geometry(nx=4, ny=1, nz=4, extent=0.1)
 
     # Initial state: stationary plasma, moving neutrals
-    plasma = State.zeros(4, 4)
+    plasma = State.zeros(4, 1, 4)
     plasma = plasma.replace(
-        n=jnp.ones((4, 4)) * n_e,
-        T=jnp.ones((4, 4)) * T_i,
-        p=jnp.ones((4, 4)) * n_e * T_i * 2,
-        v=jnp.zeros((4, 4, 3))
+        n=jnp.ones((4, 1, 4)) * n_e,
+        Te=jnp.ones((4, 1, 4)) * T_i,
+        p=jnp.ones((4, 1, 4)) * n_e * T_i * 2,
+        v=jnp.zeros((4, 1, 4, 3))
     )
 
     neutral = NeutralState(
-        rho_n=jnp.ones((4, 4)) * n_n * MI,
-        mom_n=jnp.zeros((4, 4, 3)).at[:, :, 2].set(n_n * MI * v_n0),
-        E_n=jnp.ones((4, 4)) * 0.5 * n_n * MI * v_n0**2
+        rho_n=jnp.ones((4, 1, 4)) * n_n * MI,
+        mom_n=jnp.zeros((4, 1, 4, 3)).at[:, :, :, 2].set(n_n * MI * v_n0),
+        E_n=jnp.ones((4, 1, 4)) * 0.5 * n_n * MI * v_n0**2
     )
 
     coupling = AtomicCoupling(AtomicCouplingConfig(include_radiation=False))
@@ -71,17 +66,19 @@ def test_cx_velocity_relaxation():
 
         # Compute source rates
         # Create temporary states for coupling
-        temp_plasma = plasma.replace(v=jnp.zeros((4, 4, 3)).at[:, :, 2].set(plasma_v))
+        temp_plasma = plasma.replace(
+            v=jnp.zeros((4, 1, 4, 3)).at[:, :, :, 2].set(plasma_v)
+        )
         temp_neutral = NeutralState(
             rho_n=neutral_rho,
-            mom_n=jnp.zeros((4, 4, 3)).at[:, :, 2].set(neutral_rho * neutral_v_z),
-            E_n=jnp.ones((4, 4)) * 100.0
+            mom_n=jnp.zeros((4, 1, 4, 3)).at[:, :, :, 2].set(neutral_rho * neutral_v_z),
+            E_n=jnp.ones((4, 1, 4)) * 100.0
         )
 
         plasma_src, neutral_src = coupling.compute_sources(temp_plasma, temp_neutral, geometry)
 
         # R_cx is momentum transfer to plasma (positive if neutrals faster)
-        R_cx_z = plasma_src.momentum[:, :, 2]
+        R_cx_z = plasma_src.momentum[:, :, :, 2]
 
         # Update velocities: dv/dt = R_cx / (rho)
         # For plasma: rho = n_i * MI
@@ -89,13 +86,13 @@ def test_cx_velocity_relaxation():
         dv_plasma = R_cx_z / (n_i * MI) * dt
         dv_neutral = -R_cx_z / neutral_rho * dt
 
-        new_plasma_v = plasma_v + dv_plasma[0, 0]  # Uniform, take one cell
-        new_neutral_v = neutral_v_z + dv_neutral[0, 0]
+        new_plasma_v = plasma_v + dv_plasma[0, 0, 0]  # Uniform, take one cell
+        new_neutral_v = neutral_v_z + dv_neutral[0, 0, 0]
 
         delta_v = new_neutral_v - new_plasma_v
         return (new_plasma_v, new_neutral_v, neutral_rho), delta_v
 
-    neutral_rho = jnp.ones((4, 4)) * n_n * MI
+    neutral_rho = jnp.ones((4, 1, 4)) * n_n * MI
     init_carry = (0.0, v_n0, neutral_rho)
     _, delta_v_history = lax.scan(step, init_carry, None, length=n_steps)
 
@@ -121,25 +118,20 @@ def test_cx_momentum_conservation():
     n_n = 1e19
     v_n0 = 1000.0
 
-    geometry = Geometry(
-        coord_system="cylindrical",
-        nr=4, nz=4,
-        r_min=0.01, r_max=0.1,
-        z_min=-0.1, z_max=0.1
-    )
+    geometry = make_geometry(nx=4, ny=1, nz=4, extent=0.1)
 
-    plasma = State.zeros(4, 4)
+    plasma = State.zeros(4, 1, 4)
     plasma = plasma.replace(
-        n=jnp.ones((4, 4)) * n_e,
-        T=jnp.ones((4, 4)) * T_i,
-        p=jnp.ones((4, 4)) * n_e * T_i * 2,
-        v=jnp.zeros((4, 4, 3))
+        n=jnp.ones((4, 1, 4)) * n_e,
+        Te=jnp.ones((4, 1, 4)) * T_i,
+        p=jnp.ones((4, 1, 4)) * n_e * T_i * 2,
+        v=jnp.zeros((4, 1, 4, 3))
     )
 
     neutral = NeutralState(
-        rho_n=jnp.ones((4, 4)) * n_n * MI,
-        mom_n=jnp.zeros((4, 4, 3)).at[:, :, 2].set(n_n * MI * v_n0),
-        E_n=jnp.ones((4, 4)) * 100.0
+        rho_n=jnp.ones((4, 1, 4)) * n_n * MI,
+        mom_n=jnp.zeros((4, 1, 4, 3)).at[:, :, :, 2].set(n_n * MI * v_n0),
+        E_n=jnp.ones((4, 1, 4)) * 100.0
     )
 
     coupling = AtomicCoupling(AtomicCouplingConfig(include_radiation=False))

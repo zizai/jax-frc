@@ -28,10 +28,25 @@ class PhysicsModel(ABC):
         model_type = config.get("type", "resistive_mhd")
         if model_type == "resistive_mhd":
             from jax_frc.models.resistive_mhd import ResistiveMHD
-            return ResistiveMHD.from_config(config)
+            eta = float(config.get("eta", config.get("resistivity", {}).get("eta_0", 1e-4)))
+            return ResistiveMHD(eta=eta)
         elif model_type == "extended_mhd":
             from jax_frc.models.extended_mhd import ExtendedMHD
-            return ExtendedMHD.from_config(config)
+            from jax_frc.models.extended_mhd import TemperatureBoundaryCondition
+            eta = float(config.get("eta", config.get("resistivity", {}).get("eta_0", 1e-4)))
+            include_hall = bool(config.get("include_hall", True))
+            include_electron_pressure = bool(config.get("include_electron_pressure", True))
+            kappa_perp = float(config.get("kappa_perp", config.get("thermal", {}).get("kappa_perp", 1e18)))
+            temperature_bc = None
+            if "temperature_bc" in config:
+                temperature_bc = TemperatureBoundaryCondition(**config["temperature_bc"])
+            return ExtendedMHD(
+                eta=eta,
+                include_hall=include_hall,
+                include_electron_pressure=include_electron_pressure,
+                kappa_perp=kappa_perp,
+                temperature_bc=temperature_bc,
+            )
         elif model_type == "hybrid_kinetic":
             from jax_frc.models.hybrid_kinetic import HybridKinetic
             return HybridKinetic.from_config(config)

@@ -94,3 +94,41 @@ class Geometry:
     def cell_volumes(self) -> Array:
         """Cell volumes, shape (nx, ny, nz). Simply dx * dy * dz."""
         return jnp.full((self.nx, self.ny, self.nz), self.dx * self.dy * self.dz)
+
+    @classmethod
+    def from_config(cls, config: dict) -> "Geometry":
+        """Create Geometry from configuration dictionary."""
+        if "nx" in config and "nz" in config:
+            return cls(
+                nx=int(config.get("nx")),
+                ny=int(config.get("ny", 1)),
+                nz=int(config.get("nz")),
+                x_min=float(config.get("x_min", -1.0)),
+                x_max=float(config.get("x_max", 1.0)),
+                y_min=float(config.get("y_min", -1.0)),
+                y_max=float(config.get("y_max", 1.0)),
+                z_min=float(config.get("z_min", -1.0)),
+                z_max=float(config.get("z_max", 1.0)),
+                bc_x=config.get("bc_x", "periodic"),
+                bc_y=config.get("bc_y", "periodic"),
+                bc_z=config.get("bc_z", "neumann"),
+            )
+
+        # Legacy cylindrical-style config
+        if "nr" in config and "nz" in config:
+            return cls(
+                nx=int(config.get("nr")),
+                ny=int(config.get("ny", 1)),
+                nz=int(config.get("nz")),
+                x_min=float(config.get("r_min", -1.0)),
+                x_max=float(config.get("r_max", 1.0)),
+                y_min=float(config.get("y_min", -1.0)),
+                y_max=float(config.get("y_max", 1.0)),
+                z_min=float(config.get("z_min", -1.0)),
+                z_max=float(config.get("z_max", 1.0)),
+                bc_x=config.get("bc_x", "neumann"),
+                bc_y=config.get("bc_y", "periodic"),
+                bc_z=config.get("bc_z", "neumann"),
+            )
+
+        raise ValueError("Geometry config must include nx/nz or nr/nz")
