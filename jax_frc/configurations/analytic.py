@@ -48,13 +48,9 @@ class SlabDiffusionConfiguration(AbstractConfiguration):
         # Gaussian temperature profile in z
         T_init = self.T_peak * jnp.exp(-z**2 / (2 * self.sigma**2)) + self.T_base
 
-        # Uniform B_z field (boundary-compatible envelope)
-        r_norm = (geometry.r_grid - geometry.r_min) / (geometry.r_max - geometry.r_min)
-        z_norm = (z - geometry.z_min) / (geometry.z_max - geometry.z_min)
-        envelope = 16 * r_norm * (1 - r_norm) * z_norm * (1 - z_norm)
-
+        # B = 0 for pure diffusion test (no MHD dynamics)
+        # Note: A non-zero B field with gradients causes MHD instability
         B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 2].set(1.0 * envelope)
 
         return State(
             psi=jnp.zeros((geometry.nr, geometry.nz)),
