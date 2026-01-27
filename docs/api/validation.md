@@ -8,7 +8,7 @@ The validation module provides infrastructure for validating simulations against
 from jax_frc.validation import ValidationRunner, ValidationResult
 
 # Run validation case from YAML
-runner = ValidationRunner("cases/slab_diffusion.yaml", output_dir="results/")
+runner = ValidationRunner("cases/magnetic_diffusion.yaml", output_dir="results/")
 result = runner.run()
 
 # Check results
@@ -38,15 +38,15 @@ result = runner.run()
 ### YAML Case Format
 
 ```yaml
-name: slab_diffusion_test
-description: Validate thermal diffusion against analytic solution
+name: magnetic_diffusion_test
+description: Validate magnetic diffusion against analytic solution
 
 configuration:
-  class: SlabDiffusionConfiguration
+  class: MagneticDiffusionConfiguration
   overrides:
     nr: 64
     nz: 256
-    T_peak: 100.0
+    B_peak: 1.0
 
 runtime:
   t_end: 1e-4
@@ -55,11 +55,11 @@ runtime:
 acceptance:
   quantitative:
     - metric: l2_error
-      field: T
+      field: B_theta
       expected: 0.0
       tolerance: 0.05
     - metric: linf_error
-      field: T
+      field: B_theta
       expected: 0.0
       tolerance: 0.1
 ```
@@ -99,7 +99,7 @@ Container for validation outcomes:
 from jax_frc.validation import ValidationResult, MetricResult
 
 result = ValidationResult(
-    case_name="slab_diffusion",
+    case_name="magnetic_diffusion",
     passed=True,
     runtime_seconds=12.5,
     metrics={
@@ -131,7 +131,7 @@ from jax_frc.validation import ReferenceManager, ReferenceData
 
 # Load reference data
 manager = ReferenceManager("references/")
-ref = manager.load("slab_diffusion_analytic")
+ref = manager.load("magnetic_diffusion_analytic")
 
 # Access reference fields
 T_ref = ref.fields["T"]
@@ -143,11 +143,11 @@ time_ref = ref.time
 Configurations can provide analytic solutions for validation:
 
 ```python
-from jax_frc.configurations import SlabDiffusionConfiguration
+from jax_frc.configurations import MagneticDiffusionConfiguration
 
-config = SlabDiffusionConfiguration(T_peak=100.0, kappa=1e10)
+config = MagneticDiffusionConfiguration(B_peak=1.0, eta=1e-6)
 geometry = config.build_geometry()
 
 # Get analytic solution at time t
-T_analytic = config.analytic_solution(geometry, t=1e-4)
+B_analytic = config.analytic_solution(geometry, t=1e-4)
 ```

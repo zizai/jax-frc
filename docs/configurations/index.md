@@ -9,7 +9,7 @@ jax_frc/configurations/
 ├── base.py              # AbstractConfiguration base class
 ├── linear_configuration.py  # LinearConfiguration for YAML-based setup
 ├── frc_merging.py       # Belova merging configurations
-├── analytic.py          # Analytic test cases (SlabDiffusion)
+├── magnetic_diffusion.py    # Magnetic diffusion test case
 ├── phase.py             # Phase base class and registry
 ├── transitions.py       # Transition conditions
 └── phases/
@@ -59,7 +59,7 @@ config = LinearConfiguration(
 | `BelovaCase1Configuration` | Large FRC, no compression |
 | `BelovaCase2Configuration` | Small FRC, no compression |
 | `BelovaCase4Configuration` | Large FRC with compression |
-| `SlabDiffusionConfiguration` | 1D diffusion test case |
+| `MagneticDiffusionConfiguration` | Magnetic diffusion test case |
 
 ## Transition Conditions
 
