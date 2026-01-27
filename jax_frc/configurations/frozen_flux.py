@@ -21,18 +21,16 @@ ModelType = Literal["resistive_mhd", "extended_mhd", "plasma_neutral", "hybrid_k
 class FrozenFluxConfiguration(AbstractConfiguration):
     """Frozen-in flux test (Rm >> 1) in 3D Cartesian geometry.
 
-    Physics: ∂B/∂t ≈ ∇×(v×B) (ideal MHD, flux frozen to plasma)
+    Physics: dB/dt ≈ -curl(v x B) (ideal MHD, flux frozen to plasma)
 
     Tests the advection-dominated regime where magnetic Reynolds number
-    is much greater than 1. The magnetic field is "frozen" into the plasma
-    and moves with it.
+    is much greater than 1. In 3D Cartesian coordinates with uniform
+    velocity and uniform B, the induction equation predicts no change
+    in B because curl(v x B) = 0.
 
-    Setup: Cartesian slab with uniform expansion v_x = v₀
-    Initial: Uniform B_y field (maps to B_φ)
-    Analytic: B_y(t) = B₀ · x₀/(x₀ + v₀t) from flux conservation
-
-    The toroidal flux Φ = ∫B_φ dr is conserved. As the plasma expands
-    radially, B_φ decreases to maintain constant flux.
+    Setup: Cartesian slab with uniform expansion v_x = v0
+    Initial: Uniform B_y field (maps to B_phi)
+    Analytic: B_y(t) = constant (uniform field advects without distortion)
 
     Supports: resistive_mhd, extended_mhd, plasma_neutral, hybrid_kinetic
     """
@@ -141,49 +139,17 @@ class FrozenFluxConfiguration(AbstractConfiguration):
         }
 
     def analytic_solution(self, r: jnp.ndarray, t: float) -> jnp.ndarray:
-        """Compute analytic B_φ at time t from flux conservation.
+        """Compute analytic B_phi at time t for uniform advection.
 
-        For uniform radial expansion with v_r = const, the toroidal flux
-        Φ = ∫B_φ dr is conserved. This gives:
-
-            B_φ(t) = B₀ · r₀ / (r₀ + v_r·t)
-
-        where r₀ is the initial inner radius.
-
-        Note: This simplified solution assumes the field decreases uniformly.
-        A more accurate treatment would track the Lagrangian displacement
-        of each fluid element.
-
-        Args:
-            r: Radial coordinates [m] (unused in simplified model)
-            t: Time [s]
-
-        Returns:
-            B_φ field value at time t
+        In 3D Cartesian coordinates with uniform velocity and uniform B,
+        curl(v x B) = 0, so B remains constant in time.
         """
-        # Simplified: uniform decrease based on inner radius expansion
-        r_inner_t = self.r_min + self.v_r * t
-        return self.B_phi_0 * self.r_min / r_inner_t
+        return jnp.ones_like(r) * self.B_phi_0
 
     def analytic_solution_lagrangian(self, r0: jnp.ndarray, t: float) -> tuple:
-        """Compute B_φ tracking Lagrangian fluid elements.
-
-        For a fluid element initially at r₀, its position at time t is:
-            r(t) = r₀ + v_r·t
-
-        Flux conservation for that element gives:
-            B_φ(r,t) · r = B_φ₀ · r₀
-            B_φ(r,t) = B_φ₀ · r₀ / r(t)
-
-        Args:
-            r0: Initial radial coordinates [m]
-            t: Time [s]
-
-        Returns:
-            (r_t, B_phi_t): New positions and B_φ values
-        """
+        """Return unchanged positions and uniform B for this Cartesian setup."""
         r_t = r0 + self.v_r * t
-        B_phi_t = self.B_phi_0 * r0 / r_t
+        B_phi_t = jnp.ones_like(r0) * self.B_phi_0
         return r_t, B_phi_t
 
     def advection_timescale(self) -> float:

@@ -16,14 +16,18 @@ runtime:
 
 reference:
   type: analytic
-  description: "Flux conservation: B_φ(t) = B₀ · r₀/(r₀ + v_r·t)"
+  description: "Frozen-in flux with uniform advection: B_phi is constant"
+  formula: "B_phi_0 * jnp.ones_like(z)"
+  variables:
+    - B_phi_0
+    - z
 
 acceptance:
   quantitative:
     - metric: l2_error
-      field: B_phi
-      threshold: 0.05
-      description: "Relative L2 error vs analytic solution"
+      field: B_theta
+      threshold: 0.01
+      description: "Relative L2 error vs analytic solution (uniform field)"
     - metric: flux_conservation
       threshold: 0.01
       description: "Toroidal flux conserved within 1%"
