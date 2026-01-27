@@ -13,16 +13,20 @@ Physics:
 
     Coordinate System:
         The MHD code uses 3D Cartesian (x, y, z) coordinates. For 2D-like
-        behavior, we use a thin y-dimension (ny=4) with periodic boundary
+        behavior, we use a single-cell z-dimension (nz=1) with periodic boundary
         conditions. This effectively reduces the problem to 2D diffusion
-        in the x-z plane.
+        in the x-y plane.
 
-    Initial condition (2D Gaussian in x-z plane):
-        B_z(x, z, 0) = B_peak * exp(-(x² + z²) / (2σ²))
+    Initial condition (2D Gaussian in x-y plane):
+        B_z(x, y, 0) = B_peak * exp(-(x² + y²) / (2σ²))
 
     Analytic solution (2D spreading Gaussian):
         σ_t² = σ² + 2ηt
-        B_z(x, z, t) = B_peak * (σ²/σ_t²) * exp(-(x² + z²) / (2σ_t²))
+        B_z(x, y, t) = B_peak * (σ²/σ_t²) * exp(-(x² + y²) / (2σ_t²))
+
+    The Gaussian is in the x-y plane (uniform in z) to ensure div(B) = 0,
+    since ∂Bz/∂z = 0. This is required for the MHD induction equation
+    to correctly reduce to scalar diffusion.
 
     The Gaussian spreads and decreases in amplitude while conserving total
     magnetic flux. This is the magnetic analog of heat diffusion and serves
@@ -48,7 +52,7 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from jax_frc.configurations.magnetic_diffusion import MagneticDiffusionConfiguration
-from jax_frc.solvers.explicit import EulerSolver
+from jax_frc.solvers.explicit import RK4Solver
 from jax_frc.validation.metrics import l2_error, linf_error
 from validation.utils.reporting import ValidationReport
 from validation.utils.plotting import plot_comparison, plot_error
@@ -71,17 +75,17 @@ def setup_configuration() -> dict:
     MU0 = 1.2566e-6
     diffusivity = eta / MU0  # ~1e-4 m²/s
 
-    # Grid parameters (3D Cartesian with thin y for 2D-like behavior)
+    # Grid parameters (3D Cartesian with thin z for 2D-like behavior)
     nx = 64
-    ny = 4   # Thin y-dimension with periodic BCs for 2D-like behavior
-    nz = 64
+    ny = 64
+    nz = 1   # Single cell in z (pseudo-dimension for 2D simulation)
     extent = 1.0  # Domain: [-extent, extent] in each direction
 
     dx = 2 * extent / nx
-    dz = 2 * extent / nz
+    dy = 2 * extent / ny
 
     # CFL constraint for diffusion: dt < dx^2 / (2*D)
-    dx_min = min(dx, dz)
+    dx_min = min(dx, dy)
     dt_max = 0.25 * dx_min**2 / diffusivity
     dt = dt_max * 0.5  # Safety factor
 
@@ -95,8 +99,8 @@ def setup_configuration() -> dict:
         "sigma": sigma,      # Initial Gaussian width [m]
         "eta": eta,          # Magnetic resistivity [Ω·m]
         "nx": nx,            # X resolution
-        "ny": ny,            # Y resolution (thin for 2D-like)
-        "nz": nz,            # Z resolution
+        "ny": ny,            # Y resolution
+        "nz": nz,            # Z resolution (thin for 2D-like)
         "extent": extent,    # Domain extent [m]
         "t_end": t_end,      # End time [s]
         "dt": dt,            # Time step [s] (CFL-constrained)
@@ -129,7 +133,7 @@ def run_simulation(cfg: dict) -> tuple:
     model = config.build_model()
 
     # Create Euler solver for explicit time stepping
-    solver = EulerSolver()
+    solver = RK4Solver()
 
     # Time stepping
     t_end = cfg["t_end"]
@@ -144,8 +148,8 @@ def run_simulation(cfg: dict) -> tuple:
 
 # Acceptance criteria
 ACCEPTANCE = {
-    "l2_error": 0.10,      # 10% relative L2 error threshold
-    "linf_error": 0.15,    # Max pointwise error threshold [T]
+    "l2_error": 0.01,      # 1% relative L2 error threshold
+    "linf_error": 0.02,    # 2% max pointwise error threshold
 }
 
 
@@ -180,16 +184,16 @@ def main() -> bool:
     z = geometry.z_grid
     Bz_sim = final_state.B[:, :, :, 2]  # 3D array
 
-    # For 2D-like comparison, take slice at y=0 (middle of thin y-dimension)
-    y_idx = geometry.ny // 2
+    # For 2D-like comparison, take slice at z=0 (middle of thin z-dimension)
+    z_idx = geometry.nz // 2
 
     # Extract 2D slices for comparison
-    x_2d = x[:, y_idx, :]  # Shape: (nx, nz)
-    z_2d = z[:, y_idx, :]
-    Bz_sim_2d = Bz_sim[:, y_idx, :]
+    x_2d = x[:, :, z_idx]  # Shape: (nx, ny)
+    y_2d = y[:, :, z_idx]
+    Bz_sim_2d = Bz_sim[:, :, z_idx]
 
     # Compute 2D analytic solution at final time
-    Bz_analytic_2d = config.analytic_solution_2d(x_2d, z_2d, cfg["t_end"])
+    Bz_analytic_2d = config.analytic_solution_2d(x_2d, y_2d, cfg["t_end"])
 
     # Compute metrics on 2D slice
     l2_err = l2_error(Bz_sim_2d, Bz_analytic_2d)
@@ -233,46 +237,46 @@ def main() -> bool:
     )
 
     # Add plots - use center slices for visualization
-    # X-slice at z=0 (center of domain)
-    z_center_idx = geometry.nz // 2
-    x_1d = x_2d[:, z_center_idx]
-    Bz_sim_x = Bz_sim_2d[:, z_center_idx]
-    Bz_analytic_x = Bz_analytic_2d[:, z_center_idx]
+    # X-slice at y=0 (center of domain)
+    y_center_idx = geometry.ny // 2
+    x_1d = x_2d[:, y_center_idx]
+    Bz_sim_x = Bz_sim_2d[:, y_center_idx]
+    Bz_analytic_x = Bz_analytic_2d[:, y_center_idx]
 
     fig_comparison_x = plot_comparison(
         x=x_1d,
         actual=Bz_sim_x,
         expected=Bz_analytic_x,
         labels=("Simulation", "Analytic"),
-        title=f"B_z Profile at z=0, t={cfg['t_end']:.1e}s",
+        title=f"B_z Profile at y=0, t={cfg['t_end']:.1e}s",
         xlabel="x [m]",
         ylabel="B_z [T]",
     )
     report.add_plot(fig_comparison_x, name="Bz_comparison_x")
 
-    # Z-slice at x=0 (center of domain)
+    # Y-slice at x=0 (center of domain)
     x_center_idx = geometry.nx // 2
-    z_1d = z_2d[x_center_idx, :]
-    Bz_sim_z = Bz_sim_2d[x_center_idx, :]
-    Bz_analytic_z = Bz_analytic_2d[x_center_idx, :]
+    y_1d = y_2d[x_center_idx, :]
+    Bz_sim_y = Bz_sim_2d[x_center_idx, :]
+    Bz_analytic_y = Bz_analytic_2d[x_center_idx, :]
 
-    fig_comparison_z = plot_comparison(
-        x=z_1d,
-        actual=Bz_sim_z,
-        expected=Bz_analytic_z,
+    fig_comparison_y = plot_comparison(
+        x=y_1d,
+        actual=Bz_sim_y,
+        expected=Bz_analytic_y,
         labels=("Simulation", "Analytic"),
         title=f"B_z Profile at x=0, t={cfg['t_end']:.1e}s",
-        xlabel="z [m]",
+        xlabel="y [m]",
         ylabel="B_z [T]",
     )
-    report.add_plot(fig_comparison_z, name="Bz_comparison_z")
+    report.add_plot(fig_comparison_y, name="Bz_comparison_y")
 
     fig_error = plot_error(
-        x=z_1d,
-        actual=Bz_sim_z,
-        expected=Bz_analytic_z,
+        x=y_1d,
+        actual=Bz_sim_y,
+        expected=Bz_analytic_y,
         title="B_z Error at x=0 (Simulation - Analytic)",
-        xlabel="z [m]",
+        xlabel="y [m]",
         ylabel="Error [T]",
     )
     report.add_plot(fig_error, name="Bz_error")

@@ -65,21 +65,21 @@ def test_magnetic_diffusion_builds_geometry():
 
 
 def test_magnetic_diffusion_builds_initial_state():
-    """MagneticDiffusionConfiguration creates state with Gaussian B_z in x-z plane."""
+    """MagneticDiffusionConfiguration creates state with Gaussian B_z in x-y plane."""
     from jax_frc.configurations import MagneticDiffusionConfiguration
     import jax.numpy as jnp
     from tests.utils.cartesian import make_geometry
 
     config = MagneticDiffusionConfiguration()
-    geometry = make_geometry(nx=8, ny=1, nz=8)
+    geometry = make_geometry(nx=8, ny=8, nz=1)
     state = config.build_initial_state(geometry)
 
     # B_z should have Gaussian profile (peak in center)
     x_center = geometry.nx // 2
     y_center = geometry.ny // 2
     z_center = geometry.nz // 2
-    # Center should have higher B_z than edge
-    assert state.B[x_center, y_center, z_center, 2] > state.B[x_center, y_center, 0, 2]
+    # Center should have higher B_z than edge (in x-y plane)
+    assert state.B[x_center, y_center, z_center, 2] > state.B[0, y_center, z_center, 2]
 
 
 def test_magnetic_diffusion_builds_model():

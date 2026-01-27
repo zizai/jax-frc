@@ -27,12 +27,13 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
     is much less than 1. The magnetic field diffuses through the plasma
     like heat through a conductor.
 
-    Initial condition: 3D Gaussian B_z profile centered at origin
-    Analytic solution: 3D spreading Gaussian
+    Initial condition: 2D Gaussian B_z(x,y) profile in x-y plane
+    Analytic solution: 2D spreading Gaussian
         σ_t² = σ₀² + 2Dt
-        B_z(x,y,z,t) = B_peak * (σ₀/σ_t)³ * exp(-(x² + y² + z²)/(2σ_t²))
+        B_z(x,y,t) = B_peak * (σ₀/σ_t)² * exp(-(x² + y²)/(2σ_t²))
 
-    For 2D-like tests, set ny=4 with periodic y boundary conditions.
+    The Gaussian is in the x-y plane (uniform in z) to ensure div(B) = 0,
+    since ∂Bz/∂z = 0. Set nz=1 for 2D-like behavior.
 
     Supports: resistive_mhd, extended_mhd, plasma_neutral, hybrid_kinetic
     """
@@ -42,8 +43,8 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
 
     # Grid parameters
     nx: int = 64          # X resolution
-    ny: int = 4           # Y resolution (thin for 2D-like behavior)
-    nz: int = 64          # Z resolution
+    ny: int = 64          # Y resolution
+    nz: int = 1           # Z resolution (pseudo-dimension for 2D-like behavior)
     extent: float = 1.0   # Domain: [-extent, extent] in each direction
 
     # Physics parameters
@@ -73,18 +74,21 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
             y_max=self.extent,
             z_min=-self.extent,
             z_max=self.extent,
-            bc_x="neumann",
-            bc_y="periodic",  # Periodic in thin direction for 2D-like behavior
-            bc_z="neumann",
+            bc_x="periodic",  # Operators only support periodic BCs
+            bc_y="periodic",  # Operators only support periodic BCs
+            bc_z="periodic",  # Pseudo-dimension
         )
 
     def build_initial_state(self, geometry: Geometry) -> State:
-        """2D Gaussian B_z profile in x-z plane (uniform in y), v=0."""
-        x = geometry.x_grid
-        z = geometry.z_grid
+        """2D Gaussian B_z profile in x-y plane (uniform in z), v=0.
 
-        # 2D Gaussian centered at origin (uniform in y for 2D-like behavior)
-        r_sq = x**2 + z**2
+        Using x-y plane ensures div(B) = 0 since ∂Bz/∂z = 0.
+        """
+        x = geometry.x_grid
+        y = geometry.y_grid
+
+        # 2D Gaussian centered at origin (uniform in z for div(B) = 0)
+        r_sq = x**2 + y**2
         B_z = self.B_peak * jnp.exp(-r_sq / (2 * self.sigma**2))
 
         # Build B field array (only B_z component)
@@ -186,16 +190,16 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
         return amplitude * jnp.exp(-r_sq / (2 * sigma_eff_sq))
 
     def analytic_solution_2d(
-        self, x: jnp.ndarray, z: jnp.ndarray, t: float
+        self, x: jnp.ndarray, y: jnp.ndarray, t: float
     ) -> jnp.ndarray:
-        """2D analytic solution for x-z plane (thin-y approximation).
+        """2D analytic solution for x-y plane (thin-z approximation).
 
         The 2D spreading Gaussian solution is:
-            B_z(x,z,t) = B_peak * (σ₀/σ_t)² * exp(-(x² + z²)/(2σ_t²))
+            B_z(x,y,t) = B_peak * (σ₀/σ_t)² * exp(-(x² + y²)/(2σ_t²))
 
         Args:
             x: X coordinates [m]
-            z: Z coordinates [m]
+            y: Y coordinates [m]
             t: Time [s]
 
         Returns:
@@ -206,7 +210,7 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
 
         sigma_eff_sq = self.sigma**2 + 2 * diffusivity * t
 
-        r_sq = x**2 + z**2
+        r_sq = x**2 + y**2
 
         # 2D amplitude decay: (σ₀²/σ_t²)
         amplitude = self.B_peak * (self.sigma**2 / sigma_eff_sq)
