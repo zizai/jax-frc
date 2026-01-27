@@ -1,257 +1,73 @@
-"""Resistive MHD physics model."""
+"""3D Resistive MHD model with direct B-field evolution."""
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Union, Optional
 import jax
 import jax.numpy as jnp
 from jax import jit
 
 from jax_frc.models.base import PhysicsModel
-from jax_frc.models.resistivity import ResistivityModel, SpitzerResistivity, ChoduraResistivity
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
-from jax_frc.fields import CoilField
+from jax_frc.operators import curl_3d
+from jax_frc.constants import MU0
 
-MU0 = 1.2566e-6
 
 @dataclass(frozen=True)
 class ResistiveMHD(PhysicsModel):
-    """Single-fluid resistive MHD model.
+    """Resistive MHD model evolving B directly.
 
-    Solves: d(psi)/dt + v*grad(psi) = (eta/mu_0)*Delta*psi
+    Solves: dB/dt = -curl(E)
+    Where:  E = -v x B + eta*J, J = curl(B)/mu_0
+
+    For stationary plasma (v=0): E = eta*J
 
     Args:
-        resistivity: Model for plasma resistivity
-        external_field: Optional external magnetic field from coils
+        eta: Resistivity [Ohm*m]
     """
-
-    resistivity: ResistivityModel
-    external_field: Optional[CoilField] = None
-
-    def get_total_B(self, state: State, geometry: Geometry, t: float = 0.0) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """Get total B field including external field contribution.
-
-        The total magnetic field is the sum of:
-        - B from psi (equilibrium field from plasma currents)
-        - External field from coils (if present)
-
-        In cylindrical coordinates, B from psi is:
-        - B_r = -(1/r) * dpsi/dz
-        - B_z = (1/r) * dpsi/dr
-
-        Args:
-            state: Current simulation state containing psi
-            geometry: Computational geometry
-            t: Time for time-dependent external fields
-
-        Returns:
-            (B_r, B_z): Radial and axial field components on the grid
-        """
-        psi = state.psi
-        dr, dz = geometry.dr, geometry.dz
-        r = geometry.r_grid
-
-        # Compute B from psi using central differences
-        # B_r = -(1/r) * dpsi/dz
-        dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
-        B_r_psi = -dpsi_dz / r
-
-        # B_z = (1/r) * dpsi/dr
-        dpsi_dr = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
-        B_z_psi = dpsi_dr / r
-
-        # Add external field if present
-        if self.external_field is not None:
-            r_grid = geometry.r_grid
-            z_grid = geometry.z_grid
-            B_r_ext, B_z_ext = self.external_field.B_field(r_grid, z_grid, t)
-            B_r = B_r_psi + B_r_ext
-            B_z = B_z_psi + B_z_ext
-        else:
-            B_r = B_r_psi
-            B_z = B_z_psi
-
-        return B_r, B_z
+    eta: float = 1e-4  # Resistivity [Ohm*m]
 
     @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
-        """Compute d(psi)/dt from Grad-Shafranov evolution."""
-        psi = state.psi
-        dr, dz = geometry.dr, geometry.dz
-        r = geometry.r_grid
+        """Compute dB/dt from induction equation.
 
-        # Compute Delta*psi
-        delta_star_psi = self._laplace_star(psi, dr, dz, r)
+        Args:
+            state: Current state with B field
+            geometry: 3D geometry
 
-        # Compute j_phi = -Delta*psi / (mu_0 * r)
-        j_phi = -delta_star_psi / (MU0 * r)
+        Returns:
+            State with B field containing dB/dt
+        """
+        B = state.B
 
-        # Get resistivity
-        eta = self.resistivity.compute(j_phi)
+        # Current density: J = curl(B) / mu_0
+        J = curl_3d(B, geometry) / MU0
 
-        # Diffusion: (eta/mu_0)*Delta*psi
-        d_psi = (eta / MU0) * delta_star_psi
+        # Electric field: E = eta*J (assuming v=0 for pure resistive case)
+        # For moving plasma: E = -v x B + eta*J
+        if state.v is not None:
+            v = state.v
+            v_cross_B = jnp.stack([
+                v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
+                v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
+                v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
+            ], axis=-1)
+            E = -v_cross_B + self.eta * J
+        else:
+            E = self.eta * J
 
-        # Advection: -v*grad(psi)
-        # Always compute advection term (costs nothing when v=0, avoids tracing issues)
-        v_r = state.v[:, :, 0]
-        v_z = state.v[:, :, 2]
-        dpsi_dr = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
-        dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
-        d_psi = d_psi - (v_r * dpsi_dr + v_z * dpsi_dz)
+        # Faraday's law: dB/dt = -curl(E)
+        dB_dt = -curl_3d(E, geometry)
 
-        # Return state with d_psi as the RHS, zeros for all other fields
-        return State(
-            psi=d_psi,
-            n=jnp.zeros_like(state.n),
-            p=jnp.zeros_like(state.p),
-            T=jnp.zeros_like(state.T),
-            B=jnp.zeros_like(state.B),
-            E=jnp.zeros_like(state.E),
-            v=jnp.zeros_like(state.v),
-            particles=None,
-            time=0.0,
-            step=0,
-        )
+        return state.replace(B=dB_dt)
 
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
-        """Diffusion CFL: dt < dx^2 / (4D) where D = eta_max/mu_0."""
-        # Get maximum resistivity
-        j_phi = self._compute_j_phi(state.psi, geometry)
-        eta = self.resistivity.compute(j_phi)
-        eta_max = jnp.max(eta)
-
-        D = eta_max / MU0
-        dx_min = jnp.minimum(geometry.dr, geometry.dz)
-        return 0.25 * dx_min**2 / D
+        """Resistive diffusion CFL: dt < dx^2 / (2*eta/mu0)."""
+        dx_min = min(geometry.dx, geometry.dy, geometry.dz)
+        diffusivity = self.eta / MU0
+        return 0.25 * dx_min**2 / diffusivity
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
-        """Apply boundary conditions for conducting wall."""
-        psi = state.psi
-
-        # Inner boundary: Neumann (extrapolate)
-        psi = psi.at[0, :].set(psi[1, :])
-        # Outer boundaries: Dirichlet (psi = 0)
-        psi = psi.at[-1, :].set(0)
-        psi = psi.at[:, 0].set(0)
-        psi = psi.at[:, -1].set(0)
-
-        return state.replace(psi=psi)
-
-    def _laplace_star(self, psi, dr, dz, r):
-        """Compute Delta*psi = d^2(psi)/dr^2 - (1/r)*d(psi)/dr + d^2(psi)/dz^2."""
-        psi_rr = (jnp.roll(psi, -1, axis=0) - 2*psi + jnp.roll(psi, 1, axis=0)) / dr**2
-        psi_zz = (jnp.roll(psi, -1, axis=1) - 2*psi + jnp.roll(psi, 1, axis=1)) / dz**2
-        psi_r = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
-        return psi_rr - (1.0 / r) * psi_r + psi_zz
-
-    def _compute_j_phi(self, psi, geometry):
-        """Compute toroidal current density."""
-        delta_star = self._laplace_star(psi, geometry.dr, geometry.dz, geometry.r_grid)
-        return -delta_star / (MU0 * geometry.r_grid)
-
-    def explicit_rhs(self, state: State, geometry: Geometry, t: float = 0.0) -> State:
-        """Advection term only: -v . grad(psi).
-
-        This is the explicit part for IMEX splitting.
-        """
-        psi = state.psi
-        v_r = state.v[:, :, 0]
-        v_z = state.v[:, :, 2]
-        dr, dz = geometry.dr, geometry.dz
-
-        # Compute gradient of psi using central differences (consistent with compute_rhs)
-        dpsi_dr = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2 * dr)
-        dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
-
-        # Advection: -v . grad(psi)
-        advection = -(v_r * dpsi_dr + v_z * dpsi_dz)
-
-        # Return state with zeros for all other fields
-        return State(
-            psi=advection,
-            n=jnp.zeros_like(state.n),
-            p=jnp.zeros_like(state.p),
-            T=jnp.zeros_like(state.T),
-            B=jnp.zeros_like(state.B),
-            E=jnp.zeros_like(state.E),
-            v=jnp.zeros_like(state.v),
-            particles=None,
-            time=0.0,
-            step=0,
-        )
-
-    def implicit_rhs(self, state: State, geometry: Geometry, t: float = 0.0) -> State:
-        """Diffusion term only: (eta/mu0) * Delta*psi.
-
-        This is the implicit part for IMEX splitting.
-        """
-        psi = state.psi
-        dr, dz = geometry.dr, geometry.dz
-        r = geometry.r_grid
-
-        # Compute Delta*psi
-        delta_star_psi = self._laplace_star(psi, dr, dz, r)
-
-        # Get resistivity
-        j_phi = -delta_star_psi / (MU0 * r)
-        eta = self.resistivity.compute(j_phi)
-
-        # Diffusion: (eta/mu_0)*Delta*psi
-        diffusion = (eta / MU0) * delta_star_psi
-
-        # Return state with zeros for all other fields
-        return State(
-            psi=diffusion,
-            n=jnp.zeros_like(state.n),
-            p=jnp.zeros_like(state.p),
-            T=jnp.zeros_like(state.T),
-            B=jnp.zeros_like(state.B),
-            E=jnp.zeros_like(state.E),
-            v=jnp.zeros_like(state.v),
-            particles=None,
-            time=0.0,
-            step=0,
-        )
-
-    def apply_implicit_operator(
-        self, state: State, geometry: Geometry, dt: float, theta: float
-    ) -> State:
-        """Apply (I - theta*dt*L) where L is diffusion operator.
-
-        Used for matrix-free CG solve.
-        """
-        psi = state.psi
-        dr, dz = geometry.dr, geometry.dz
-        r = geometry.r_grid
-
-        # Compute diffusion operator L*psi = (eta/mu0) * Delta*psi
-        delta_star_psi = self._laplace_star(psi, dr, dz, r)
-        j_phi = -delta_star_psi / (MU0 * r)
-        eta = self.resistivity.compute(j_phi)
-        L_psi = (eta / MU0) * delta_star_psi
-
-        # Apply (I - theta*dt*L)
-        new_psi = psi - theta * dt * L_psi
-
-        return state.replace(psi=new_psi)
-
-    @classmethod
-    def from_config(cls, config: dict) -> "ResistiveMHD":
-        """Create from configuration dictionary."""
-        res_config = config.get("resistivity", {"type": "spitzer"})
-        res_type = res_config.get("type", "spitzer")
-
-        if res_type == "spitzer":
-            resistivity = SpitzerResistivity(eta_0=float(res_config.get("eta_0", 1e-6)))
-        elif res_type == "chodura":
-            resistivity = ChoduraResistivity(
-                eta_0=float(res_config.get("eta_0", 1e-6)),
-                eta_anom=float(res_config.get("eta_anom", 1e-3)),
-                threshold=float(res_config.get("threshold", 1e4))
-            )
-        else:
-            raise ValueError(f"Unknown resistivity type: {res_type}")
-
-        return cls(resistivity=resistivity)
+        """Apply boundary conditions based on geometry.bc_* settings."""
+        # For now, return state unchanged (periodic BCs handled by operators)
+        return state
