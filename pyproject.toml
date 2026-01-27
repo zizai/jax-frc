@@ -32,6 +32,7 @@ dependencies = [
     "matplotlib>=3.7.0",
     "seaborn>=0.12.0",
     "pyyaml>=6.0.0",
+    "h5py>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +43,8 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.0.0",
     "pre-commit>=3.0.0",
+    "ipywidgets>=8.0.0",
+    "jupyterlab>=4.0.0",
 ]
 cuda = [
     "jax[cuda12]>=0.4.20",
