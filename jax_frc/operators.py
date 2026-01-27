@@ -5,9 +5,12 @@ Includes both Cartesian (periodic) and cylindrical (non-periodic) operators.
 Cylindrical operators handle the 1/r singularity at the axis using L'Hopital's rule.
 """
 
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 import jax.numpy as jnp
 from jax import jit
+
+if TYPE_CHECKING:
+    from jax_frc.core.geometry import Geometry
 
 Array = jnp.ndarray
 
@@ -230,11 +233,10 @@ def gradient_2d(f: Array, dx: float, dy: float) -> Tuple[Array, Array]:
     return df_dx, df_dy
 
 
-@jit
-def gradient_3d(
+def _gradient_3d_tuple(
     f: Array, dx: float, dy: float, dz: float
 ) -> Tuple[Array, Array, Array]:
-    """Compute 3D gradient using central differences.
+    """Compute 3D gradient using central differences (internal helper).
 
     Args:
         f: 3D scalar field of shape (nx, ny, nz)
@@ -249,6 +251,30 @@ def gradient_3d(
     df_dy = (jnp.roll(f, -1, axis=1) - jnp.roll(f, 1, axis=1)) / (2 * dy)
     df_dz = (jnp.roll(f, -1, axis=2) - jnp.roll(f, 1, axis=2)) / (2 * dz)
     return df_dx, df_dy, df_dz
+
+
+@jit(static_argnums=(1,))
+def gradient_3d(f: Array, geometry: "Geometry") -> Array:
+    """Compute gradient of scalar field in 3D Cartesian coordinates.
+
+    Uses central differences with periodic wrapping via jnp.roll.
+    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+
+    Args:
+        f: Scalar field, shape (nx, ny, nz)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Gradient vector field, shape (nx, ny, nz, 3) with [df/dx, df/dy, df/dz]
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+
+    # Central differences with periodic wrapping
+    df_dx = (jnp.roll(f, -1, axis=0) - jnp.roll(f, 1, axis=0)) / (2 * dx)
+    df_dy = (jnp.roll(f, -1, axis=1) - jnp.roll(f, 1, axis=1)) / (2 * dy)
+    df_dz = (jnp.roll(f, -1, axis=2) - jnp.roll(f, 1, axis=2)) / (2 * dz)
+
+    return jnp.stack([df_dx, df_dy, df_dz], axis=-1)
 
 
 @jit
