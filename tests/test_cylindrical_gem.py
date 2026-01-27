@@ -10,8 +10,8 @@ def test_cylindrical_gem_builds_geometry():
     config = CylindricalGEMConfiguration()
     geometry = config.build_geometry()
 
-    assert geometry.coord_system == "cylindrical"
-    assert geometry.nr == 256
+    assert geometry.nx == 256
+    assert geometry.ny == 4
     assert geometry.nz == 512
 
 
@@ -24,12 +24,13 @@ def test_cylindrical_gem_harris_sheet():
     state = config.build_initial_state(geometry)
 
     # Br should be ~+B0 for z >> lambda, ~-B0 for z << -lambda
-    center_r = geometry.nr // 2
+    center_x = geometry.nx // 2
+    center_y = geometry.ny // 2
     z_idx_pos = 3 * geometry.nz // 4  # z > 0
     z_idx_neg = geometry.nz // 4  # z < 0
 
-    assert state.B[center_r, z_idx_pos, 0] > 0.5 * config.B0
-    assert state.B[center_r, z_idx_neg, 0] < -0.5 * config.B0
+    assert state.B[center_x, center_y, z_idx_pos, 0] > 0.5 * config.B0
+    assert state.B[center_x, center_y, z_idx_neg, 0] < -0.5 * config.B0
 
 
 def test_cylindrical_gem_density_profile():
@@ -43,9 +44,10 @@ def test_cylindrical_gem_density_profile():
     # Density should peak at z=0
     center_z = geometry.nz // 2
     edge_z = 0
-    center_r = geometry.nr // 2
+    center_x = geometry.nx // 2
+    center_y = geometry.ny // 2
 
-    assert state.n[center_r, center_z] > state.n[center_r, edge_z]
+    assert state.n[center_x, center_y, center_z] > state.n[center_x, center_y, edge_z]
 
 
 def test_cylindrical_gem_uses_extended_mhd():
