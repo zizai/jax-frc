@@ -11,13 +11,18 @@ from jax_frc.core.geometry import Geometry
 def geometry():
     """Standard geometry for tests."""
     return Geometry(
-        coord_system="cylindrical",
-        nr=16,
+        nx=16,
+        ny=4,
         nz=32,
-        r_min=0.1,
-        r_max=0.5,
+        x_min=0.1,
+        x_max=0.5,
+        y_min=0.0,
+        y_max=2 * jnp.pi,
         z_min=-1.0,
         z_max=1.0,
+        bc_x="neumann",
+        bc_y="periodic",
+        bc_z="neumann",
     )
 
 
@@ -108,8 +113,8 @@ class TestPlasmaToCoils:
         coupling = FluxCoupling()
 
         # Uniform Bz field
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 2].set(1.0)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(1.0)
 
         Psi_pickup, Psi_external = coupling.plasma_to_coils(
             B, geometry, pickup_array, external_circuits
@@ -127,8 +132,8 @@ class TestPlasmaToCoils:
         coupling = FluxCoupling()
 
         # Uniform Bz = 1 T field
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 2].set(1.0)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(1.0)
 
         Psi_pickup, Psi_external = coupling.plasma_to_coils(
             B, geometry, pickup_array, external_circuits
@@ -150,10 +155,10 @@ class TestPlasmaToCoils:
         coupling = FluxCoupling()
 
         # Bz varies with z: stronger at z > 0
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
         z_grid = geometry.z_grid
         Bz = jnp.where(z_grid > 0, 2.0, 1.0)
-        B = B.at[:, :, 2].set(Bz)
+        B = B.at[:, :, :, 2].set(Bz)
 
         Psi_pickup, Psi_external = coupling.plasma_to_coils(
             B, geometry, pickup_array, external_circuits
@@ -171,7 +176,7 @@ class TestPlasmaToCoils:
 
         coupling = FluxCoupling()
 
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
 
         Psi_pickup, Psi_external = coupling.plasma_to_coils(
             B, geometry, pickup_array, external_circuits
@@ -194,7 +199,7 @@ class TestCoilsToPlasma:
 
         B_coils = coupling.coils_to_plasma(I_external, external_circuits, geometry)
 
-        assert B_coils.shape == (geometry.nr, geometry.nz, 3)
+        assert B_coils.shape == (geometry.nx, geometry.ny, geometry.nz, 3)
 
     def test_coils_to_plasma_zero_current(self, geometry, external_circuits):
         """coils_to_plasma returns zero field for zero current."""
@@ -219,7 +224,7 @@ class TestCoilsToPlasma:
         B_coils = coupling.coils_to_plasma(I_external, external_circuits, geometry)
 
         # Should have nonzero Bz component
-        assert jnp.any(B_coils[:, :, 2] != 0.0)
+        assert jnp.any(B_coils[:, :, :, 2] != 0.0)
 
     def test_coils_to_plasma_current_scaling(self, geometry, external_circuits):
         """coils_to_plasma field scales linearly with current."""
@@ -246,8 +251,8 @@ class TestJITCompatibility:
 
         coupling = FluxCoupling()
 
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 2].set(1.0)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(1.0)
 
         # Should compile and run without errors
         @jit
@@ -276,7 +281,7 @@ class TestJITCompatibility:
 
         B_coils = compute_field(I_external)
 
-        assert B_coils.shape == (geometry.nr, geometry.nz, 3)
+        assert B_coils.shape == (geometry.nx, geometry.ny, geometry.nz, 3)
 
 
 class TestEmptyCircuits:
@@ -290,8 +295,8 @@ class TestEmptyCircuits:
         coupling = FluxCoupling()
         empty_external = ExternalCircuits(circuits=())
 
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 2].set(1.0)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(1.0)
 
         Psi_pickup, Psi_external = coupling.plasma_to_coils(
             B, geometry, pickup_array, empty_external
@@ -312,5 +317,5 @@ class TestEmptyCircuits:
 
         B_coils = coupling.coils_to_plasma(I_external, empty_external, geometry)
 
-        assert B_coils.shape == (geometry.nr, geometry.nz, 3)
+        assert B_coils.shape == (geometry.nx, geometry.ny, geometry.nz, 3)
         assert jnp.allclose(B_coils, 0.0)

@@ -9,13 +9,18 @@ from jax_frc.core.geometry import Geometry
 @pytest.fixture
 def geometry():
     return Geometry(
-        coord_system="cylindrical",
-        nr=16,
+        nx=16,
+        ny=4,
         nz=32,
-        r_min=0.1,
-        r_max=0.8,
+        x_min=0.1,
+        x_max=0.8,
+        y_min=0.0,
+        y_max=2 * jnp.pi,
         z_min=-1.0,
         z_max=1.0,
+        bc_x="neumann",
+        bc_y="periodic",
+        bc_z="neumann",
     )
 
 
@@ -163,7 +168,7 @@ class TestExternalCircuits:
         I = jnp.array([1000.0])  # 1000 A
         B = external.compute_b_field(I, geometry)
 
-        assert B.shape == (geometry.nr, geometry.nz, 3)
+        assert B.shape == (geometry.nx, geometry.ny, geometry.nz, 3)
         # Should have significant Bz on axis
-        Bz_center = B[0, geometry.nz // 2, 2]
+        Bz_center = B[0, geometry.ny // 2, geometry.nz // 2, 2]
         assert Bz_center > 0.05  # Should be order 0.1 T for 1000 A

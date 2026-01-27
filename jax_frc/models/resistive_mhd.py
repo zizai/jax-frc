@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from functools import partial
+from typing import Optional
 import jax
 import jax.numpy as jnp
 from jax import jit
@@ -11,6 +12,7 @@ from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
 from jax_frc.operators import curl_3d
 from jax_frc.constants import MU0
+from jax_frc.fields import CoilField
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,7 @@ class ResistiveMHD(PhysicsModel):
         eta: Resistivity [Ohm*m]
     """
     eta: float = 1e-4  # Resistivity [Ohm*m]
+    external_field: Optional[CoilField] = None
 
     @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
@@ -66,6 +69,22 @@ class ResistiveMHD(PhysicsModel):
         dx_min = min(geometry.dx, geometry.dy, geometry.dz)
         diffusivity = self.eta / MU0
         return 0.25 * dx_min**2 / diffusivity
+
+    def get_total_B(
+        self, state: State, geometry: Geometry, t: float
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Return total B components (Bx, Bz), including external field."""
+        B_total = state.B
+        if self.external_field is not None:
+            r = jnp.abs(geometry.x_grid)
+            z = geometry.z_grid
+            B_r, B_z = self.external_field.B_field(r, z, t)
+            B_ext = jnp.zeros_like(B_total)
+            B_ext = B_ext.at[:, :, :, 0].set(B_r)
+            B_ext = B_ext.at[:, :, :, 2].set(B_z)
+            B_total = B_total + B_ext
+
+        return B_total[:, :, :, 0], B_total[:, :, :, 2]
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
         """Apply boundary conditions based on geometry.bc_* settings."""

@@ -11,6 +11,7 @@ from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
 from jax_frc.operators import curl_3d, gradient_3d, laplacian_3d
 from jax_frc.constants import MU0, QE
+from jax_frc.fields import CoilField
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class ExtendedMHD(PhysicsModel):
     include_electron_pressure: bool = True
     kappa_parallel: float = 1e20
     kappa_perp: float = 1e18
+    external_field: Optional[CoilField] = None
 
     @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
@@ -157,6 +159,22 @@ class ExtendedMHD(PhysicsModel):
             dt_hall = jnp.inf
 
         return float(jnp.minimum(dt_resistive, dt_hall))
+
+    def get_total_B(
+        self, state: State, geometry: Geometry, t: float
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Return total B components (Bx, Bz), including external field."""
+        B_total = state.B
+        if self.external_field is not None:
+            r = jnp.abs(geometry.x_grid)
+            z = geometry.z_grid
+            B_r, B_z = self.external_field.B_field(r, z, t)
+            B_ext = jnp.zeros_like(B_total)
+            B_ext = B_ext.at[:, :, :, 0].set(B_r)
+            B_ext = B_ext.at[:, :, :, 2].set(B_z)
+            B_total = B_total + B_ext
+
+        return B_total[:, :, :, 0], B_total[:, :, :, 2]
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
         """Apply boundary conditions."""
