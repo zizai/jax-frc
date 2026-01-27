@@ -13,32 +13,45 @@ class TestMergingDiagnostics:
     @pytest.fixture
     def geometry(self):
         return Geometry(
-            coord_system="cylindrical",
-            nr=20, nz=40,
-            r_min=0.1, r_max=1.0,
-            z_min=-2.0, z_max=2.0
+            nx=20,
+            ny=4,
+            nz=40,
+            x_min=0.1,
+            x_max=1.0,
+            y_min=0.0,
+            y_max=2 * jnp.pi,
+            z_min=-2.0,
+            z_max=2.0,
+            bc_x="neumann",
+            bc_y="periodic",
+            bc_z="neumann",
         )
 
     @pytest.fixture
     def two_frc_state(self, geometry):
         """Create state with two FRC-like structures."""
-        state = State.zeros(nr=20, nz=40)
+        state = State.zeros(nx=20, ny=4, nz=40)
 
-        # Create two peaked psi structures
-        r = geometry.r_grid
+        # Create two peaked Bz structures
+        x = geometry.x_grid
         z = geometry.z_grid
 
         # FRC 1 centered at z=-1
-        psi1 = jnp.exp(-((r - 0.5)**2 + (z + 1.0)**2) / 0.1)
+        bz1 = jnp.exp(-((x - 0.5)**2 + (z + 1.0)**2) / 0.1)
         # FRC 2 centered at z=+1
-        psi2 = jnp.exp(-((r - 0.5)**2 + (z - 1.0)**2) / 0.1)
+        bz2 = jnp.exp(-((x - 0.5)**2 + (z - 1.0)**2) / 0.1)
 
-        psi = psi1 + psi2
+        bz = bz1 + bz2
 
         # Set pressure proportional to psi
-        p = psi * 0.5
+        p = bz * 0.5
+        n = jnp.ones_like(bz)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(bz)
+        v = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        E = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
 
-        return state.replace(psi=psi, p=p, n=jnp.ones_like(psi))
+        return state.replace(B=B, E=E, p=p, n=n, v=v)
 
     def test_computes_separation(self, two_frc_state, geometry):
         """Diagnostics compute null separation."""
@@ -90,7 +103,7 @@ class TestMergingDiagnostics:
     def test_reconnection_rate_zero_when_E_field_zero(self, geometry):
         """Reconnection rate is zero when E field is zero."""
         # Create state with zero E field
-        state = State.zeros(nr=20, nz=40)
+        state = State.zeros(nx=20, ny=4, nz=40)
         # E field is already zeros from State.zeros()
 
         diag = MergingDiagnostics()

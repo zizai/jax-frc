@@ -14,26 +14,37 @@ class TestMergingPhase:
     @pytest.fixture
     def geometry(self):
         return Geometry(
-            coord_system="cylindrical",
-            nr=20, nz=80,
-            r_min=0.1, r_max=1.0,
-            z_min=-4.0, z_max=4.0
+            nx=20,
+            ny=4,
+            nz=80,
+            x_min=0.1,
+            x_max=1.0,
+            y_min=0.0,
+            y_max=2 * jnp.pi,
+            z_min=-4.0,
+            z_max=4.0,
+            bc_x="neumann",
+            bc_y="periodic",
+            bc_z="neumann",
         )
 
     @pytest.fixture
     def single_frc_state(self, geometry):
         """Create a single FRC equilibrium state."""
-        state = State.zeros(nr=20, nz=80)
+        state = State.zeros(nx=20, ny=4, nz=80)
 
-        r = geometry.r_grid
+        x = geometry.x_grid
         z = geometry.z_grid
 
         # Single FRC centered at z=0
-        psi = jnp.exp(-((r - 0.5)**2 + z**2) / 0.2)
-        p = psi * 0.5
-        n = jnp.ones_like(psi)
+        core = jnp.exp(-((x - 0.5)**2 + z**2) / 0.2)
+        p = core * 0.5
+        n = jnp.ones_like(core)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(core)
+        v = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
 
-        return state.replace(psi=psi, p=p, n=n)
+        return state.replace(p=p, n=n, B=B, v=v)
 
     def test_setup_creates_two_frc_state(self, single_frc_state, geometry):
         """MergingPhase.setup creates two-FRC configuration."""
@@ -47,12 +58,12 @@ class TestMergingPhase:
         config = {}
         result = phase.setup(single_frc_state, geometry, config)
 
-        # Should have two psi peaks
-        psi = result.psi
-        z_mid = psi.shape[1] // 2
+        # Should have two pressure peaks
+        p = result.p
+        z_mid = p.shape[2] // 2
 
-        left_max = jnp.max(psi[:, :z_mid])
-        right_max = jnp.max(psi[:, z_mid:])
+        left_max = jnp.max(p[:, :, :z_mid])
+        right_max = jnp.max(p[:, :, z_mid:])
 
         # Both halves should have significant flux
         assert left_max > 0.1
@@ -71,10 +82,10 @@ class TestMergingPhase:
         result = phase.setup(single_frc_state, geometry, config)
 
         # Left FRC should have +Vz, right FRC should have -Vz
-        z_mid = result.v.shape[1] // 2
+        z_mid = result.v.shape[2] // 2
 
-        vz_left = result.v[:, z_mid // 2, 2]  # z component
-        vz_right = result.v[:, z_mid + z_mid // 2, 2]
+        vz_left = result.v[:, :, z_mid // 2, 2]  # z component
+        vz_right = result.v[:, :, z_mid + z_mid // 2, 2]
 
         # Should have opposite signs
         assert jnp.mean(vz_left) > 0

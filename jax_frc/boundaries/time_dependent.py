@@ -13,9 +13,8 @@ from jax_frc.core.geometry import Geometry
 class TimeDependentMirrorBC(BoundaryCondition):
     """Mirror field with time-varying strength at z boundaries.
 
-    Implements compression profile from Belova et al.:
-    - Spatial: delta_Aphi(z) ~ 0.5(1 - cos(pi*z/Zc))
-    - Temporal: f(t) ~ (1 - cos(pi*t/T)) for cosine profile
+    Implements a simple 3D Cartesian mirror by scaling B_z at the z
+    boundaries based on the time-dependent profile.
 
     Attributes:
         base_field: B0 at t=0
@@ -42,29 +41,16 @@ class TimeDependentMirrorBC(BoundaryCondition):
             State with modified boundary values
         """
         t = float(state.time)  # Read time from state
-        psi = state.psi
 
         # Compute current mirror ratio
         ratio = self._compute_mirror_ratio(t)
 
-        delta_ratio = ratio - 1.0
+        # Apply to B_z at z boundaries
+        B = state.B
+        B = B.at[:, :, 0, 2].set(B[:, :, 0, 2] * ratio)
+        B = B.at[:, :, -1, 2].set(B[:, :, -1, 2] * ratio)
 
-        # Spatial profile: strongest at ends, zero at midplane
-        z = geometry.z
-        Zc = geometry.z_max
-        spatial_profile = 0.5 * (1 - jnp.cos(jnp.pi * jnp.abs(z) / Zc))
-
-        # Apply to psi at z boundaries
-        r = geometry.r
-
-        # Compute boundary modification
-        delta_psi_boundary = delta_ratio * self.base_field * r * spatial_profile[-1]
-
-        # Apply to end boundaries
-        psi = psi.at[:, 0].set(psi[:, 0] + delta_psi_boundary)
-        psi = psi.at[:, -1].set(psi[:, -1] + delta_psi_boundary)
-
-        return state.replace(psi=psi)
+        return state.replace(B=B)
 
     def _compute_mirror_ratio(self, t: float) -> float:
         """Compute current mirror ratio based on time and profile.

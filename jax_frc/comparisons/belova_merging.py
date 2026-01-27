@@ -219,10 +219,13 @@ class BelovaComparisonSuite:
         initial_separation: Initial distance between FRC centers [m]
         initial_velocity: Initial axial velocity of each FRC [m/s]
         frc_elongation: FRC elongation (length/diameter)
-        nr: Number of radial grid points
+        nr: Number of x grid points
+        ny: Number of y grid points
         nz: Number of axial grid points
-        r_min: Minimum radial coordinate [m]
-        r_max: Maximum radial coordinate [m]
+        r_min: Minimum x coordinate [m]
+        r_max: Maximum x coordinate [m]
+        y_min: Minimum y coordinate [m]
+        y_max: Maximum y coordinate [m]
         z_min: Minimum axial coordinate [m]
         z_max: Maximum axial coordinate [m]
     """
@@ -234,9 +237,12 @@ class BelovaComparisonSuite:
 
     # Grid parameters
     nr: int = 64
+    ny: int = 4
     nz: int = 128
     r_min: float = 0.01  # Avoid r=0 singularity
     r_max: float = 0.5
+    y_min: float = 0.0
+    y_max: float = 2 * jnp.pi
     z_min: float = -2.0
     z_max: float = 2.0
 
@@ -255,13 +261,18 @@ class BelovaComparisonSuite:
             Geometry object for simulations
         """
         return Geometry(
-            coord_system="cylindrical",
-            nr=self.nr,
+            nx=self.nr,
+            ny=self.ny,
             nz=self.nz,
-            r_min=self.r_min,
-            r_max=self.r_max,
+            x_min=self.r_min,
+            x_max=self.r_max,
+            y_min=self.y_min,
+            y_max=self.y_max,
             z_min=self.z_min,
             z_max=self.z_max,
+            bc_x="neumann",
+            bc_y="periodic",
+            bc_z="neumann",
         )
 
     def collect_diagnostics(
@@ -335,17 +346,15 @@ class BelovaComparisonSuite:
         """
         # Import models here to avoid circular imports
         from jax_frc.models.resistive_mhd import ResistiveMHD
-        from jax_frc.models.resistivity import SpitzerResistivity
 
         geometry = self.create_geometry()
 
         # Create model
-        resistivity = SpitzerResistivity(eta_0=resistivity_eta)
-        model = ResistiveMHD(resistivity=resistivity)
+        model = ResistiveMHD(eta=resistivity_eta)
 
         # Create initial state if not provided
         if initial_state is None:
-            initial_state = State.zeros(self.nr, self.nz)
+            initial_state = State.zeros(self.nr, self.ny, self.nz)
 
         # Placeholder for actual simulation loop
         # In production, this would use the simulation runner
@@ -438,9 +447,7 @@ class BelovaComparisonSuite:
 
         # Create initial state if not provided
         if initial_state is None:
-            initial_state = State.zeros(
-                self.nr, self.nz, with_particles=True, n_particles=n_particles
-            )
+            initial_state = State.zeros(self.nr, self.ny, self.nz)
 
         # Placeholder for actual simulation loop
         n_steps = int(t_end / dt)

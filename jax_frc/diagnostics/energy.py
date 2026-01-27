@@ -118,6 +118,8 @@ class EnergyDiagnostics(Probe):
         Returns:
             Kinetic energy in Joules
         """
+        if state.v is None:
+            return 0.0
         # v field has shape (nr, nz, 3) with components [v_r, v_phi, v_z]
         v_squared = jnp.sum(state.v**2, axis=-1)  # v_r^2 + v_phi^2 + v_z^2
 
