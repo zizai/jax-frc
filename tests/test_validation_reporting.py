@@ -232,3 +232,51 @@ def test_import_from_utils_package():
     from validation.utils import ValidationReport
 
     assert ValidationReport is not None
+
+
+def test_plot_comparison():
+    """plot_comparison creates overlay of simulation vs expected."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from validation.utils.plotting import plot_comparison
+
+    x = np.linspace(-1, 1, 50)
+    actual = x**2 + 0.01 * np.random.randn(50)
+    expected = x**2
+
+    fig = plot_comparison(
+        x, actual, expected,
+        labels=['Simulation', 'Analytic'],
+        title='Test Comparison',
+        xlabel='x',
+        ylabel='y'
+    )
+
+    assert isinstance(fig, plt.Figure)
+    ax = fig.axes[0]
+    assert len(ax.lines) == 2
+    assert ax.get_title() == 'Test Comparison'
+    plt.close(fig)
+
+
+def test_plot_error():
+    """plot_error creates error plot with zero reference line."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from validation.utils.plotting import plot_error
+
+    x = np.linspace(-1, 1, 50)
+    actual = x**2 + 0.05
+    expected = x**2
+
+    fig = plot_error(x, actual, expected, title='Test Error')
+
+    assert isinstance(fig, plt.Figure)
+    ax = fig.axes[0]
+    assert len(ax.lines) == 2  # error line + zero reference
+    assert ax.get_title() == 'Test Error'
+    plt.close(fig)
