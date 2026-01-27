@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 import pytest
-from jax_frc.operators import gradient_3d
+from jax_frc.operators import gradient_3d, divergence_3d
 from jax_frc.core.geometry import Geometry
 
 
@@ -69,3 +69,39 @@ class TestGradient3D:
         geom = Geometry(nx=4, ny=6, nz=8)
         grad_f = gradient_3d(f, geom)
         assert grad_f.shape == (4, 6, 8, 3)
+
+
+class TestDivergence3D:
+    """Test 3D divergence operator."""
+
+    def test_divergence_constant_field(self):
+        """Divergence of constant vector field should be zero."""
+        F = jnp.ones((8, 8, 8, 3)) * 3.0
+        geom = Geometry(nx=8, ny=8, nz=8)
+        div_F = divergence_3d(F, geom)
+        assert div_F.shape == (8, 8, 8)
+        assert jnp.allclose(div_F, 0.0, atol=1e-10)
+
+    def test_divergence_linear_field(self):
+        """Divergence of F = (x, y, z) should be 3."""
+        geom = Geometry(
+            nx=16, ny=16, nz=16,
+            x_min=0.0, x_max=1.0,
+            y_min=0.0, y_max=1.0,
+            z_min=0.0, z_max=1.0,
+            bc_x="periodic", bc_y="periodic", bc_z="periodic"
+        )
+        F = jnp.stack([geom.x_grid, geom.y_grid, geom.z_grid], axis=-1)
+        div_F = divergence_3d(F, geom)
+        # dFx/dx + dFy/dy + dFz/dz = 1 + 1 + 1 = 3
+        # Note: boundary cells affected by periodic wrap for non-periodic F=(x,y,z)
+        # Check interior points only (exclude first and last in each dimension)
+        assert jnp.allclose(div_F[1:-1, 1:-1, 1:-1], 3.0, atol=1e-6)
+
+    def test_divergence_solenoidal(self):
+        """Divergence of solenoidal field should be zero."""
+        geom = Geometry(nx=16, ny=16, nz=16)
+        # Create a solenoidal field: F = (-y, x, 0)
+        F = jnp.stack([-geom.y_grid, geom.x_grid, jnp.zeros_like(geom.x_grid)], axis=-1)
+        div_F = divergence_3d(F, geom)
+        assert jnp.allclose(div_F, 0.0, atol=1e-10)

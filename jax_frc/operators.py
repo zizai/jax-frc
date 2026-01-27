@@ -404,10 +404,10 @@ def divergence_2d(f_x: Array, f_y: Array, dx: float, dy: float) -> Array:
 
 
 @jit
-def divergence_3d(
+def divergence_3d_components(
     f_x: Array, f_y: Array, f_z: Array, dx: float, dy: float, dz: float
 ) -> Array:
-    """Compute 3D divergence of a vector field.
+    """Compute 3D divergence of a vector field from separate components.
 
     Args:
         f_x, f_y, f_z: Components of vector field, each shape (nx, ny, nz)
@@ -420,6 +420,29 @@ def divergence_3d(
     dfy_dy = (jnp.roll(f_y, -1, axis=1) - jnp.roll(f_y, 1, axis=1)) / (2 * dy)
     dfz_dz = (jnp.roll(f_z, -1, axis=2) - jnp.roll(f_z, 1, axis=2)) / (2 * dz)
     return dfx_dx + dfy_dy + dfz_dz
+
+
+@jit(static_argnums=(1,))
+def divergence_3d(F: Array, geometry: "Geometry") -> Array:
+    """Compute divergence of vector field in 3D Cartesian coordinates.
+
+    Uses central differences with periodic wrapping via jnp.roll.
+    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+
+    Args:
+        F: Vector field, shape (nx, ny, nz, 3)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Divergence scalar field, shape (nx, ny, nz)
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+
+    dFx_dx = (jnp.roll(F[..., 0], -1, axis=0) - jnp.roll(F[..., 0], 1, axis=0)) / (2 * dx)
+    dFy_dy = (jnp.roll(F[..., 1], -1, axis=1) - jnp.roll(F[..., 1], 1, axis=1)) / (2 * dy)
+    dFz_dz = (jnp.roll(F[..., 2], -1, axis=2) - jnp.roll(F[..., 2], 1, axis=2)) / (2 * dz)
+
+    return dFx_dx + dFy_dy + dFz_dz
 
 
 @jit
