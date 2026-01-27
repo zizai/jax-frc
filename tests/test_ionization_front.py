@@ -4,11 +4,11 @@
 import jax.numpy as jnp
 import jax.lax as lax
 from jax_frc.core.state import State
-from jax_frc.core.geometry import Geometry
 from jax_frc.models.neutral_fluid import NeutralState
 from jax_frc.models.coupled import CoupledState
 from jax_frc.models.atomic_coupling import AtomicCoupling, AtomicCouplingConfig
 from jax_frc.constants import MI, QE
+from tests.utils.cartesian import make_geometry
 
 
 def test_ionization_front_mass_conservation():
@@ -20,25 +20,20 @@ def test_ionization_front_mass_conservation():
     T_e = 100 * QE  # 100 eV - hot enough for ionization
     rho_n = 1e-5  # Initial neutral density [kg/m^3]
 
-    geometry = Geometry(
-        coord_system="cylindrical",
-        nr=8, nz=8,
-        r_min=0.01, r_max=0.1,
-        z_min=-0.1, z_max=0.1
-    )
+    geometry = make_geometry(nx=8, ny=1, nz=8, extent=0.1)
 
-    plasma = State.zeros(8, 8)
+    plasma = State.zeros(8, 1, 8)
     plasma = plasma.replace(
-        n=jnp.ones((8, 8)) * n_e,
-        T=jnp.ones((8, 8)) * T_e,
-        p=jnp.ones((8, 8)) * n_e * T_e * 2,
-        v=jnp.zeros((8, 8, 3))
+        n=jnp.ones((8, 1, 8)) * n_e,
+        Te=jnp.ones((8, 1, 8)) * T_e,
+        p=jnp.ones((8, 1, 8)) * n_e * T_e * 2,
+        v=jnp.zeros((8, 1, 8, 3))
     )
 
     neutral = NeutralState(
-        rho_n=jnp.ones((8, 8)) * rho_n,
-        mom_n=jnp.zeros((8, 8, 3)),
-        E_n=jnp.ones((8, 8)) * rho_n * 300 * QE / MI  # Room temp neutrals
+        rho_n=jnp.ones((8, 1, 8)) * rho_n,
+        mom_n=jnp.zeros((8, 1, 8, 3)),
+        E_n=jnp.ones((8, 1, 8)) * rho_n * 300 * QE / MI  # Room temp neutrals
     )
 
     coupling = AtomicCoupling(AtomicCouplingConfig(include_radiation=False))
@@ -78,24 +73,20 @@ def test_ionization_creates_plasma():
     T_e = 200 * QE  # 200 eV - very hot
     rho_n = 1e-4  # Significant neutral density
 
-    geometry = Geometry(
-        coord_system="cylindrical",
-        nr=4, nz=4,
-        r_min=0.01, r_max=0.1,
-        z_min=-0.1, z_max=0.1
-    )
+    geometry = make_geometry(nx=4, ny=1, nz=4, extent=0.1)
 
-    plasma = State.zeros(4, 4)
+    plasma = State.zeros(4, 1, 4)
     plasma = plasma.replace(
-        n=jnp.ones((4, 4)) * n_e,
-        T=jnp.ones((4, 4)) * T_e,
-        p=jnp.ones((4, 4)) * n_e * T_e * 2
+        n=jnp.ones((4, 1, 4)) * n_e,
+        Te=jnp.ones((4, 1, 4)) * T_e,
+        p=jnp.ones((4, 1, 4)) * n_e * T_e * 2,
+        v=jnp.zeros((4, 1, 4, 3)),
     )
 
     neutral = NeutralState(
-        rho_n=jnp.ones((4, 4)) * rho_n,
-        mom_n=jnp.zeros((4, 4, 3)),
-        E_n=jnp.ones((4, 4)) * 100.0
+        rho_n=jnp.ones((4, 1, 4)) * rho_n,
+        mom_n=jnp.zeros((4, 1, 4, 3)),
+        E_n=jnp.ones((4, 1, 4)) * 100.0
     )
 
     coupling = AtomicCoupling(AtomicCouplingConfig(include_radiation=False))

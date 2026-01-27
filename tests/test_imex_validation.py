@@ -6,6 +6,8 @@ import jax.numpy as jnp
 import sys
 from pathlib import Path
 
+from tests.utils.cartesian import make_geometry
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
@@ -22,23 +24,16 @@ class TestResistiveDiffusionAnalytic:
         """
         from jax_frc.solvers.imex import ImexSolver, ImexConfig
         from jax_frc.core.state import State
-        from jax_frc.core.geometry import Geometry
         from jax_frc.models.resistive_mhd import ResistiveMHD
-        from jax_frc.models.resistivity import SpitzerResistivity
 
         # Setup: coarse grid for fast test (physics validated with higher eta)
-        nr, nz = 16, 32
+        nx, ny, nz = 16, 1, 32
         L_r, L_z = 1.0, 2.0
-        geometry = Geometry(
-            coord_system="cylindrical",
-            r_min=0.01, r_max=L_r,
-            z_min=-L_z/2, z_max=L_z/2,
-            nr=nr, nz=nz
-        )
+        geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
         # Use moderately higher resistivity for faster decay
         eta = 2e-4
-        model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=eta))
+        model = ResistiveMHD(eta=eta)
 
         # Backward Euler is unconditionally stable, tight CG tolerance
         config = ImexConfig(theta=1.0, cg_tol=1e-10, cg_max_iter=1000)
@@ -55,20 +50,15 @@ class TestResistiveDiffusionAnalytic:
         z_grid = geometry.z_grid
         B_z_init = B0 * jnp.sin(k * z_grid)
 
-        B = jnp.zeros((nr, nz, 3))
-        B = B.at[:, :, 2].set(B_z_init)
+        B = jnp.zeros((nx, ny, nz, 3))
+        B = B.at[:, :, :, 2].set(B_z_init)
 
-        state = State(
-            psi=jnp.zeros((nr, nz)),
-            n=jnp.ones((nr, nz)) * 1e19,
-            p=jnp.ones((nr, nz)) * 1e3,
-            T=jnp.ones((nr, nz)) * 100.0,
+        state = State.zeros(nx, ny, nz)
+        state = state.replace(
             B=B,
-            E=jnp.zeros((nr, nz, 3)),
-            v=jnp.zeros((nr, nz, 3)),
-            particles=None,
-            time=0.0,
-            step=0
+            n=jnp.ones((nx, ny, nz)) * 1e19,
+            p=jnp.ones((nx, ny, nz)) * 1e3,
+            v=jnp.zeros((nx, ny, nz, 3)),
         )
 
         # Run simulation - moderate dt for accuracy with fewer steps
@@ -85,11 +75,11 @@ class TestResistiveDiffusionAnalytic:
 
         # Compare interior points (avoid boundary effects)
         # Use a central slice in r and avoid z boundaries
-        r_slice = slice(nr//4, 3*nr//4)
+        r_slice = slice(nx//4, 3*nx//4)
         z_slice = slice(nz//4, 3*nz//4)
 
-        B_numerical = state.B[r_slice, z_slice, 2]
-        B_expected = B_analytic[r_slice, z_slice]
+        B_numerical = state.B[r_slice, 0, z_slice, 2]
+        B_expected = B_analytic[r_slice, 0, z_slice]
 
         # Compute relative error
         # Note: With backward Euler and boundaries, we expect some numerical error
@@ -118,21 +108,14 @@ class TestResistiveDiffusionAnalytic:
         """Diffusion should preserve the spatial pattern shape (sinusoidal)."""
         from jax_frc.solvers.imex import ImexSolver, ImexConfig
         from jax_frc.core.state import State
-        from jax_frc.core.geometry import Geometry
         from jax_frc.models.resistive_mhd import ResistiveMHD
-        from jax_frc.models.resistivity import SpitzerResistivity
 
-        nr, nz = 8, 16
+        nx, ny, nz = 8, 1, 16
         L_z = 2.0
-        geometry = Geometry(
-            coord_system="cylindrical",
-            r_min=0.01, r_max=1.0,
-            z_min=-L_z/2, z_max=L_z/2,
-            nr=nr, nz=nz
-        )
+        geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
         eta = 1e-4
-        model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=eta))
+        model = ResistiveMHD(eta=eta)
         config = ImexConfig(theta=1.0, cg_tol=1e-10)
         solver = ImexSolver(config=config)
 
@@ -141,20 +124,15 @@ class TestResistiveDiffusionAnalytic:
         B0 = 0.1
         z_grid = geometry.z_grid
 
-        B = jnp.zeros((nr, nz, 3))
-        B = B.at[:, :, 2].set(B0 * jnp.sin(k * z_grid))
+        B = jnp.zeros((nx, ny, nz, 3))
+        B = B.at[:, :, :, 2].set(B0 * jnp.sin(k * z_grid))
 
-        state = State(
-            psi=jnp.zeros((nr, nz)),
-            n=jnp.ones((nr, nz)) * 1e19,
-            p=jnp.ones((nr, nz)) * 1e3,
-            T=jnp.ones((nr, nz)) * 100.0,
+        state = State.zeros(nx, ny, nz)
+        state = state.replace(
             B=B,
-            E=jnp.zeros((nr, nz, 3)),
-            v=jnp.zeros((nr, nz, 3)),
-            particles=None,
-            time=0.0,
-            step=0
+            n=jnp.ones((nx, ny, nz)) * 1e19,
+            p=jnp.ones((nx, ny, nz)) * 1e3,
+            v=jnp.zeros((nx, ny, nz, 3)),
         )
 
         # Run a few steps
@@ -164,7 +142,7 @@ class TestResistiveDiffusionAnalytic:
 
         # The pattern should remain sinusoidal: B(z) ~ sin(k*z)
         # Check correlation with sin(k*z) at interior points
-        B_z = state.B[nr//2, nz//4:3*nz//4, 2]  # Take middle r slice
+        B_z = state.B[nx//2, 0, nz//4:3*nz//4, 2]  # Take middle x slice
         z_interior = geometry.z[nz//4:3*nz//4]
         sin_pattern = jnp.sin(k * z_interior)
 
@@ -184,39 +162,27 @@ class TestResistiveDiffusionAnalytic:
         """A spatially uniform B field should not diffuse."""
         from jax_frc.solvers.imex import ImexSolver, ImexConfig
         from jax_frc.core.state import State
-        from jax_frc.core.geometry import Geometry
         from jax_frc.models.resistive_mhd import ResistiveMHD
-        from jax_frc.models.resistivity import SpitzerResistivity
 
-        nr, nz = 8, 16
-        geometry = Geometry(
-            coord_system="cylindrical",
-            r_min=0.01, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-            nr=nr, nz=nz
-        )
+        nx, ny, nz = 8, 1, 16
+        geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
         eta = 1e-4
-        model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=eta))
+        model = ResistiveMHD(eta=eta)
         config = ImexConfig(theta=1.0, cg_tol=1e-10)
         solver = ImexSolver(config=config)
 
         # Uniform B field (should be unchanged by diffusion)
         B0 = 0.1
-        B = jnp.zeros((nr, nz, 3))
-        B = B.at[:, :, 2].set(B0)
+        B = jnp.zeros((nx, ny, nz, 3))
+        B = B.at[:, :, :, 2].set(B0)
 
-        state = State(
-            psi=jnp.zeros((nr, nz)),
-            n=jnp.ones((nr, nz)) * 1e19,
-            p=jnp.ones((nr, nz)) * 1e3,
-            T=jnp.ones((nr, nz)) * 100.0,
+        state = State.zeros(nx, ny, nz)
+        state = state.replace(
             B=B,
-            E=jnp.zeros((nr, nz, 3)),
-            v=jnp.zeros((nr, nz, 3)),
-            particles=None,
-            time=0.0,
-            step=0
+            n=jnp.ones((nx, ny, nz)) * 1e19,
+            p=jnp.ones((nx, ny, nz)) * 1e3,
+            v=jnp.zeros((nx, ny, nz, 3)),
         )
 
         # Run several steps
@@ -225,7 +191,7 @@ class TestResistiveDiffusionAnalytic:
             state = solver.step(state, dt, model, geometry)
 
         # Interior should remain uniform (boundaries may have effects)
-        B_z_interior = state.B[2:-2, 2:-2, 2]
+        B_z_interior = state.B[2:-2, 0, 2:-2, 2]
 
         # Check uniformity: standard deviation should be very small
         std = jnp.std(B_z_interior)
@@ -243,18 +209,11 @@ class TestResistiveDiffusionAnalytic:
         """Higher resistivity should cause faster decay."""
         from jax_frc.solvers.imex import ImexSolver, ImexConfig
         from jax_frc.core.state import State
-        from jax_frc.core.geometry import Geometry
         from jax_frc.models.resistive_mhd import ResistiveMHD
-        from jax_frc.models.resistivity import SpitzerResistivity
 
-        nr, nz = 8, 16
+        nx, ny, nz = 8, 1, 16
         L_z = 2.0
-        geometry = Geometry(
-            coord_system="cylindrical",
-            r_min=0.01, r_max=1.0,
-            z_min=-L_z/2, z_max=L_z/2,
-            nr=nr, nz=nz
-        )
+        geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
         k = jnp.pi / L_z
         B0 = 0.1
@@ -264,30 +223,25 @@ class TestResistiveDiffusionAnalytic:
 
         def measure_decay(eta_val, dt, n_steps):
             """Run simulation and return peak amplitude at end."""
-            model = ResistiveMHD(resistivity=SpitzerResistivity(eta_0=eta_val))
+            model = ResistiveMHD(eta=eta_val)
             solver = ImexSolver(config=config)
 
-            B = jnp.zeros((nr, nz, 3))
-            B = B.at[:, :, 2].set(B0 * jnp.sin(k * z_grid))
+            B = jnp.zeros((nx, ny, nz, 3))
+            B = B.at[:, :, :, 2].set(B0 * jnp.sin(k * z_grid))
 
-            state = State(
-                psi=jnp.zeros((nr, nz)),
-                n=jnp.ones((nr, nz)) * 1e19,
-                p=jnp.ones((nr, nz)) * 1e3,
-                T=jnp.ones((nr, nz)) * 100.0,
+            state = State.zeros(nx, ny, nz)
+            state = state.replace(
                 B=B,
-                E=jnp.zeros((nr, nz, 3)),
-                v=jnp.zeros((nr, nz, 3)),
-                particles=None,
-                time=0.0,
-                step=0
+                n=jnp.ones((nx, ny, nz)) * 1e19,
+                p=jnp.ones((nx, ny, nz)) * 1e3,
+                v=jnp.zeros((nx, ny, nz, 3)),
             )
 
             for _ in range(n_steps):
                 state = solver.step(state, dt, model, geometry)
 
             # Return peak amplitude (interior)
-            return jnp.max(jnp.abs(state.B[nr//4:3*nr//4, nz//4:3*nz//4, 2]))
+            return jnp.max(jnp.abs(state.B[nx//4:3*nx//4, 0, nz//4:3*nz//4, 2]))
 
         # Compare low and high resistivity (higher values for faster decay)
         eta_low = 1e-4

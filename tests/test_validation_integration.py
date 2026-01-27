@@ -15,7 +15,8 @@ def validation_case(tmp_path):
         'configuration': {
             'class': 'MagneticDiffusionConfiguration',
             'overrides': {
-                'nr': 4,
+                'nx': 4,
+                'ny': 1,
                 'nz': 16,  # Small grid for fast testing
             }
         },

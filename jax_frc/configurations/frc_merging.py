@@ -73,15 +73,21 @@ class BelovaMergingConfiguration(LinearConfiguration):
     separation_threshold: float = 0.3
 
     def build_geometry(self) -> Geometry:
-        """Create cylindrical geometry for merging simulation."""
+        """Create 3D Cartesian geometry for merging simulation."""
+        extent = self.flux_conserver_radius
         return Geometry(
-            coord_system="cylindrical",
-            nr=self.nr,
+            nx=self.nr,
+            ny=1,
             nz=self.nz,
-            r_min=0.01 * self.flux_conserver_radius,
-            r_max=self.flux_conserver_radius,
+            x_min=-extent,
+            x_max=extent,
+            y_min=-extent,
+            y_max=extent,
             z_min=-self.domain_half_length,
             z_max=self.domain_half_length,
+            bc_x="neumann",
+            bc_y="periodic",
+            bc_z="neumann",
         )
 
     def build_initial_state(self, geometry: Geometry) -> State:
@@ -96,32 +102,33 @@ class BelovaMergingConfiguration(LinearConfiguration):
         Returns:
             Single FRC equilibrium state (will be transformed by MergingPhase)
         """
-        state = State.zeros(nr=geometry.nr, nz=geometry.nz)
+        state = State.zeros(geometry.nx, geometry.ny, geometry.nz)
 
-        r = geometry.r_grid
+        r = jnp.abs(geometry.x_grid)
         z = geometry.z_grid
 
         # Compute FRC dimensions from parameters
-        Rc = geometry.r_max
+        Rc = self.flux_conserver_radius
         Rs = self.xs * Rc
         Zs = self.elongation * Rs
 
         # Create Gaussian FRC profile centered at z=0
-        psi = jnp.exp(-((r - 0.5 * Rs) ** 2 / (0.3 * Rs) ** 2 + z ** 2 / Zs ** 2))
+        B_z = jnp.exp(-((r - 0.5 * Rs) ** 2 / (0.3 * Rs) ** 2 + z ** 2 / Zs ** 2))
 
         # Pressure proportional to psi, with separatrix beta
-        p = self.beta_s * psi
+        p = self.beta_s * B_z
 
         # Uniform density
-        n = jnp.ones_like(psi)
+        n = jnp.ones_like(B_z)
 
         # Temperature from T = p/n
         T = p / jnp.maximum(n, 1e-10)
 
         # Initialize B field (will be computed from psi by model)
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(B_z)
 
-        return state.replace(psi=psi, p=p, n=n, T=T, B=B)
+        return state.replace(p=p, n=n, Te=T, B=B)
 
     def build_model(self) -> PhysicsModel:
         """Create physics model with Chodura resistivity."""

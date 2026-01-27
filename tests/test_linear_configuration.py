@@ -6,7 +6,7 @@ from typing import List
 import jax.numpy as jnp
 
 from jax_frc.core.state import State
-from jax_frc.core.geometry import Geometry
+from tests.utils.cartesian import make_geometry
 from jax_frc.configurations import (
     LinearConfiguration,
     ConfigurationResult,
@@ -88,16 +88,16 @@ class TestTransitionFromSpec:
         trans = transition_from_spec(spec)
 
         # Low temperature - should not trigger
-        state = State.zeros(nr=10, nz=20)
+        state = State.zeros(10, 1, 20)
         state = state.replace(
-            p=jnp.ones((10, 20)) * 10.0,
-            n=jnp.ones((10, 20)) * 1.0  # T = 10
+            p=jnp.ones((10, 1, 20)) * 10.0,
+            n=jnp.ones((10, 1, 20)) * 1.0  # T = 10
         )
         triggered, _ = trans.evaluate(state, t=0.0)
         assert not triggered
 
         # High temperature - should trigger
-        state = state.replace(p=jnp.ones((10, 20)) * 100.0)  # T = 100
+        state = state.replace(p=jnp.ones((10, 1, 20)) * 100.0)  # T = 100
         triggered, _ = trans.evaluate(state, t=0.0)
         assert triggered
 
@@ -158,8 +158,8 @@ class TestConfigurationResult:
 
     def test_final_state_property(self):
         """ConfigurationResult.final_state returns last phase state."""
-        state1 = State.zeros(nr=8, nz=16)
-        state2 = State.zeros(nr=8, nz=16).replace(time=1.0)
+        state1 = State.zeros(8, 1, 16)
+        state2 = State.zeros(8, 1, 16).replace(time=1.0)
 
         result = ConfigurationResult(
             name="test",
@@ -193,12 +193,7 @@ class TestLinearConfiguration:
 
     @pytest.fixture
     def simple_geometry(self):
-        return Geometry(
-            coord_system="cylindrical",
-            nr=8, nz=16,
-            r_min=0.1, r_max=1.0,
-            z_min=-1.0, z_max=1.0
-        )
+        return make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
     def test_run_executes_phases(self, mock_physics_model, mock_solver):
         """LinearConfiguration.run() executes all phases."""
@@ -207,16 +202,11 @@ class TestLinearConfiguration:
         class TestConfiguration(LinearConfiguration):
             name: str = "test_config"
 
-            def build_geometry(self) -> Geometry:
-                return Geometry(
-                    coord_system="cylindrical",
-                    nr=8, nz=16,
-                    r_min=0.1, r_max=1.0,
-                    z_min=-1.0, z_max=1.0
-                )
+            def build_geometry(self):
+                return make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
-            def build_initial_state(self, geometry: Geometry) -> State:
-                return State.zeros(nr=8, nz=16)
+            def build_initial_state(self, geometry) -> State:
+                return State.zeros(8, 1, 16)
 
             def build_model(self) -> PhysicsModel:
                 return mock_physics_model
@@ -252,16 +242,11 @@ class TestLinearConfiguration:
         class TwoPhaseConfig(LinearConfiguration):
             name: str = "two_phase"
 
-            def build_geometry(self) -> Geometry:
-                return Geometry(
-                    coord_system="cylindrical",
-                    nr=8, nz=16,
-                    r_min=0.1, r_max=1.0,
-                    z_min=-1.0, z_max=1.0
-                )
+            def build_geometry(self):
+                return make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
-            def build_initial_state(self, geometry: Geometry) -> State:
-                return State.zeros(nr=8, nz=16)
+            def build_initial_state(self, geometry) -> State:
+                return State.zeros(8, 1, 16)
 
             def build_model(self) -> PhysicsModel:
                 return mock_physics_model
@@ -303,16 +288,11 @@ class TestLinearConfiguration:
         class ConditionConfig(LinearConfiguration):
             name: str = "condition_test"
 
-            def build_geometry(self) -> Geometry:
-                return Geometry(
-                    coord_system="cylindrical",
-                    nr=8, nz=16,
-                    r_min=0.1, r_max=1.0,
-                    z_min=-1.0, z_max=1.0
-                )
+            def build_geometry(self):
+                return make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
-            def build_initial_state(self, geometry: Geometry) -> State:
-                return State.zeros(nr=8, nz=16)
+            def build_initial_state(self, geometry) -> State:
+                return State.zeros(8, 1, 16)
 
             def build_model(self) -> PhysicsModel:
                 return mock_physics_model
@@ -346,16 +326,11 @@ class TestLinearConfiguration:
         class SpecConfig(LinearConfiguration):
             name: str = "spec_test"
 
-            def build_geometry(self) -> Geometry:
-                return Geometry(
-                    coord_system="cylindrical",
-                    nr=8, nz=16,
-                    r_min=0.1, r_max=1.0,
-                    z_min=-1.0, z_max=1.0
-                )
+            def build_geometry(self):
+                return make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
-            def build_initial_state(self, geometry: Geometry) -> State:
-                return State.zeros(nr=8, nz=16)
+            def build_initial_state(self, geometry) -> State:
+                return State.zeros(8, 1, 16)
 
             def build_model(self) -> PhysicsModel:
                 return mock_physics_model
@@ -387,16 +362,11 @@ class TestLinearConfiguration:
         class BadConfig(LinearConfiguration):
             name: str = "bad_config"
 
-            def build_geometry(self) -> Geometry:
-                return Geometry(
-                    coord_system="cylindrical",
-                    nr=8, nz=16,
-                    r_min=0.1, r_max=1.0,
-                    z_min=-1.0, z_max=1.0
-                )
+            def build_geometry(self):
+                return make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
-            def build_initial_state(self, geometry: Geometry) -> State:
-                return State.zeros(nr=8, nz=16)
+            def build_initial_state(self, geometry) -> State:
+                return State.zeros(8, 1, 16)
 
             def build_model(self) -> PhysicsModel:
                 return mock_physics_model
@@ -426,16 +396,11 @@ class TestLinearConfiguration:
         class TimingConfig(LinearConfiguration):
             name: str = "timing"
 
-            def build_geometry(self) -> Geometry:
-                return Geometry(
-                    coord_system="cylindrical",
-                    nr=8, nz=16,
-                    r_min=0.1, r_max=1.0,
-                    z_min=-1.0, z_max=1.0
-                )
+            def build_geometry(self):
+                return make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
-            def build_initial_state(self, geometry: Geometry) -> State:
-                return State.zeros(nr=8, nz=16)
+            def build_initial_state(self, geometry) -> State:
+                return State.zeros(8, 1, 16)
 
             def build_model(self) -> PhysicsModel:
                 return mock_physics_model

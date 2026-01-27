@@ -57,7 +57,8 @@ def test_runner_instantiates_configuration_with_overrides(tmp_path):
         'configuration': {
             'class': 'MagneticDiffusionConfiguration',
             'overrides': {
-                'nr': 16,
+                'nx': 16,
+                'ny': 1,
                 'nz': 128,
                 'B_peak': 2.0
             }
@@ -69,7 +70,8 @@ def test_runner_instantiates_configuration_with_overrides(tmp_path):
     runner = ValidationRunner(case_yaml, tmp_path / "output")
     config = runner._build_configuration()
 
-    assert config.nr == 16
+    assert config.nx == 16
+    assert config.ny == 1
     assert config.nz == 128
     assert config.B_peak == 2.0
 

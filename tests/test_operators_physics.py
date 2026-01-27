@@ -1,33 +1,25 @@
 """Physics correctness tests for differential operators."""
 import pytest
 import jax.numpy as jnp
-from jax_frc.models.extended_mhd import ExtendedMHD
-from jax_frc.models.resistivity import SpitzerResistivity
-from jax_frc.core.geometry import Geometry
+from tests.utils.cartesian import make_geometry
 
 
 class TestCylindricalCurl:
     """Tests for cylindrical curl operator correctness."""
 
     @pytest.fixture
-    def geometry(self):
-        """Create test geometry."""
-        return Geometry(
-            coord_system="cylindrical",
-            r_min=0.01, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-            nr=16, nz=32
-        )
+    def grid(self):
+        """Create r-z grid for cylindrical operator tests."""
+        nr, nz = 16, 32
+        r_min, r_max = 0.01, 1.0
+        z_min, z_max = -1.0, 1.0
+        dr = (r_max - r_min) / nr
+        dz = (z_max - z_min) / nz
+        r = jnp.linspace(r_min + dr / 2, r_max - dr / 2, nr)[:, None]
+        z = jnp.linspace(z_min + dz / 2, z_max - dz / 2, nz)[None, :]
+        return nr, nz, dr, dz, r, z
 
-    @pytest.fixture
-    def model(self):
-        """Create ExtendedMHD model."""
-        resistivity = SpitzerResistivity(eta_0=1e-6)
-        from jax_frc.models.extended_mhd import HaloDensityModel
-        halo = HaloDensityModel()
-        return ExtendedMHD(resistivity=resistivity, halo_model=halo)
-
-    def test_jz_includes_b_theta_over_r_term(self, geometry, model):
+    def test_jz_includes_b_theta_over_r_term(self, grid):
         """J_z should include B_theta/r term, not just dB_theta/dr.
 
         For B_theta = r (linear in r), the correct J_z is:
@@ -38,10 +30,7 @@ class TestCylindricalCurl:
         The incorrect formula (just dB_theta/dr) gives:
             J_z = (1/mu0) * 1
         """
-        MU0 = 1.2566e-6
-        nr, nz = geometry.nr, geometry.nz
-        dr, dz = geometry.dr, geometry.dz
-        r = geometry.r_grid
+        nr, nz, dr, dz, r, _ = grid
 
         # B_theta = r (linear profile)
         B_r = jnp.zeros((nr, nz))
@@ -49,10 +38,11 @@ class TestCylindricalCurl:
         B_z = jnp.zeros((nr, nz))
 
         # Note: The corrected _compute_current method requires r parameter
-        J_r, J_phi, J_z = model._compute_current(B_r, B_theta, B_z, dr, dz, r)
+        from jax_frc.operators import curl_cylindrical_axisymmetric
+        J_r, J_phi, J_z = curl_cylindrical_axisymmetric(B_r, B_theta, B_z, dr, dz, r)
 
         # Expected: J_z = 2/mu0 everywhere (except boundaries)
-        expected_J_z = 2.0 / MU0
+        expected_J_z = 2.0
 
         # Check interior points (avoid boundaries)
         interior_J_z = J_z[5:-5, 5:-5]
@@ -71,12 +61,7 @@ class TestHybridHallTerm:
     @pytest.fixture
     def geometry(self):
         """Create test geometry."""
-        return Geometry(
-            coord_system="cylindrical",
-            r_min=0.01, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-            nr=16, nz=32
-        )
+        return make_geometry(nx=16, ny=1, nz=32, extent=1.0)
 
     @pytest.fixture
     def model(self):
@@ -96,28 +81,21 @@ class TestHybridHallTerm:
         """
         from jax_frc.core.state import State
 
-        nr, nz = geometry.nr, geometry.nz
+        nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
 
         # Create state with non-trivial B field that produces current
         # B_z = B0 * exp(-r^2) generates J_theta from dB_z/dr
         B0 = 0.1  # Tesla
-        r = geometry.r_grid
-        B_r = jnp.zeros((nr, nz))
-        B_phi = jnp.zeros((nr, nz))
-        B_z = B0 * jnp.exp(-r**2) * jnp.ones((1, nz))
-        B = jnp.stack([B_r, B_phi, B_z], axis=-1)
+        x = geometry.x_grid
+        B = jnp.zeros((nx, ny, nz, 3))
+        B = B.at[:, :, :, 2].set(B0 * jnp.exp(-x**2))
 
-        n = jnp.ones((nr, nz)) * 1e19
-        p = jnp.ones((nr, nz)) * 1e3  # Uniform pressure (no gradient contribution)
-        T = jnp.ones((nr, nz)) * 100.0  # Temperature in eV
-        v = jnp.zeros((nr, nz, 3))
-        psi = jnp.zeros((nr, nz))
-        E = jnp.zeros((nr, nz, 3))
+        n = jnp.ones((nx, ny, nz)) * 1e19
+        p = jnp.ones((nx, ny, nz)) * 1e3  # Uniform pressure (no gradient contribution)
+        v = jnp.zeros((nx, ny, nz, 3))
+        E = jnp.zeros((nx, ny, nz, 3))
 
-        state = State(
-            psi=psi, B=B, v=v, n=n, p=p, T=T, E=E,
-            time=0.0, step=0, particles=None
-        )
+        state = State.zeros(nx, ny, nz).replace(B=B, v=v, n=n, p=p, E=E)
 
         # Compute RHS which includes E-field calculation
         rhs = model.compute_rhs(state, geometry)
@@ -125,10 +103,10 @@ class TestHybridHallTerm:
         # The E field should have non-zero E_r from Hall term
         # J_theta ~ -dB_z/dr = 2*r*B0*exp(-r^2) (positive for r>0)
         # Hall_r = J_theta * B_z / (ne) should be non-zero
-        E_r = rhs.E[:, :, 0]
+        E_r = rhs.E[:, :, :, 0]
 
         # Check that E_r is non-zero in interior (Hall contribution)
-        interior_E_r = E_r[3:-3, 3:-3]
+        interior_E_r = E_r[3:-3, 0, 3:-3]
         max_E_r = float(jnp.max(jnp.abs(interior_E_r)))
 
         # With eta=1e-6 and B~0.1T, the resistive term is small
@@ -149,16 +127,10 @@ class TestHybridCollisions:
         """
         from jax_frc.models.hybrid_kinetic import HybridKinetic, RigidRotorEquilibrium
         from jax_frc.core.state import State, ParticleState
-        from jax_frc.core.geometry import Geometry
         import jax.random as random
 
         # Setup
-        geometry = Geometry(
-            coord_system="cylindrical",
-            r_min=0.01, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-            nr=8, nz=16
-        )
+        geometry = make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
         nu_collision = 1e5  # 1/s collision frequency (10x faster for quicker tests)
         equilibrium = RigidRotorEquilibrium(n0=1e19, T0=1000.0, Omega=1e5)
@@ -173,38 +145,37 @@ class TestHybridCollisions:
         key = random.PRNGKey(42)
         keys = random.split(key, 4)
 
-        r = random.uniform(keys[0], (n_particles,), minval=0.1, maxval=0.9)
-        theta = random.uniform(keys[1], (n_particles,), minval=0, maxval=2*jnp.pi)
+        x = random.uniform(keys[0], (n_particles,), minval=-0.8, maxval=0.8)
+        y = random.uniform(keys[1], (n_particles,), minval=-0.8, maxval=0.8)
         z = random.uniform(keys[2], (n_particles,), minval=-0.8, maxval=0.8)
-        x = jnp.stack([r, theta, z], axis=-1)
+        positions = jnp.stack([x, y, z], axis=-1)
 
         # Use equilibrium velocities: vtheta = Omega*r + small thermal
         # This minimizes physics weight evolution so we can isolate collision effect
         v_thermal = 1e4  # Small thermal spread
-        vr = random.normal(keys[3], (n_particles,)) * v_thermal * 0.1
-        vz = random.normal(random.fold_in(keys[3], 1), (n_particles,)) * v_thermal * 0.1
-        vtheta = equilibrium.Omega * r + random.normal(random.fold_in(keys[3], 2), (n_particles,)) * v_thermal * 0.1
-        v = jnp.stack([vr, vtheta, vz], axis=-1)
+        vx = random.normal(keys[3], (n_particles,)) * v_thermal * 0.1
+        vy = random.normal(random.fold_in(keys[3], 1), (n_particles,)) * v_thermal * 0.1
+        vz = random.normal(random.fold_in(keys[3], 2), (n_particles,)) * v_thermal * 0.1
+        v = jnp.stack([vx, vy, vz], axis=-1)
 
         # Start with weights = 0.5
         w_initial = jnp.ones(n_particles) * 0.5
 
-        particles = ParticleState(x=x, v=v, w=w_initial, species="ion")
+        particles = ParticleState(x=positions, v=v, w=w_initial, species="ion")
 
         # Create state with zero E-field (no acceleration => no physics weight evolution)
-        nr, nz = geometry.nr, geometry.nz
-        B = jnp.zeros((nr, nz, 3))
-        B = B.at[:, :, 2].set(0.01)  # Small uniform B_z
-        E = jnp.zeros((nr, nz, 3))  # Zero E-field
+        nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
+        B = jnp.zeros((nx, ny, nz, 3))
+        B = B.at[:, :, :, 2].set(0.01)  # Small uniform B_z
+        E = jnp.zeros((nx, ny, nz, 3))  # Zero E-field
 
-        state = State(
-            psi=jnp.zeros((nr, nz)),
-            B=B, v=jnp.zeros((nr, nz, 3)),
-            n=jnp.ones((nr, nz)) * 1e19,
-            p=jnp.ones((nr, nz)) * 1e3,
-            T=jnp.ones((nr, nz)) * 100.0,  # Temperature in eV
-            E=E, time=0.0, step=0,
-            particles=particles
+        state = State.zeros(nx, ny, nz).replace(
+            B=B,
+            v=jnp.zeros((nx, ny, nz, 3)),
+            n=jnp.ones((nx, ny, nz)) * 1e19,
+            p=jnp.ones((nx, ny, nz)) * 1e3,
+            E=E,
+            particles=particles,
         )
 
         # Run for time = 1/nu (one collision time)
@@ -243,42 +214,28 @@ class TestDivergenceCleaning:
         phi=0 boundary condition reduce effectiveness. We test on the interior
         region [3:-3, 3:-3] which represents the physics region of interest.
         """
-        from jax_frc.solvers.divergence_cleaning import clean_divergence_b
-        from jax_frc.core.geometry import Geometry
+        from jax_frc.solvers.divergence_cleaning import clean_divergence
+        from jax_frc.operators import divergence_3d
 
-        geometry = Geometry(
-            coord_system="cylindrical",
-            r_min=0.01, r_max=1.0,
-            z_min=-1.0, z_max=1.0,
-            nr=8, nz=16
-        )
+        geometry = make_geometry(nx=8, ny=1, nz=16, extent=1.0)
 
-        nr, nz = geometry.nr, geometry.nz
-        dr, dz = geometry.dr, geometry.dz
-        r = geometry.r_grid
+        nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
 
-        # Create B field with non-zero divergence
-        # B_r = r, B_z = z gives div(B) != 0
-        # In cylindrical: div(B) = (1/r)*d(r*B_r)/dr + dB_z/dz
-        #                        = (1/r)*(2r) + 1 = 3
-        B_r = r * jnp.ones((1, nz))
-        B_phi = jnp.zeros((nr, nz))
-        B_z = geometry.z_grid * jnp.ones((nr, 1))
-        B = jnp.stack([B_r, B_phi, B_z], axis=-1)
+        # Create B field with non-zero divergence: B = (x, 0, z)
+        B = jnp.zeros((nx, ny, nz, 3))
+        B = B.at[:, :, :, 0].set(geometry.x_grid)
+        B = B.at[:, :, :, 2].set(geometry.z_grid)
 
         # Compute initial divergence - check interior region
-        from jax_frc.operators import divergence_cylindrical
-        div_B_initial = divergence_cylindrical(B_r, B_z, dr, dz, r)
-        max_div_initial = float(jnp.max(jnp.abs(div_B_initial[3:-3, 3:-3])))
+        div_B_initial = divergence_3d(B, geometry)
+        max_div_initial = float(jnp.max(jnp.abs(div_B_initial[3:-3, 0, 3:-3])))
 
         # Clean divergence
-        B_clean = clean_divergence_b(B, geometry)
+        B_clean = clean_divergence(B, geometry)
 
         # Compute cleaned divergence - check same interior region
-        B_r_clean = B_clean[:, :, 0]
-        B_z_clean = B_clean[:, :, 2]
-        div_B_clean = divergence_cylindrical(B_r_clean, B_z_clean, dr, dz, r)
-        max_div_clean = float(jnp.max(jnp.abs(div_B_clean[3:-3, 3:-3])))
+        div_B_clean = divergence_3d(B_clean, geometry)
+        max_div_clean = float(jnp.max(jnp.abs(div_B_clean[3:-3, 0, 3:-3])))
 
         # Divergence should be reduced significantly (at least 5x) in the interior
         reduction = max_div_initial / max(max_div_clean, 1e-20)

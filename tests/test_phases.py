@@ -4,7 +4,7 @@ import pytest
 from jax_frc.configurations import Transition, timeout, condition, any_of, all_of
 from jax_frc.configurations import Phase, PhaseResult
 from jax_frc.core.state import State
-from jax_frc.core.geometry import Geometry
+from tests.utils.cartesian import make_geometry
 
 
 class TestTransition:
@@ -66,13 +66,8 @@ class TestPhase:
     def test_phase_setup_returns_state(self):
         """Phase.setup returns modified state."""
         phase = Phase(name="test", transition=timeout(10.0))
-        geometry = Geometry(
-            coord_system="cylindrical",
-            nr=10, nz=20,
-            r_min=0.1, r_max=1.0,
-            z_min=-1.0, z_max=1.0
-        )
-        state = State.zeros(nr=10, nz=20)
+        geometry = make_geometry(nx=10, ny=1, nz=20, extent=1.0)
+        state = State.zeros(10, 1, 20)
 
         result = phase.setup(state, geometry, {})
         assert isinstance(result, State)
@@ -80,7 +75,7 @@ class TestPhase:
     def test_phase_is_complete_delegates_to_transition(self):
         """Phase.is_complete uses transition.evaluate."""
         phase = Phase(name="test", transition=timeout(5.0))
-        state = State.zeros(nr=10, nz=20)
+        state = State.zeros(10, 1, 20)
 
         complete, reason = phase.is_complete(state, t=3.0)
         assert not complete
@@ -99,19 +94,13 @@ class TestPhysicsConditions:
         import jax.numpy as jnp
 
         # Create state with two magnetic nulls
-        state = State.zeros(nr=10, nz=40)
-        # Set psi with two peaks (simplified)
-        psi = jnp.zeros((10, 40))
-        psi = psi.at[5, 10].set(1.0)  # Null 1 at z_idx=10
-        psi = psi.at[5, 30].set(1.0)  # Null 2 at z_idx=30
-        state = state.replace(psi=psi)
+        state = State.zeros(10, 1, 40)
+        B = jnp.zeros((10, 1, 40, 3))
+        B = B.at[5, 0, 10, 2].set(1.0)  # Peak 1 at z_idx=10
+        B = B.at[5, 0, 30, 2].set(1.0)  # Peak 2 at z_idx=30
+        state = state.replace(B=B)
 
-        geometry = Geometry(
-            coord_system="cylindrical",
-            nr=10, nz=40,
-            r_min=0.1, r_max=1.0,
-            z_min=-2.0, z_max=2.0  # dz = 0.1, separation = 20*0.1 = 2.0
-        )
+        geometry = make_geometry(nx=10, ny=1, nz=40, extent=2.0)
 
         trans = separation_below(3.0, geometry)  # Should trigger (2.0 < 3.0)
         triggered, _ = trans.evaluate(state, t=0.0)
@@ -126,11 +115,11 @@ class TestPhysicsConditions:
         from jax_frc.configurations import temperature_above
         import jax.numpy as jnp
 
-        state = State.zeros(nr=10, nz=20)
+        state = State.zeros(10, 1, 20)
         # Set pressure and density to give T = p/n
         state = state.replace(
-            p=jnp.ones((10, 20)) * 100.0,
-            n=jnp.ones((10, 20)) * 10.0  # T = 100/10 = 10
+            p=jnp.ones((10, 1, 20)) * 100.0,
+            n=jnp.ones((10, 1, 20)) * 10.0  # T = 100/10 = 10
         )
 
         trans = temperature_above(5.0)  # Should trigger (10 > 5)
@@ -146,10 +135,10 @@ class TestPhysicsConditions:
         from jax_frc.configurations import flux_below
         import jax.numpy as jnp
 
-        state = State.zeros(nr=10, nz=20)
-        psi = jnp.ones((10, 20)) * 0.5
-        psi = psi.at[5, 10].set(2.0)  # Peak at 2.0
-        state = state.replace(psi=psi)
+        state = State.zeros(10, 1, 20)
+        B = jnp.zeros((10, 1, 20, 3))
+        B = B.at[5, 0, 10, 2].set(2.0)  # Peak at 2.0
+        state = state.replace(B=B)
 
         trans = flux_below(3.0)  # Should trigger (2.0 < 3.0)
         triggered, _ = trans.evaluate(state, t=0.0)
@@ -164,11 +153,11 @@ class TestPhysicsConditions:
         from jax_frc.configurations import velocity_below
         import jax.numpy as jnp
 
-        state = State.zeros(nr=10, nz=20)
+        state = State.zeros(10, 1, 20)
         # Set velocity field with peak magnitude
-        v = jnp.zeros((10, 20, 3))
-        v = v.at[5, 10, 0].set(3.0)  # vr = 3
-        v = v.at[5, 10, 2].set(4.0)  # vz = 4, |v| = 5
+        v = jnp.zeros((10, 1, 20, 3))
+        v = v.at[5, 0, 10, 0].set(3.0)  # vx = 3
+        v = v.at[5, 0, 10, 2].set(4.0)  # vz = 4, |v| = 5
         state = state.replace(v=v)
 
         trans = velocity_below(10.0)  # Should trigger (5.0 < 10.0)
@@ -185,7 +174,7 @@ def test_phase_result_has_history():
     from jax_frc.configurations import PhaseResult
     from jax_frc.core.state import State
 
-    state = State.zeros(nr=8, nz=16)
+    state = State.zeros(8, 1, 16)
     result = PhaseResult(
         name="test",
         initial_state=state,

@@ -21,11 +21,9 @@ class TestBelovaMergingConfiguration:
         config = BelovaMergingConfiguration()
         geometry = config.build_geometry()
 
-        assert geometry.coord_system == "cylindrical"
-        assert geometry.r_min > 0
-        assert geometry.r_max > geometry.r_min
+        assert geometry.x_max > geometry.x_min
         assert geometry.z_min < 0 < geometry.z_max
-        assert geometry.nr == config.nr
+        assert geometry.nx == config.nr
         assert geometry.nz == config.nz
 
     def test_builds_single_frc_state(self):
@@ -35,19 +33,19 @@ class TestBelovaMergingConfiguration:
         state = config.build_initial_state(geometry)
 
         # State should have proper shapes
-        assert state.psi.shape == (geometry.nr, geometry.nz)
-        assert state.p.shape == (geometry.nr, geometry.nz)
-        assert state.n.shape == (geometry.nr, geometry.nz)
+        assert state.B.shape == (geometry.nx, geometry.ny, geometry.nz, 3)
+        assert state.p.shape == (geometry.nx, geometry.ny, geometry.nz)
+        assert state.n.shape == (geometry.nx, geometry.ny, geometry.nz)
 
-        # Peak psi should be positive (FRC has trapped flux)
-        assert jnp.max(state.psi) > 0.5
+        # Peak Bz should be positive (FRC has trapped flux proxy)
+        assert jnp.max(state.B[:, :, :, 2]) > 0.5
 
         # Profile should be roughly symmetric about z=0
         mid_z = geometry.nz // 2
-        left_psi = state.psi[:, mid_z - 10:mid_z]
-        right_psi = state.psi[:, mid_z:mid_z + 10]
-        right_psi_flipped = jnp.flip(right_psi, axis=1)
-        symmetry_error = jnp.mean(jnp.abs(left_psi - right_psi_flipped))
+        left_bz = state.B[:, 0, mid_z - 10:mid_z, 2]
+        right_bz = state.B[:, 0, mid_z:mid_z + 10, 2]
+        right_bz_flipped = jnp.flip(right_bz, axis=1)
+        symmetry_error = jnp.mean(jnp.abs(left_bz - right_bz_flipped))
         assert symmetry_error < 0.1, f"Symmetry error {symmetry_error} too large"
 
     def test_builds_resistive_mhd_model(self):
