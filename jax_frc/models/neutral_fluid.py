@@ -20,22 +20,22 @@ GAMMA = 5.0 / 3.0
 class NeutralState:
     """Neutral fluid state variables.
 
-    All fields use SI units.
+    All fields use SI units and 3D Cartesian coordinates.
     """
 
-    rho_n: Array  # Mass density [kg/m³], shape (nr, nz)
-    mom_n: Array  # Momentum density [kg/m²/s], shape (nr, nz, 3)
-    E_n: Array    # Total energy density [J/m³], shape (nr, nz)
+    rho_n: Array  # Mass density [kg/m³], shape (nx, ny, nz)
+    mom_n: Array  # Momentum density [kg/m²/s], shape (nx, ny, nz, 3)
+    E_n: Array    # Total energy density [J/m³], shape (nx, ny, nz)
 
     @property
     def v_n(self) -> Array:
-        """Velocity [m/s], shape (nr, nz, 3)."""
+        """Velocity [m/s], shape (nx, ny, nz, 3)."""
         rho_safe = jnp.maximum(self.rho_n[..., None], 1e-20)
         return self.mom_n / rho_safe
 
     @property
     def p_n(self) -> Array:
-        """Pressure [Pa] from ideal gas EOS, shape (nr, nz)."""
+        """Pressure [Pa] from ideal gas EOS, shape (nx, ny, nz)."""
         rho_safe = jnp.maximum(self.rho_n, 1e-20)
         ke = 0.5 * jnp.sum(self.mom_n**2, axis=-1) / rho_safe
         internal_energy = self.E_n - ke
@@ -43,7 +43,7 @@ class NeutralState:
 
     @property
     def T_n(self) -> Array:
-        """Temperature [J], shape (nr, nz)."""
+        """Temperature [J], shape (nx, ny, nz)."""
         n_n = self.rho_n / MI
         n_safe = jnp.maximum(n_n, 1e-10)
         return self.p_n / n_safe
@@ -160,6 +160,7 @@ class NeutralFluid:
     """Hydrodynamic neutral fluid model.
 
     Solves Euler equations with optional atomic source terms.
+    Uses 3D Cartesian coordinates.
     """
 
     gamma: float = GAMMA
@@ -167,171 +168,117 @@ class NeutralFluid:
     def compute_flux_divergence(
         self, state: NeutralState, geometry: "Geometry"
     ) -> Tuple[Array, Array, Array]:
-        """Compute -div(F) for Euler equations using HLLE.
+        """Compute -div(F) for 3D Euler equations using dimension-by-dimension HLLE.
 
         Args:
             state: Current neutral state
-            geometry: Grid geometry
+            geometry: Grid geometry with dx, dy, dz
 
         Returns:
-            d_rho: Mass density RHS [kg/m³/s]
-            d_mom: Momentum density RHS [kg/m²/s²]
-            d_E: Energy density RHS [W/m³]
+            d_rho: Mass density RHS [kg/m³/s], shape (nx, ny, nz)
+            d_mom: Momentum density RHS [kg/m²/s²], shape (nx, ny, nz, 3)
+            d_E: Energy density RHS [W/m³], shape (nx, ny, nz)
         """
-        dr, dz = geometry.dr, geometry.dz
+        dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
         rho = state.rho_n
         v = state.v_n
         p = state.p_n
         E = state.E_n
 
-        # Radial fluxes (r-direction, axis=0)
-        F_r = self._compute_radial_flux(rho, v, p, E)
+        # X-direction flux (axis=0, vel_idx=0)
+        d_rho_x, d_mom_x, d_E_x = self._compute_flux_dir(rho, v, p, E, dx, axis=0, vel_idx=0)
 
-        # Axial fluxes (z-direction, axis=1)
-        F_z = self._compute_axial_flux(rho, v, p, E)
+        # Y-direction flux (axis=1, vel_idx=1)
+        d_rho_y, d_mom_y, d_E_y = self._compute_flux_dir(rho, v, p, E, dy, axis=1, vel_idx=1)
 
-        # Flux divergence: -d(F_r)/dr - d(F_z)/dz
-        # Using central differences for divergence
-        d_rho = -(
-            (jnp.roll(F_r[0], -1, axis=0) - jnp.roll(F_r[0], 1, axis=0)) / (2 * dr) +
-            (jnp.roll(F_z[0], -1, axis=1) - jnp.roll(F_z[0], 1, axis=1)) / (2 * dz)
-        )
+        # Z-direction flux (axis=2, vel_idx=2)
+        d_rho_z, d_mom_z, d_E_z = self._compute_flux_dir(rho, v, p, E, dz, axis=2, vel_idx=2)
 
-        # Momentum: handle each component
-        d_mom_r = -(
-            (jnp.roll(F_r[1], -1, axis=0) - jnp.roll(F_r[1], 1, axis=0)) / (2 * dr) +
-            (jnp.roll(F_z[1], -1, axis=1) - jnp.roll(F_z[1], 1, axis=1)) / (2 * dz)
-        )
-        d_mom_theta = jnp.zeros_like(d_mom_r)  # No theta flux in axisymmetric
-        d_mom_z = -(
-            (jnp.roll(F_r[2], -1, axis=0) - jnp.roll(F_r[2], 1, axis=0)) / (2 * dr) +
-            (jnp.roll(F_z[2], -1, axis=1) - jnp.roll(F_z[2], 1, axis=1)) / (2 * dz)
-        )
-        d_mom = jnp.stack([d_mom_r, d_mom_theta, d_mom_z], axis=-1)
-
-        d_E = -(
-            (jnp.roll(F_r[3], -1, axis=0) - jnp.roll(F_r[3], 1, axis=0)) / (2 * dr) +
-            (jnp.roll(F_z[3], -1, axis=1) - jnp.roll(F_z[3], 1, axis=1)) / (2 * dz)
-        )
+        # Sum contributions from all directions
+        d_rho = d_rho_x + d_rho_y + d_rho_z
+        d_mom = d_mom_x + d_mom_y + d_mom_z
+        d_E = d_E_x + d_E_y + d_E_z
 
         return d_rho, d_mom, d_E
 
-    def _compute_radial_flux(self, rho, v, p, E):
-        """Compute HLLE flux in r-direction at cell faces."""
-        v_r = v[..., 0]  # Radial velocity
+    def _compute_flux_dir(self, rho, v, p, E, dx, axis, vel_idx):
+        """Compute flux divergence in one direction using HLLE.
 
-        # Left and right states (i-1/2 interface uses i-1 and i)
-        rho_L = jnp.roll(rho, 1, axis=0)
+        Args:
+            rho: Mass density, shape (nx, ny, nz)
+            v: Velocity, shape (nx, ny, nz, 3)
+            p: Pressure, shape (nx, ny, nz)
+            E: Total energy, shape (nx, ny, nz)
+            dx: Grid spacing in this direction
+            axis: Array axis for this direction (0=x, 1=y, 2=z)
+            vel_idx: Velocity component index (0=vx, 1=vy, 2=vz)
+
+        Returns:
+            d_rho: Mass density change, shape (nx, ny, nz)
+            d_mom: Momentum density change, shape (nx, ny, nz, 3)
+            d_E: Energy density change, shape (nx, ny, nz)
+        """
+        # Velocity component in flux direction
+        v_dir = v[..., vel_idx]
+
+        # Left and right states at cell interfaces (i-1/2)
+        rho_L = jnp.roll(rho, 1, axis=axis)
         rho_R = rho
-        v_L = jnp.roll(v_r, 1, axis=0)
-        v_R = v_r
-        p_L = jnp.roll(p, 1, axis=0)
+        v_L = jnp.roll(v_dir, 1, axis=axis)
+        v_R = v_dir
+        p_L = jnp.roll(p, 1, axis=axis)
         p_R = p
-        E_L = jnp.roll(E, 1, axis=0)
+        E_L = jnp.roll(E, 1, axis=axis)
         E_R = E
 
-        F_rho, F_mom_r, F_E = hlle_flux_1d(
+        # HLLE flux at i-1/2 interfaces
+        F_rho, F_mom, F_E = hlle_flux_1d(
             rho_L, rho_R, v_L, v_R, p_L, p_R, E_L, E_R, self.gamma
         )
 
-        # For momentum components perpendicular to flux direction,
-        # flux is rho * v_r * v_perp
-        mom_theta_L = jnp.roll(rho * v[..., 1], 1, axis=0)
-        mom_theta_R = rho * v[..., 1]
-        F_mom_theta = jnp.where(
-            v_L + v_R > 0,
-            v_L * mom_theta_L / jnp.maximum(rho_L, 1e-20),
-            v_R * mom_theta_R / jnp.maximum(rho_R, 1e-20)
-        ) * 0.5 * (rho_L + rho_R)
+        # Flux divergence: -(F_{i+1/2} - F_{i-1/2}) / dx
+        # F at i+1/2 is jnp.roll(F, -1, axis) since F is stored at i-1/2
+        d_rho = -(jnp.roll(F_rho, -1, axis=axis) - F_rho) / dx
+        d_E = -(jnp.roll(F_E, -1, axis=axis) - F_E) / dx
 
-        mom_z_L = jnp.roll(rho * v[..., 2], 1, axis=0)
-        mom_z_R = rho * v[..., 2]
-        F_mom_z = jnp.where(
-            v_L + v_R > 0,
-            v_L * mom_z_L / jnp.maximum(rho_L, 1e-20),
-            v_R * mom_z_R / jnp.maximum(rho_R, 1e-20)
-        ) * 0.5 * (rho_L + rho_R)
+        # Momentum: only the component in flux direction gets the HLLE flux
+        d_mom = jnp.zeros_like(v)
+        d_mom = d_mom.at[..., vel_idx].set(-(jnp.roll(F_mom, -1, axis=axis) - F_mom) / dx)
 
-        return (F_rho, F_mom_r, F_mom_z, F_E)
+        # Transverse momentum advection: F_perp = rho * v_dir * v_perp
+        # Use upwind for transverse components
+        for perp_idx in range(3):
+            if perp_idx != vel_idx:
+                v_perp = v[..., perp_idx]
+                mom_perp_L = jnp.roll(rho * v_perp, 1, axis=axis)
+                mom_perp_R = rho * v_perp
 
-    def _compute_axial_flux(self, rho, v, p, E):
-        """Compute HLLE flux in z-direction at cell faces."""
-        v_z = v[..., 2]  # Axial velocity
+                # Simple upwind flux for transverse momentum
+                F_perp = jnp.where(
+                    v_L + v_R > 0,
+                    mom_perp_L * v_L,
+                    mom_perp_R * v_R
+                )
 
-        # Left and right states
-        rho_L = jnp.roll(rho, 1, axis=1)
-        rho_R = rho
-        v_L = jnp.roll(v_z, 1, axis=1)
-        v_R = v_z
-        p_L = jnp.roll(p, 1, axis=1)
-        p_R = p
-        E_L = jnp.roll(E, 1, axis=1)
-        E_R = E
+                d_mom = d_mom.at[..., perp_idx].add(
+                    -(jnp.roll(F_perp, -1, axis=axis) - F_perp) / dx
+                )
 
-        F_rho, F_mom_z, F_E = hlle_flux_1d(
-            rho_L, rho_R, v_L, v_R, p_L, p_R, E_L, E_R, self.gamma
-        )
-
-        # Perpendicular momentum fluxes
-        mom_r_L = jnp.roll(rho * v[..., 0], 1, axis=1)
-        mom_r_R = rho * v[..., 0]
-        F_mom_r = jnp.where(
-            v_L + v_R > 0,
-            v_L * mom_r_L / jnp.maximum(rho_L, 1e-20),
-            v_R * mom_r_R / jnp.maximum(rho_R, 1e-20)
-        ) * 0.5 * (rho_L + rho_R)
-
-        return (F_rho, F_mom_r, F_mom_z, F_E)
+        return d_rho, d_mom, d_E
 
     def apply_boundary_conditions(
-        self, state: NeutralState, geometry: "Geometry", bc_type: str = "reflecting"
+        self, state: NeutralState, geometry: "Geometry", bc_type: str = "periodic"
     ) -> NeutralState:
         """Apply boundary conditions to neutral state.
 
         Args:
             state: Current neutral state
             geometry: Grid geometry
-            bc_type: "reflecting" or "absorbing"
+            bc_type: "periodic" (default) - just returns state unchanged
 
         Returns:
             State with boundary conditions applied
         """
-        rho_n = state.rho_n
-        mom_n = state.mom_n
-        E_n = state.E_n
-
-        # Axis (r=0): symmetry
-        # v_r = 0, v_theta = 0, scalars have zero gradient
-        mom_n = mom_n.at[0, :, 0].set(0.0)  # v_r = 0
-        mom_n = mom_n.at[0, :, 1].set(0.0)  # v_theta = 0
-        rho_n = rho_n.at[0, :].set(rho_n[1, :])  # Neumann
-        E_n = E_n.at[0, :].set(E_n[1, :])
-
-        if bc_type == "reflecting":
-            # Outer radial wall: reflect v_r
-            mom_n = mom_n.at[-1, :, 0].set(-mom_n[-2, :, 0])
-            rho_n = rho_n.at[-1, :].set(rho_n[-2, :])
-            E_n = E_n.at[-1, :].set(E_n[-2, :])
-
-            # Axial walls: reflect v_z
-            mom_n = mom_n.at[:, 0, 2].set(-mom_n[:, 1, 2])
-            mom_n = mom_n.at[:, -1, 2].set(-mom_n[:, -2, 2])
-            rho_n = rho_n.at[:, 0].set(rho_n[:, 1])
-            rho_n = rho_n.at[:, -1].set(rho_n[:, -2])
-            E_n = E_n.at[:, 0].set(E_n[:, 1])
-            E_n = E_n.at[:, -1].set(E_n[:, -2])
-
-        elif bc_type == "absorbing":
-            # Outflow: zero gradient
-            rho_n = rho_n.at[-1, :].set(rho_n[-2, :])
-            mom_n = mom_n.at[-1, :, :].set(mom_n[-2, :, :])
-            E_n = E_n.at[-1, :].set(E_n[-2, :])
-
-            rho_n = rho_n.at[:, 0].set(rho_n[:, 1])
-            rho_n = rho_n.at[:, -1].set(rho_n[:, -2])
-            mom_n = mom_n.at[:, 0, :].set(mom_n[:, 1, :])
-            mom_n = mom_n.at[:, -1, :].set(mom_n[:, -2, :])
-            E_n = E_n.at[:, 0].set(E_n[:, 1])
-            E_n = E_n.at[:, -1].set(E_n[:, -2])
-
-        return NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
+        # For periodic BCs (default in 3D Cartesian), nothing to do
+        # The jnp.roll operations in flux computation naturally handle periodic BC
+        return state

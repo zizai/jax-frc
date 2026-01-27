@@ -1,4 +1,8 @@
-"""Tests for neutral fluid model."""
+"""Tests for neutral fluid model.
+
+Note: This test file has been updated from 2D cylindrical to 3D Cartesian.
+See test_neutral_fluid_3d.py for comprehensive 3D tests.
+"""
 
 import jax
 import jax.numpy as jnp
@@ -18,42 +22,43 @@ class TestNeutralState:
     def test_neutral_state_creation(self):
         """Can create NeutralState with required fields."""
         from jax_frc.models.neutral_fluid import NeutralState
-        rho_n = jnp.ones((16, 32)) * 1e-6
-        mom_n = jnp.zeros((16, 32, 3))
-        E_n = jnp.ones((16, 32)) * 1e3
+        # Using 3D arrays: (nx, ny, nz)
+        rho_n = jnp.ones((16, 16, 32)) * 1e-6
+        mom_n = jnp.zeros((16, 16, 32, 3))
+        E_n = jnp.ones((16, 16, 32)) * 1e3
         state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
-        assert state.rho_n.shape == (16, 32)
-        assert state.mom_n.shape == (16, 32, 3)
-        assert state.E_n.shape == (16, 32)
+        assert state.rho_n.shape == (16, 16, 32)
+        assert state.mom_n.shape == (16, 16, 32, 3)
+        assert state.E_n.shape == (16, 16, 32)
 
     def test_neutral_state_velocity_property(self):
         """v_n = mom_n / rho_n."""
         from jax_frc.models.neutral_fluid import NeutralState
-        rho_n = jnp.ones((16, 32)) * 1e-6
-        mom_n = jnp.ones((16, 32, 3)) * 1e-6 * 1000  # 1000 m/s
-        E_n = jnp.ones((16, 32)) * 1e3
+        rho_n = jnp.ones((16, 16, 32)) * 1e-6
+        mom_n = jnp.ones((16, 16, 32, 3)) * 1e-6 * 1000  # 1000 m/s
+        E_n = jnp.ones((16, 16, 32)) * 1e3
         state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
         assert jnp.allclose(state.v_n, 1000.0)
 
     def test_neutral_state_pressure_property(self):
         """p_n from ideal gas EOS."""
         from jax_frc.models.neutral_fluid import NeutralState
-        rho_n = jnp.ones((16, 32)) * MI * 1e19  # n = 1e19 m^-3
-        mom_n = jnp.zeros((16, 32, 3))  # Stationary
+        rho_n = jnp.ones((16, 16, 32)) * MI * 1e19  # n = 1e19 m^-3
+        mom_n = jnp.zeros((16, 16, 32, 3))  # Stationary
         # E_n = p / (gamma - 1) for stationary gas
         gamma = 5/3
         p_target = 1e19 * 10 * QE  # n * T where T = 10 eV
         E_n = p_target / (gamma - 1)
-        E_n = jnp.ones((16, 32)) * E_n
+        E_n = jnp.ones((16, 16, 32)) * E_n
         state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
         assert jnp.allclose(state.p_n, p_target, rtol=1e-5)
 
     def test_neutral_state_is_pytree(self):
         """NeutralState works with JAX transformations."""
         from jax_frc.models.neutral_fluid import NeutralState
-        rho_n = jnp.ones((16, 32)) * 1e-6
-        mom_n = jnp.zeros((16, 32, 3))
-        E_n = jnp.ones((16, 32)) * 1e3
+        rho_n = jnp.ones((16, 16, 32)) * 1e-6
+        mom_n = jnp.zeros((16, 16, 32, 3))
+        E_n = jnp.ones((16, 16, 32)) * 1e3
         state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
 
         # Should be able to use in JIT
@@ -62,7 +67,7 @@ class TestNeutralState:
             return s.rho_n
 
         result = get_density(state)
-        assert result.shape == (16, 32)
+        assert result.shape == (16, 16, 32)
 
 
 class TestEulerFlux:
@@ -164,51 +169,51 @@ class TestNeutralFluid:
         from jax_frc.models.neutral_fluid import NeutralFluid, NeutralState
         from jax_frc.core.geometry import Geometry
 
-        nr, nz = 16, 32
+        nx, ny, nz = 16, 16, 32
         model = NeutralFluid()
         geometry = Geometry(
-            coord_system="cylindrical",
-            nr=nr, nz=nz,
-            r_min=0.1, r_max=1.0,
+            nx=nx, ny=ny, nz=nz,
+            x_min=-1.0, x_max=1.0,
+            y_min=-1.0, y_max=1.0,
             z_min=0.0, z_max=2.0
         )
 
-        rho_n = jnp.ones((nr, nz)) * 1e-6
-        mom_n = jnp.zeros((nr, nz, 3))
-        E_n = jnp.ones((nr, nz)) * 1e3
+        rho_n = jnp.ones((nx, ny, nz)) * 1e-6
+        mom_n = jnp.zeros((nx, ny, nz, 3))
+        E_n = jnp.ones((nx, ny, nz)) * 1e3
         state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
 
         d_rho, d_mom, d_E = model.compute_flux_divergence(state, geometry)
 
-        assert d_rho.shape == (nr, nz)
-        assert d_mom.shape == (nr, nz, 3)
-        assert d_E.shape == (nr, nz)
+        assert d_rho.shape == (nx, ny, nz)
+        assert d_mom.shape == (nx, ny, nz, 3)
+        assert d_E.shape == (nx, ny, nz)
 
     def test_uniform_state_zero_flux_divergence(self):
         """Uniform stationary state has ~zero flux divergence."""
         from jax_frc.models.neutral_fluid import NeutralFluid, NeutralState
         from jax_frc.core.geometry import Geometry
 
-        nr, nz = 16, 32
+        nx, ny, nz = 16, 16, 32
         model = NeutralFluid()
         geometry = Geometry(
-            coord_system="cylindrical",
-            nr=nr, nz=nz,
-            r_min=0.1, r_max=1.0,
+            nx=nx, ny=ny, nz=nz,
+            x_min=-1.0, x_max=1.0,
+            y_min=-1.0, y_max=1.0,
             z_min=0.0, z_max=2.0
         )
 
         # Uniform stationary state
-        rho_n = jnp.ones((nr, nz)) * 1e-6
-        mom_n = jnp.zeros((nr, nz, 3))
+        rho_n = jnp.ones((nx, ny, nz)) * 1e-6
+        mom_n = jnp.zeros((nx, ny, nz, 3))
         p_n = 1e3
-        E_n = jnp.ones((nr, nz)) * p_n / (5/3 - 1)
+        E_n = jnp.ones((nx, ny, nz)) * p_n / (5/3 - 1)
         state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
 
         d_rho, d_mom, d_E = model.compute_flux_divergence(state, geometry)
 
-        # Interior should be near zero (boundaries may have edge effects)
-        assert jnp.max(jnp.abs(d_rho[2:-2, 2:-2])) < 1e-10
+        # With periodic BC on uniform state, flux divergence should be near zero
+        assert jnp.max(jnp.abs(d_rho)) < 1e-10
 
 
 class TestNeutralBoundaryConditions:
@@ -220,52 +225,23 @@ class TestNeutralBoundaryConditions:
         model = NeutralFluid()
         assert hasattr(model, 'apply_boundary_conditions')
 
-    def test_reflecting_bc_reverses_normal_velocity(self):
-        """Reflecting BC reverses velocity normal to wall."""
+    def test_periodic_bc_returns_unchanged(self):
+        """Periodic BC returns state unchanged."""
         from jax_frc.models.neutral_fluid import NeutralFluid, NeutralState
         from jax_frc.core.geometry import Geometry
 
-        nr, nz = 16, 32
+        nx, ny, nz = 16, 16, 32
         model = NeutralFluid()
-        geometry = Geometry(
-            coord_system="cylindrical",
-            nr=nr, nz=nz,
-            r_min=0.1, r_max=1.0,
-            z_min=0.0, z_max=2.0
-        )
+        geometry = Geometry(nx=nx, ny=ny, nz=nz)
 
-        rho_n = jnp.ones((nr, nz)) * 1e-6
-        # Velocity pointing outward at outer r boundary
-        mom_n = jnp.zeros((nr, nz, 3))
-        mom_n = mom_n.at[-1, :, 0].set(1e-6 * 100)  # v_r = 100 at outer wall
-        E_n = jnp.ones((nr, nz)) * 1e3
+        rho_n = jnp.ones((nx, ny, nz)) * 1e-6
+        mom_n = jnp.ones((nx, ny, nz, 3)) * 1e-6 * 100
+        E_n = jnp.ones((nx, ny, nz)) * 1e3
         state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
 
-        state_bc = model.apply_boundary_conditions(state, geometry, bc_type="reflecting")
+        state_bc = model.apply_boundary_conditions(state, geometry, bc_type="periodic")
 
-        # v_r should be zero or reversed at outer boundary
-        assert jnp.all(state_bc.mom_n[-1, :, 0] <= 0)
-
-    def test_axis_symmetry(self):
-        """Axis (r=0) has correct symmetry."""
-        from jax_frc.models.neutral_fluid import NeutralFluid, NeutralState
-        from jax_frc.core.geometry import Geometry
-
-        nr, nz = 16, 32
-        model = NeutralFluid()
-        geometry = Geometry(
-            coord_system="cylindrical",
-            nr=nr, nz=nz,
-            r_min=0.1, r_max=1.0,
-            z_min=0.0, z_max=2.0
-        )
-
-        rho_n = jnp.ones((nr, nz)) * 1e-6
-        mom_n = jnp.ones((nr, nz, 3)) * 1e-6 * 100
-        E_n = jnp.ones((nr, nz)) * 1e3
-        state = NeutralState(rho_n=rho_n, mom_n=mom_n, E_n=E_n)
-
-        state_bc = model.apply_boundary_conditions(state, geometry)
-
-        # v_r = 0 at axis
-        assert jnp.allclose(state_bc.mom_n[0, :, 0], 0, atol=1e-20)
+        # Periodic BC should not modify the state
+        assert jnp.allclose(state_bc.rho_n, state.rho_n)
+        assert jnp.allclose(state_bc.mom_n, state.mom_n)
+        assert jnp.allclose(state_bc.E_n, state.E_n)
