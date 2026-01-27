@@ -45,19 +45,19 @@ def test_abstract_configuration_importable_from_package():
 
 # MagneticDiffusionConfiguration tests
 def test_magnetic_diffusion_builds_geometry():
-    """MagneticDiffusionConfiguration creates valid geometry."""
+    """MagneticDiffusionConfiguration creates valid 3D Cartesian geometry."""
     from jax_frc.configurations import MagneticDiffusionConfiguration
 
     config = MagneticDiffusionConfiguration()
     geometry = config.build_geometry()
 
-    assert geometry.nr > 0
+    assert geometry.nx > 0
+    assert geometry.ny > 0
     assert geometry.nz > 0
-    assert geometry.coord_system == "cylindrical"
 
 
 def test_magnetic_diffusion_builds_initial_state():
-    """MagneticDiffusionConfiguration creates state with Gaussian B_z."""
+    """MagneticDiffusionConfiguration creates state with Gaussian B_z in x-z plane."""
     from jax_frc.configurations import MagneticDiffusionConfiguration
     import jax.numpy as jnp
 
@@ -66,8 +66,11 @@ def test_magnetic_diffusion_builds_initial_state():
     state = config.build_initial_state(geometry)
 
     # B_z should have Gaussian profile (peak in center)
-    center_idx = geometry.nz // 2
-    assert state.B[geometry.nr // 2, center_idx, 2] > state.B[geometry.nr // 2, 0, 2]
+    x_center = geometry.nx // 2
+    y_center = geometry.ny // 2
+    z_center = geometry.nz // 2
+    # Center should have higher B_z than edge
+    assert state.B[x_center, y_center, z_center, 2] > state.B[x_center, y_center, 0, 2]
 
 
 def test_magnetic_diffusion_builds_model():

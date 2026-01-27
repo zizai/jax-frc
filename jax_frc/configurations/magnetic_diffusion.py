@@ -6,7 +6,7 @@ from typing import Literal
 from jax_frc.core.geometry import Geometry
 from jax_frc.core.state import State
 from jax_frc.models.resistive_mhd import ResistiveMHD
-from jax_frc.models.extended_mhd import ExtendedMHD, HaloDensityModel
+from jax_frc.models.extended_mhd import ExtendedMHD
 from jax_frc.models.hybrid_kinetic import HybridKinetic, RigidRotorEquilibrium
 from jax_frc.models.coupled import CoupledModel, CoupledModelConfig
 from jax_frc.models.neutral_fluid import NeutralFluid
@@ -20,7 +20,7 @@ ModelType = Literal["resistive_mhd", "extended_mhd", "plasma_neutral", "hybrid_k
 
 @dataclass
 class MagneticDiffusionConfiguration(AbstractConfiguration):
-    """2D magnetic diffusion test in slab geometry (Rm << 1).
+    """3D magnetic diffusion test (Rm << 1).
 
     Physics: ∂B/∂t = η∇²B (resistive diffusion, no flow)
 
@@ -28,41 +28,31 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
     is much less than 1. The magnetic field diffuses through the plasma
     like heat through a conductor.
 
-    Coordinate Transformation:
-        The MHD code uses cylindrical 2D (r,z) coordinates, while the analytic
-        solution is for 2D Cartesian diffusion. By centering the domain at
-        large r (r_center >> sigma), the cylindrical Laplacian approximates
-        Cartesian: ∇²B_z ≈ ∂²B_z/∂r² + ∂²B_z/∂z² (the (1/r)∂B_z/∂r term
-        becomes negligible when r >> sigma).
+    Initial condition: 3D Gaussian B_z profile centered at origin
+    Analytic solution: 3D spreading Gaussian
+        σ_t² = σ₀² + 2Dt
+        B_z(x,y,z,t) = B_peak * (σ₀/σ_t)³ * exp(-(x² + y² + z²)/(2σ_t²))
 
-    Initial condition: 2D Gaussian B_z profile centered at (r_center, z_center)
-    Analytic solution: 2D spreading Gaussian (Cartesian approximation)
-        σ_t² = σ₀² + 2ηt
-        B_z(r,z,t) = B_peak * (σ₀²/σ_t²) * exp(-((r-r₀)² + (z-z₀)²)/(2σ_t²))
+    For 2D-like tests, set ny=4 with periodic y boundary conditions.
 
     Supports: resistive_mhd, extended_mhd, plasma_neutral, hybrid_kinetic
     """
 
     name: str = "magnetic_diffusion"
-    description: str = "2D magnetic field diffusion in slab geometry (Rm << 1)"
+    description: str = "3D magnetic field diffusion (Rm << 1)"
 
-    # Grid parameters - slab geometry for Cartesian approximation
-    nr: int = 64          # Radial resolution
-    nz: int = 64          # Axial resolution
-    r_min: float = 1.0    # Inner radius [m] - far from axis
-    r_max: float = 2.0    # Outer radius [m]
-    z_extent: float = 1.0 # Domain: z ∈ [-z_extent, z_extent]
+    # Grid parameters
+    nx: int = 64          # X resolution
+    ny: int = 4           # Y resolution (thin for 2D-like behavior)
+    nz: int = 64          # Z resolution
+    extent: float = 1.0   # Domain: [-extent, extent] in each direction
 
     # Physics parameters
     B_peak: float = 1.0        # Peak B_z [T]
-    sigma: float = 0.1         # Initial Gaussian width [m] (should be << r_min)
+    sigma: float = 0.1         # Initial Gaussian width [m]
     # Note: eta is resistivity [Ω·m], diffusivity = eta/mu_0
     # For diffusivity D = 1e-4 m²/s, eta = D * mu_0 ≈ 1.26e-10 Ω·m
     eta: float = 1.26e-10      # Magnetic resistivity [Ω·m]
-
-    # Center of Gaussian in slab
-    r_center: float = 1.5    # Radial center [m] = (r_min + r_max) / 2
-    z_center: float = 0.0    # Axial center [m]
 
     # Plasma parameters (for models that need them)
     # Use very high density to suppress Hall term for pure diffusion test
@@ -73,68 +63,61 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
     model_type: ModelType = "extended_mhd"
 
     def build_geometry(self) -> Geometry:
-        """Cylindrical geometry, minimal r resolution (1D in z)."""
+        """3D Cartesian geometry."""
         return Geometry(
-            coord_system="cylindrical",
-            r_min=self.r_min,
-            r_max=self.r_max,
-            z_min=-self.z_extent,
-            z_max=self.z_extent,
-            nr=self.nr,
+            nx=self.nx,
+            ny=self.ny,
             nz=self.nz,
+            x_min=-self.extent,
+            x_max=self.extent,
+            y_min=-self.extent,
+            y_max=self.extent,
+            z_min=-self.extent,
+            z_max=self.extent,
+            bc_x="neumann",
+            bc_y="periodic",  # Periodic in thin direction for 2D-like behavior
+            bc_z="neumann",
         )
 
     def build_initial_state(self, geometry: Geometry) -> State:
-        """2D Gaussian B_z profile in slab geometry, v=0."""
-        r = geometry.r_grid
+        """2D Gaussian B_z profile in x-z plane (uniform in y), v=0."""
+        x = geometry.x_grid
         z = geometry.z_grid
 
-        # 2D Gaussian centered at (r_center, z_center)
-        # Using (r - r_center) as the "x" coordinate in Cartesian approximation
-        x_sq = (r - self.r_center)**2
-        z_sq = (z - self.z_center)**2
-        B_z = self.B_peak * jnp.exp(-(x_sq + z_sq) / (2 * self.sigma**2))
+        # 2D Gaussian centered at origin (uniform in y for 2D-like behavior)
+        r_sq = x**2 + z**2
+        B_z = self.B_peak * jnp.exp(-r_sq / (2 * self.sigma**2))
 
         # Build B field array (only B_z component)
-        B = jnp.zeros((geometry.nr, geometry.nz, 3))
-        B = B.at[:, :, 2].set(B_z)
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[:, :, :, 2].set(B_z)
 
         # v = 0 for pure diffusion (Rm << 1)
-        v = jnp.zeros((geometry.nr, geometry.nz, 3))
+        v = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
 
         return State(
-            psi=jnp.zeros((geometry.nr, geometry.nz)),
-            n=jnp.ones((geometry.nr, geometry.nz)) * self.n0,
-            p=jnp.ones((geometry.nr, geometry.nz)) * self.n0 * self.T0,  # p = nT
-            T=jnp.ones((geometry.nr, geometry.nz)) * self.T0,
             B=B,
-            E=jnp.zeros((geometry.nr, geometry.nz, 3)),
+            E=jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3)),
+            n=jnp.ones((geometry.nx, geometry.ny, geometry.nz)) * self.n0,
+            p=jnp.ones((geometry.nx, geometry.ny, geometry.nz)) * self.n0 * self.T0,
             v=v,
-            particles=None,
-            time=0.0,
-            step=0,
         )
 
     def build_model(self):
         """Build physics model with resistivity configured for diffusion test."""
-        resistivity = SpitzerResistivity(eta_0=self.eta)
-
         if self.model_type == "resistive_mhd":
+            resistivity = SpitzerResistivity(eta_0=self.eta)
             return ResistiveMHD(resistivity=resistivity)
 
         elif self.model_type == "extended_mhd":
             return ExtendedMHD(
-                resistivity=resistivity,
-                halo_model=HaloDensityModel(
-                    halo_density=self.n0,
-                    core_density=self.n0,
-                ),
-                thermal=None,  # No thermal transport for this test
+                eta=self.eta,
                 include_hall=False,  # Disable Hall term for pure diffusion test
                 include_electron_pressure=False,  # Disable electron pressure
             )
 
         elif self.model_type == "plasma_neutral":
+            resistivity = SpitzerResistivity(eta_0=self.eta)
             plasma_model = ResistiveMHD(resistivity=resistivity)
             neutral_model = NeutralFluid()
             coupling = AtomicCoupling()
@@ -171,37 +154,66 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
             "dt": 1e-4 * tau_diff,    # Small timestep for stability
         }
 
-    def analytic_solution(self, r: jnp.ndarray, z: jnp.ndarray, t: float) -> jnp.ndarray:
-        """2D Cartesian analytic solution mapped to cylindrical coordinates.
+    def analytic_solution(
+        self, x: jnp.ndarray, y: jnp.ndarray, z: jnp.ndarray, t: float
+    ) -> jnp.ndarray:
+        """3D analytic solution for spreading Gaussian.
 
-        In 2D Cartesian, the spreading Gaussian solution is:
-            B_z(x,z,t) = B_peak * (σ₀²/σ_t²) * exp(-((x-x₀)² + (z-z₀)²)/(2σ_t²))
+        The 3D spreading Gaussian solution is:
+            B_z(x,y,z,t) = B_peak * (σ₀/σ_t)³ * exp(-(x² + y² + z²)/(2σ_t²))
 
-        Mapping: x = r - r_center (slab approximation when r >> σ)
+        where σ_t² = σ₀² + 2Dt, D = eta/mu_0 is the magnetic diffusivity.
 
-        where σ_t² = σ₀² + 2Dt, D = eta/mu_0 is the magnetic diffusivity
+        Note: For thin-y domain (ny=4, periodic), the solution is effectively
+        2D in the x-z plane. Use analytic_solution_2d() for that case.
 
         Args:
-            r: Radial coordinates [m]
-            z: Axial coordinates [m]
+            x: X coordinates [m]
+            y: Y coordinates [m]
+            z: Z coordinates [m]
             t: Time [s]
 
         Returns:
             B_z field values at the given coordinates and time
         """
-        # Convert resistivity to diffusivity: D = eta / mu_0
+        MU0 = 1.2566e-6
+        diffusivity = self.eta / MU0
+
+        sigma_eff_sq = self.sigma**2 + 2 * diffusivity * t
+        sigma_eff = jnp.sqrt(sigma_eff_sq)
+
+        r_sq = x**2 + y**2 + z**2
+
+        # 3D amplitude decay: (σ₀/σ_t)³
+        amplitude = self.B_peak * (self.sigma / sigma_eff) ** 3
+        return amplitude * jnp.exp(-r_sq / (2 * sigma_eff_sq))
+
+    def analytic_solution_2d(
+        self, x: jnp.ndarray, z: jnp.ndarray, t: float
+    ) -> jnp.ndarray:
+        """2D analytic solution for x-z plane (thin-y approximation).
+
+        The 2D spreading Gaussian solution is:
+            B_z(x,z,t) = B_peak * (σ₀/σ_t)² * exp(-(x² + z²)/(2σ_t²))
+
+        Args:
+            x: X coordinates [m]
+            z: Z coordinates [m]
+            t: Time [s]
+
+        Returns:
+            B_z field values at the given coordinates and time
+        """
         MU0 = 1.2566e-6
         diffusivity = self.eta / MU0
 
         sigma_eff_sq = self.sigma**2 + 2 * diffusivity * t
 
-        # Map cylindrical r to Cartesian x relative to center
-        x = r - self.r_center
-        z_rel = z - self.z_center
+        r_sq = x**2 + z**2
 
-        # 2D Cartesian amplitude decay: σ₀²/σ_t² (not sqrt for 2D)
+        # 2D amplitude decay: (σ₀²/σ_t²)
         amplitude = self.B_peak * (self.sigma**2 / sigma_eff_sq)
-        return amplitude * jnp.exp(-(x**2 + z_rel**2) / (2 * sigma_eff_sq))
+        return amplitude * jnp.exp(-r_sq / (2 * sigma_eff_sq))
 
     def diffusion_timescale(self) -> float:
         """Characteristic diffusion time τ = σ²/(2D) where D = eta/mu_0."""
@@ -222,5 +234,5 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
         """
         MU0 = 1.2566e-6
         diffusivity = self.eta / MU0
-        L = 2 * self.z_extent  # Characteristic length
+        L = 2 * self.extent  # Characteristic length
         return v * L / diffusivity

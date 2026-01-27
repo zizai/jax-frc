@@ -1,8 +1,8 @@
-"""2D Magnetic Field Diffusion Validation (Slab Geometry)
+"""3D Magnetic Field Diffusion Validation (Cartesian Geometry, 2D-like)
 
 Physics:
     This test validates the MHD solver against the exact solution
-    for 2D diffusion of a Gaussian magnetic field profile in the low magnetic
+    for diffusion of a Gaussian magnetic field profile in the low magnetic
     Reynolds number limit (Rm << 1).
 
     Magnetic induction equation (no flow):
@@ -11,19 +11,18 @@ Physics:
     where η is the magnetic diffusivity [m²/s], related to resistivity by
     η = 1/(μ₀σ) where σ is the electrical conductivity.
 
-    Coordinate Transformation:
-        The MHD code uses cylindrical 2D (r,z) coordinates, while the analytic
-        solution is for 2D Cartesian diffusion. By centering the domain at
-        large r (r_center >> sigma), the cylindrical Laplacian approximates
-        Cartesian: ∇²B_z ≈ ∂²B_z/∂r² + ∂²B_z/∂z² (the (1/r)∂B_z/∂r term
-        becomes negligible when r >> sigma).
+    Coordinate System:
+        The MHD code uses 3D Cartesian (x, y, z) coordinates. For 2D-like
+        behavior, we use a thin y-dimension (ny=4) with periodic boundary
+        conditions. This effectively reduces the problem to 2D diffusion
+        in the x-z plane.
 
-    Initial condition (2D Gaussian):
-        B_z(r, z, 0) = B_peak * exp(-((r-r₀)² + (z-z₀)²) / (2σ²))
+    Initial condition (2D Gaussian in x-z plane):
+        B_z(x, z, 0) = B_peak * exp(-(x² + z²) / (2σ²))
 
     Analytic solution (2D spreading Gaussian):
         σ_t² = σ² + 2ηt
-        B_z(r, z, t) = B_peak * (σ²/σ_t²) * exp(-((r-r₀)² + (z-z₀)²) / (2σ_t²))
+        B_z(x, z, t) = B_peak * (σ²/σ_t²) * exp(-(x² + z²) / (2σ_t²))
 
     The Gaussian spreads and decreases in amplitude while conserving total
     magnetic flux. This is the magnetic analog of heat diffusion and serves
@@ -57,7 +56,7 @@ from validation.utils.plotting import plot_comparison, plot_error
 
 # Case metadata
 NAME = "magnetic_diffusion"
-DESCRIPTION = "2D magnetic field diffusion test in slab geometry with analytic solution (Rm << 1)"
+DESCRIPTION = "3D magnetic field diffusion test in Cartesian geometry with analytic solution (Rm << 1)"
 
 
 def setup_configuration() -> dict:
@@ -72,16 +71,17 @@ def setup_configuration() -> dict:
     MU0 = 1.2566e-6
     diffusivity = eta / MU0  # ~1e-4 m²/s
 
-    # Grid parameters
-    nr = 64
+    # Grid parameters (3D Cartesian with thin y for 2D-like behavior)
+    nx = 64
+    ny = 4   # Thin y-dimension with periodic BCs for 2D-like behavior
     nz = 64
-    r_min = 1.0
-    r_max = 2.0
-    dr = (r_max - r_min) / nr
-    dz = 2.0 / nz  # z_extent = 1.0, so z goes from -1 to 1
+    extent = 1.0  # Domain: [-extent, extent] in each direction
+
+    dx = 2 * extent / nx
+    dz = 2 * extent / nz
 
     # CFL constraint for diffusion: dt < dx^2 / (2*D)
-    dx_min = min(dr, dz)
+    dx_min = min(dx, dz)
     dt_max = 0.25 * dx_min**2 / diffusivity
     dt = dt_max * 0.5  # Safety factor
 
@@ -92,15 +92,12 @@ def setup_configuration() -> dict:
 
     return {
         "B_peak": 1.0,       # Peak magnetic field [T]
-        "sigma": sigma,      # Initial Gaussian width [m] (should be << r_min)
+        "sigma": sigma,      # Initial Gaussian width [m]
         "eta": eta,          # Magnetic resistivity [Ω·m]
-        "nr": nr,            # Radial resolution
-        "nz": nz,            # Axial resolution
-        "r_min": r_min,      # Inner radius [m] - far from axis
-        "r_max": r_max,      # Outer radius [m]
-        "z_extent": 1.0,     # Domain: z ∈ [-z_extent, z_extent] [m]
-        "r_center": 1.5,     # Radial center of Gaussian [m]
-        "z_center": 0.0,     # Axial center of Gaussian [m]
+        "nx": nx,            # X resolution
+        "ny": ny,            # Y resolution (thin for 2D-like)
+        "nz": nz,            # Z resolution
+        "extent": extent,    # Domain extent [m]
         "t_end": t_end,      # End time [s]
         "dt": dt,            # Time step [s] (CFL-constrained)
     }
@@ -117,16 +114,13 @@ def run_simulation(cfg: dict) -> tuple:
     """
     # Build configuration with specified parameters
     config = MagneticDiffusionConfiguration(
+        nx=cfg["nx"],
+        ny=cfg["ny"],
+        nz=cfg["nz"],
+        extent=cfg["extent"],
         B_peak=cfg["B_peak"],
         sigma=cfg["sigma"],
         eta=cfg["eta"],
-        nr=cfg["nr"],
-        nz=cfg["nz"],
-        r_min=cfg["r_min"],
-        r_max=cfg["r_max"],
-        z_extent=cfg["z_extent"],
-        r_center=cfg["r_center"],
-        z_center=cfg["z_center"],
     )
 
     # Create geometry and initial state
@@ -148,9 +142,9 @@ def run_simulation(cfg: dict) -> tuple:
     return state, geometry, config
 
 
-# Acceptance criteria (adjusted for coordinate transformation approximation)
+# Acceptance criteria
 ACCEPTANCE = {
-    "l2_error": 0.10,      # 10% relative L2 error threshold (higher due to cylindrical approx)
+    "l2_error": 0.10,      # 10% relative L2 error threshold
     "linf_error": 0.15,    # Max pointwise error threshold [T]
 }
 
@@ -180,17 +174,26 @@ def main() -> bool:
     print(f"  Completed in {t_sim:.2f}s")
     print()
 
-    # Extract full 2D B_z field
-    r = geometry.r_grid
+    # Extract 3D grids and B_z field
+    x = geometry.x_grid  # Shape: (nx, ny, nz)
+    y = geometry.y_grid
     z = geometry.z_grid
-    Bz_sim = final_state.B[:, :, 2]
+    Bz_sim = final_state.B[:, :, :, 2]  # 3D array
 
-    # Compute analytic solution at final time with coordinate transformation
-    Bz_analytic = config.analytic_solution(r, z, cfg["t_end"])
+    # For 2D-like comparison, take slice at y=0 (middle of thin y-dimension)
+    y_idx = geometry.ny // 2
 
-    # Compute metrics on full 2D field
-    l2_err = l2_error(Bz_sim, Bz_analytic)
-    linf_err = linf_error(Bz_sim, Bz_analytic)
+    # Extract 2D slices for comparison
+    x_2d = x[:, y_idx, :]  # Shape: (nx, nz)
+    z_2d = z[:, y_idx, :]
+    Bz_sim_2d = Bz_sim[:, y_idx, :]
+
+    # Compute 2D analytic solution at final time
+    Bz_analytic_2d = config.analytic_solution_2d(x_2d, z_2d, cfg["t_end"])
+
+    # Compute metrics on 2D slice
+    l2_err = l2_error(Bz_sim_2d, Bz_analytic_2d)
+    linf_err = linf_error(Bz_sim_2d, Bz_analytic_2d)
 
     print("Metrics:")
     print(f"  L2 error:   {l2_err:.4g} (threshold: {ACCEPTANCE['l2_error']})")
@@ -208,13 +211,13 @@ def main() -> bool:
             "value": float(l2_err),
             "threshold": ACCEPTANCE["l2_error"],
             "passed": l2_pass,
-            "description": "Relative L2 error vs analytic solution (2D)",
+            "description": "Relative L2 error vs 2D analytic solution",
         },
         "linf_error": {
             "value": float(linf_err),
             "threshold": ACCEPTANCE["linf_error"],
             "passed": linf_pass,
-            "description": "Maximum pointwise B_z error [T] (2D)",
+            "description": "Maximum pointwise B_z error [T]",
         },
     }
 
@@ -230,35 +233,35 @@ def main() -> bool:
     )
 
     # Add plots - use center slices for visualization
-    # Radial slice at z_center
+    # X-slice at z=0 (center of domain)
     z_center_idx = geometry.nz // 2
-    r_1d = r[:, z_center_idx]
-    Bz_sim_r = Bz_sim[:, z_center_idx]
-    Bz_analytic_r = Bz_analytic[:, z_center_idx]
+    x_1d = x_2d[:, z_center_idx]
+    Bz_sim_x = Bz_sim_2d[:, z_center_idx]
+    Bz_analytic_x = Bz_analytic_2d[:, z_center_idx]
 
-    fig_comparison_r = plot_comparison(
-        x=r_1d,
-        actual=Bz_sim_r,
-        expected=Bz_analytic_r,
+    fig_comparison_x = plot_comparison(
+        x=x_1d,
+        actual=Bz_sim_x,
+        expected=Bz_analytic_x,
         labels=("Simulation", "Analytic"),
         title=f"B_z Profile at z=0, t={cfg['t_end']:.1e}s",
-        xlabel="r [m]",
+        xlabel="x [m]",
         ylabel="B_z [T]",
     )
-    report.add_plot(fig_comparison_r, name="Bz_comparison_r")
+    report.add_plot(fig_comparison_x, name="Bz_comparison_x")
 
-    # Axial slice at r_center
-    r_center_idx = geometry.nr // 2
-    z_1d = z[r_center_idx, :]
-    Bz_sim_z = Bz_sim[r_center_idx, :]
-    Bz_analytic_z = Bz_analytic[r_center_idx, :]
+    # Z-slice at x=0 (center of domain)
+    x_center_idx = geometry.nx // 2
+    z_1d = z_2d[x_center_idx, :]
+    Bz_sim_z = Bz_sim_2d[x_center_idx, :]
+    Bz_analytic_z = Bz_analytic_2d[x_center_idx, :]
 
     fig_comparison_z = plot_comparison(
         x=z_1d,
         actual=Bz_sim_z,
         expected=Bz_analytic_z,
         labels=("Simulation", "Analytic"),
-        title=f"B_z Profile at r=r_center, t={cfg['t_end']:.1e}s",
+        title=f"B_z Profile at x=0, t={cfg['t_end']:.1e}s",
         xlabel="z [m]",
         ylabel="B_z [T]",
     )
@@ -268,7 +271,7 @@ def main() -> bool:
         x=z_1d,
         actual=Bz_sim_z,
         expected=Bz_analytic_z,
-        title="B_z Error at r=r_center (Simulation - Analytic)",
+        title="B_z Error at x=0 (Simulation - Analytic)",
         xlabel="z [m]",
         ylabel="Error [T]",
     )
