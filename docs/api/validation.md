@@ -4,65 +4,15 @@ The validation module provides infrastructure for validating simulations against
 
 ## Overview
 
-```python
-from jax_frc.validation import ValidationRunner, ValidationResult
+Validation cases are standalone scripts under `validation/cases/`.
+Run them directly to generate HTML reports in `validation/reports/`.
 
-# Run validation case from YAML
-runner = ValidationRunner("cases/magnetic_diffusion.yaml", output_dir="results/")
-result = runner.run()
-
-# Check results
-print(f"Passed: {result.passed}")
-print(f"Metrics: {result.metrics}")
+```bash
+python validation/cases/analytic/magnetic_diffusion.py
+python validation/cases/analytic/frozen_flux.py
 ```
 
-## ValidationRunner
-
-Orchestrates validation case execution:
-
-```python
-from jax_frc.validation import ValidationRunner
-
-runner = ValidationRunner(
-    case_path="cases/my_case.yaml",  # YAML case definition
-    output_dir="results/"             # Output directory
-)
-
-# Dry run (no simulation, just setup verification)
-result = runner.run(dry_run=True)
-
-# Full run
-result = runner.run()
-```
-
-### YAML Case Format
-
-```yaml
-name: magnetic_diffusion_test
-description: Validate magnetic diffusion against analytic solution
-
-configuration:
-  class: MagneticDiffusionConfiguration
-  overrides:
-    nr: 64
-    nz: 256
-    B_peak: 1.0
-
-runtime:
-  t_end: 1e-4
-  dt: 1e-7
-
-acceptance:
-  quantitative:
-    - metric: l2_error
-      field: B_theta
-      expected: 0.0
-      tolerance: 0.05
-    - metric: linf_error
-      field: B_theta
-      expected: 0.0
-      tolerance: 0.1
-```
+Each script prints metrics to stdout and saves a report with plots.
 
 ## Metrics
 
