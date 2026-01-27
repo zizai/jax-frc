@@ -9,8 +9,9 @@ from jax import Array
 from jax_frc.equilibrium.base import EquilibriumSolver, EquilibriumConstraints
 from jax_frc.core.geometry import Geometry
 from jax_frc.core.state import State
-
-MU0 = 1.2566e-6
+from jax_frc.constants import MU0, QE
+from jax_frc.operators import curl_3d, gradient_3d
+from jax_frc.solvers.divergence_cleaning import clean_divergence
 
 
 @dataclass
@@ -185,7 +186,7 @@ class GradShafranovSolver(EquilibriumSolver):
 
         # Density (assume isothermal for simplicity)
         T0 = 1000.0  # eV
-        density = pressure / (T0 * 1.602e-19)  # n = p / (kT)
+        density = pressure / (T0 * QE)  # n = p / (kT)
 
         return {
             "B": B,
@@ -205,3 +206,72 @@ class GradShafranovSolver(EquilibriumSolver):
         psi_zz = (jnp.roll(psi, -1, axis=1) - 2*psi + jnp.roll(psi, 1, axis=1)) / dz**2
         psi_r = (jnp.roll(psi, -1, axis=0) - jnp.roll(psi, 1, axis=0)) / (2*dr)
         return psi_rr - (1.0/r) * psi_r + psi_zz
+
+
+@dataclass
+class ForceBalanceSolver:
+    """3D force-balance equilibrium solver.
+
+    Finds B field satisfying J x B = grad(p) iteratively.
+    Uses projection method to maintain div(B) = 0.
+    """
+
+    max_iterations: int = 1000
+    tolerance: float = 1e-6
+    relaxation: float = 0.1
+
+    def solve(self, geometry: Geometry, p_profile: Array, B_initial: Array) -> State:
+        """Find force-balanced B field.
+
+        Args:
+            geometry: 3D Cartesian geometry
+            p_profile: Pressure profile, shape (nx, ny, nz)
+            B_initial: Initial magnetic field guess, shape (nx, ny, nz, 3)
+
+        Returns:
+            State with equilibrium B field and pressure
+        """
+        def iteration_step(carry, _):
+            B, _ = carry
+            F = self.compute_force_imbalance(B, p_profile, geometry)
+            curl_F = curl_3d(F, geometry)
+            B_new = B + self.relaxation * curl_F
+            B_new = clean_divergence(B_new, geometry)
+            error = jnp.max(jnp.abs(F))
+            return (B_new, error), error
+
+        init_carry = (B_initial, jnp.inf)
+        (B_final, _), errors = lax.scan(
+            iteration_step, init_carry, jnp.arange(self.max_iterations)
+        )
+
+        state = State.zeros(geometry.nx, geometry.ny, geometry.nz)
+        return state.replace(B=B_final, p=p_profile)
+
+    @staticmethod
+    @jit(static_argnums=(2,))
+    def compute_force_imbalance(B: Array, p: Array, geometry: "Geometry") -> Array:
+        """Compute J x B - grad(p).
+
+        Args:
+            B: Magnetic field, shape (nx, ny, nz, 3)
+            p: Pressure, shape (nx, ny, nz)
+            geometry: 3D Cartesian geometry
+
+        Returns:
+            Force imbalance vector field, shape (nx, ny, nz, 3)
+        """
+        # Current density: J = curl(B) / mu_0
+        J = curl_3d(B, geometry) / MU0
+
+        # J x B cross product
+        J_cross_B = jnp.stack([
+            J[..., 1] * B[..., 2] - J[..., 2] * B[..., 1],
+            J[..., 2] * B[..., 0] - J[..., 0] * B[..., 2],
+            J[..., 0] * B[..., 1] - J[..., 1] * B[..., 0],
+        ], axis=-1)
+
+        # Pressure gradient
+        grad_p = gradient_3d(p, geometry)
+
+        return J_cross_B - grad_p
