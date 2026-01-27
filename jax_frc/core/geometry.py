@@ -1,76 +1,96 @@
-"""Computational geometry and coordinate systems."""
+"""3D Cartesian geometry for plasma simulations."""
 
 from dataclasses import dataclass
 from typing import Literal
 import jax.numpy as jnp
 from jax import Array
 
+
 @dataclass(frozen=True)
 class Geometry:
-    """Defines the computational domain and coordinate system."""
+    """3D Cartesian computational geometry.
 
-    coord_system: Literal["cylindrical", "cartesian"]
-    nr: int
+    Attributes:
+        nx, ny, nz: Number of grid cells in each direction
+        x_min, x_max: Domain bounds in x
+        y_min, y_max: Domain bounds in y
+        z_min, z_max: Domain bounds in z
+        bc_x, bc_y, bc_z: Boundary condition type per axis
+    """
+    nx: int
+    ny: int
     nz: int
-    r_min: float
-    r_max: float
-    z_min: float
-    z_max: float
-
-    def __post_init__(self):
-        # Validate inputs
-        if self.r_min <= 0 and self.coord_system == "cylindrical":
-            raise ValueError("r_min must be > 0 for cylindrical coordinates")
-        if self.nr < 2 or self.nz < 2:
-            raise ValueError("Grid must have at least 2 points in each dimension")
+    x_min: float = -1.0
+    x_max: float = 1.0
+    y_min: float = -1.0
+    y_max: float = 1.0
+    z_min: float = -1.0
+    z_max: float = 1.0
+    bc_x: Literal["periodic", "dirichlet", "neumann"] = "periodic"
+    bc_y: Literal["periodic", "dirichlet", "neumann"] = "periodic"
+    bc_z: Literal["periodic", "dirichlet", "neumann"] = "dirichlet"
 
     @property
-    def r(self) -> Array:
-        """1D array of radial coordinates."""
-        return jnp.linspace(self.r_min, self.r_max, self.nr)
+    def dx(self) -> float:
+        """Grid spacing in x."""
+        return (self.x_max - self.x_min) / self.nx
 
     @property
-    def z(self) -> Array:
-        """1D array of axial coordinates."""
-        return jnp.linspace(self.z_min, self.z_max, self.nz)
-
-    @property
-    def dr(self) -> float:
-        """Radial grid spacing."""
-        return (self.r_max - self.r_min) / (self.nr - 1)
+    def dy(self) -> float:
+        """Grid spacing in y."""
+        return (self.y_max - self.y_min) / self.ny
 
     @property
     def dz(self) -> float:
-        """Axial grid spacing."""
-        return (self.z_max - self.z_min) / (self.nz - 1)
+        """Grid spacing in z."""
+        return (self.z_max - self.z_min) / self.nz
 
     @property
-    def r_grid(self) -> Array:
-        """2D array of radial coordinates (nr, nz)."""
-        return self.r[:, None] * jnp.ones((1, self.nz))
+    def x(self) -> Array:
+        """1D array of cell-centered x coordinates."""
+        return jnp.linspace(
+            self.x_min + self.dx / 2,
+            self.x_max - self.dx / 2,
+            self.nx
+        )
+
+    @property
+    def y(self) -> Array:
+        """1D array of cell-centered y coordinates."""
+        return jnp.linspace(
+            self.y_min + self.dy / 2,
+            self.y_max - self.dy / 2,
+            self.ny
+        )
+
+    @property
+    def z(self) -> Array:
+        """1D array of cell-centered z coordinates."""
+        return jnp.linspace(
+            self.z_min + self.dz / 2,
+            self.z_max - self.dz / 2,
+            self.nz
+        )
+
+    @property
+    def x_grid(self) -> Array:
+        """3D array of x coordinates, shape (nx, ny, nz)."""
+        x, y, z = jnp.meshgrid(self.x, self.y, self.z, indexing='ij')
+        return x
+
+    @property
+    def y_grid(self) -> Array:
+        """3D array of y coordinates, shape (nx, ny, nz)."""
+        x, y, z = jnp.meshgrid(self.x, self.y, self.z, indexing='ij')
+        return y
 
     @property
     def z_grid(self) -> Array:
-        """2D array of axial coordinates (nr, nz)."""
-        return jnp.ones((self.nr, 1)) * self.z[None, :]
+        """3D array of z coordinates, shape (nx, ny, nz)."""
+        x, y, z = jnp.meshgrid(self.x, self.y, self.z, indexing='ij')
+        return z
 
     @property
     def cell_volumes(self) -> Array:
-        """2D array of cell volumes including 2*pi*r factor for cylindrical."""
-        if self.coord_system == "cylindrical":
-            return 2 * jnp.pi * self.r_grid * self.dr * self.dz
-        else:
-            return jnp.ones((self.nr, self.nz)) * self.dr * self.dz
-
-    @classmethod
-    def from_config(cls, config: dict) -> "Geometry":
-        """Create Geometry from configuration dictionary."""
-        return cls(
-            coord_system=config["coord_system"],
-            nr=int(config["nr"]),
-            nz=int(config["nz"]),
-            r_min=float(config["r_min"]),
-            r_max=float(config["r_max"]),
-            z_min=float(config["z_min"]),
-            z_max=float(config["z_max"]),
-        )
+        """Cell volumes, shape (nx, ny, nz). Simply dx * dy * dz."""
+        return jnp.full((self.nx, self.ny, self.nz), self.dx * self.dy * self.dz)
