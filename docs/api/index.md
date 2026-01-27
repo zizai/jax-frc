@@ -53,7 +53,6 @@ jax_frc/
 │   ├── metrics.py         # Error metrics (L2, Linf, RMSE)
 │   ├── references.py      # Reference data management
 │   ├── result.py          # ValidationResult container
-│   └── runner.py          # ValidationRunner orchestrator
 ├── equilibrium/
 │   ├── base.py            # Equilibrium base class
 │   ├── grad_shafranov.py  # Grad-Shafranov solver
