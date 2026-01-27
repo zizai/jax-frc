@@ -11,7 +11,6 @@ from jax_frc.models.hybrid_kinetic import HybridKinetic, RigidRotorEquilibrium
 from jax_frc.models.coupled import CoupledModel, CoupledModelConfig
 from jax_frc.models.neutral_fluid import NeutralFluid
 from jax_frc.models.atomic_coupling import AtomicCoupling
-from jax_frc.models.resistivity import SpitzerResistivity
 from .base import AbstractConfiguration
 
 
@@ -106,8 +105,7 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
     def build_model(self):
         """Build physics model with resistivity configured for diffusion test."""
         if self.model_type == "resistive_mhd":
-            resistivity = SpitzerResistivity(eta_0=self.eta)
-            return ResistiveMHD(resistivity=resistivity)
+            return ResistiveMHD(eta=self.eta)
 
         elif self.model_type == "extended_mhd":
             return ExtendedMHD(
@@ -117,8 +115,7 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
             )
 
         elif self.model_type == "plasma_neutral":
-            resistivity = SpitzerResistivity(eta_0=self.eta)
-            plasma_model = ResistiveMHD(resistivity=resistivity)
+            plasma_model = ResistiveMHD(eta=self.eta)
             neutral_model = NeutralFluid()
             coupling = AtomicCoupling()
             return CoupledModel(
