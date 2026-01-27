@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+import jax.numpy as jnp
 import yaml
 
 from jax_frc.configurations import CONFIGURATION_REGISTRY
@@ -121,16 +122,76 @@ class ValidationRunner:
         logger.info(f"Validation complete: {'PASS' if result.overall_pass else 'FAIL'}")
         return result
 
+    def _extract_field(self, state, field_spec: str) -> jnp.ndarray:
+        """Extract field from state. Handles 'T', 'n', 'B_r', 'B_z', etc."""
+        if '_' in field_spec:
+            # Vector component: B_r -> B[:,:,0], B_z -> B[:,:,2]
+            field_name, comp = field_spec.rsplit('_', 1)
+            comp_idx = {'r': 0, 'theta': 1, 'z': 2}[comp]
+            return getattr(state, field_name)[:, :, comp_idx]
+        return getattr(state, field_spec)
+
+    def _collect_params(self, state, geometry, configuration, variables: list) -> dict:
+        """Collect parameters needed for analytic formula evaluation."""
+        params = {}
+        for var in variables:
+            if var == 't':
+                params['t'] = state.time
+            elif var == 'z':
+                params['z'] = geometry.z_grid
+            elif var == 'r':
+                params['r'] = geometry.r_grid
+            elif hasattr(configuration, var):
+                params[var] = getattr(configuration, var)
+        return params
+
     def _compute_metrics(self, state, geometry, configuration) -> dict:
         """Compute all acceptance metrics."""
         metrics = {}
         acceptance = self.config.get('acceptance', {})
+        ref_config = self.config.get('reference', {})
+
+        # Load analytic reference if specified
+        reference_array = None
+        if ref_config.get('type') == 'analytic':
+            variables = ref_config.get('variables', [])
+            params = self._collect_params(state, geometry, configuration, variables)
+            ref_data = self.reference_mgr.load(ref_config, params)
+            reference_array = ref_data.data['result']
 
         for spec in acceptance.get('quantitative', []):
             metric_name = spec['metric']
 
-            if 'expected' in spec and 'tolerance' in spec:
-                # Direct value check
+            # Comparison metrics: l2_error, linf_error, rmse_curve
+            if metric_name in ('l2_error', 'linf_error', 'rmse_curve'):
+                field_name = spec.get('field')
+                threshold = spec.get('threshold')
+
+                if field_name and reference_array is not None:
+                    actual = self._extract_field(state, field_name)
+                    metric_fn = METRIC_FUNCTIONS[metric_name]
+                    value = metric_fn(actual, reference_array)
+                    passed = value <= threshold if threshold else True
+                    metrics[metric_name] = MetricResult(
+                        name=metric_name,
+                        value=value,
+                        threshold=threshold,
+                        passed=passed,
+                        message="" if passed else f"{metric_name}={value:.4g} > {threshold}"
+                    )
+
+            # State checks: no_numerical_instability
+            elif metric_name == 'no_numerical_instability':
+                has_nan = bool(jnp.any(jnp.isnan(state.T)) or jnp.any(jnp.isinf(state.T)))
+                metrics[metric_name] = MetricResult(
+                    name=metric_name,
+                    value=0.0 if not has_nan else 1.0,
+                    passed=not has_nan,
+                    message="" if not has_nan else "NaN/Inf detected"
+                )
+
+            # Direct tolerance check (existing pattern)
+            elif 'expected' in spec and 'tolerance' in spec:
                 value = spec.get('value', 0.0)
                 result = check_tolerance(value, spec['expected'], spec['tolerance'])
                 metrics[metric_name] = MetricResult(

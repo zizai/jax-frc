@@ -170,3 +170,7 @@ METRIC_FUNCTIONS = {
     'peak_reconnection_rate': peak_reconnection_rate,
     'current_layer_thickness': current_layer_thickness,
 }
+
+# Metric categories by signature
+COMPARISON_METRICS = {'l2_error', 'linf_error', 'rmse_curve'}
+STATE_CHECK_METRICS = {'no_numerical_instability', 'energy_bounded', 'flux_conservation'}
