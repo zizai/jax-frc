@@ -22,11 +22,23 @@ Extreme (Days/Weeks)
 
 ## Equations
 
-```
-dv_i/dt = (q/m_i)(E + v_i×B)
-E = (J_total×B - J_i,kinetic×B)/(ne) - ∇p_e/(ne) + ηJ
-dw/dt = -(1-w)d ln f₀/dt
-```
+Ion equation of motion:
+
+$$
+\frac{d\mathbf{v}_i}{dt} = \frac{q}{m_i}(\mathbf{E} + \mathbf{v}_i \times \mathbf{B})
+$$
+
+Electric field closure:
+
+$$
+\mathbf{E} = \frac{(\mathbf{J}_{\rm total} - \mathbf{J}_{i,\rm kinetic}) \times \mathbf{B}}{ne} - \frac{\nabla p_e}{ne} + \eta \mathbf{J}
+$$
+
+Weight evolution:
+
+$$
+\frac{dw}{dt} = -(1-w)\frac{d \ln f_0}{dt}
+$$
 
 ## Usage
 
@@ -84,8 +96,8 @@ The `weight_evolution()` function evolves particle weights according to the delt
 
 Analytical equilibrium distribution for FRCs:
 
-```
-f₀ = n₀(m/(2πT))^(3/2) exp(-m/(2T)(v_r² + (v_θ-Ωr)² + v_z²))
-```
+$$
+f_0 = n_0 \left(\frac{m}{2\pi T}\right)^{3/2} \exp\left(-\frac{m}{2T}(v_r^2 + (v_\theta - \Omega r)^2 + v_z^2)\right)
+$$
 
 See [Physics Concepts](../reference/physics.md) for more details.

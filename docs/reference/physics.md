@@ -4,34 +4,35 @@ Background on the physics implemented in JAX-FRC.
 
 ## Flux Function Formulation
 
-In resistive MHD, we solve for the poloidal flux ψ(r,z) instead of the full magnetic field vector. This reduces the problem to 2D axisymmetric geometry.
+In resistive MHD, we solve for the poloidal flux $\psi(r,z)$ instead of the full magnetic field vector. This reduces the problem to 2D axisymmetric geometry.
 
 The magnetic field is recovered from:
-```
-B_r = -(1/r) ∂ψ/∂z
-B_z = (1/r) ∂ψ/∂r
-```
+
+$$
+B_r = -\frac{1}{r} \frac{\partial \psi}{\partial z}, \quad
+B_z = \frac{1}{r} \frac{\partial \psi}{\partial r}
+$$
 
 ## Chodura Resistivity
 
 Anomalous resistivity model for FRC formation that mimics micro-turbulence effects at the plasma boundary:
 
-```
-η = η_0 + η_anom * f(j/j_crit)
-```
+$$
+\eta = \eta_0 + \eta_{\rm anom} \cdot f(j/j_{\rm crit})
+$$
 
 Where:
-- `η_0` is the classical Spitzer resistivity
-- `η_anom` is the anomalous enhancement
-- `f` is a threshold function that activates at high current density
+- $\eta_0$ is the classical Spitzer resistivity
+- $\eta_{\rm anom}$ is the anomalous enhancement
+- $f$ is a threshold function that activates at high current density
 
 ## Hall Term
 
 Two-fluid effect that separates electron and ion motion:
 
-```
-E_Hall = (J × B) / (n e)
-```
+$$
+\mathbf{E}_{\rm Hall} = \frac{\mathbf{J} \times \mathbf{B}}{n e}
+$$
 
 This term is crucial for capturing kinetic stabilization in FRCs. Without it, MHD codes predict instabilities that don't occur in experiments.
 
@@ -39,9 +40,9 @@ This term is crucial for capturing kinetic stabilization in FRCs. Without it, MH
 
 Numerical technique to handle stiff Whistler waves in extended MHD without requiring extremely small time steps:
 
-```
-(I - Δt² L_Hall) ΔB^{n+1} = Explicit terms
-```
+$$
+(I - \Delta t^2 L_{\rm Hall}) \Delta \mathbf{B}^{n+1} = \text{Explicit terms}
+$$
 
 The Hall term is treated implicitly, allowing the Alfven CFL condition to determine the timestep rather than the much more restrictive Whistler CFL.
 
@@ -49,29 +50,30 @@ The Hall term is treated implicitly, allowing the Alfven CFL condition to determ
 
 Particle-in-Cell method that simulates deviations from an equilibrium distribution:
 
-```
-f(x,v,t) = f_0(x,v) + δf(x,v,t)
-```
+$$
+f(x,v,t) = f_0(x,v) + \delta f(x,v,t)
+$$
 
-Particles carry weights `w` representing δf/f. This reduces noise by a factor of 1/δf compared to full-f PIC.
+Particles carry weights $w$ representing $\delta f/f$. This reduces noise by a factor of $1/\delta f$ compared to full-f PIC.
 
 Weight evolution:
-```
-dw/dt = -(1-w) d ln f_0 / dt
-```
+
+$$
+\frac{dw}{dt} = -(1-w) \frac{d \ln f_0}{dt}
+$$
 
 ## Rigid Rotor Equilibrium
 
 Analytical equilibrium distribution for FRCs:
 
-```
-f_0 = n_0 (m/(2πT))^(3/2) exp(-m/(2T)(v_r² + (v_θ - Ωr)² + v_z²))
-```
+$$
+f_0 = n_0 \left(\frac{m}{2\pi T}\right)^{3/2} \exp\left(-\frac{m}{2T}(v_r^2 + (v_\theta - \Omega r)^2 + v_z^2)\right)
+$$
 
 Where:
-- `n_0` is the peak density
-- `T` is the temperature
-- `Ω` is the rotation frequency
+- $n_0$ is the peak density
+- $T$ is the temperature
+- $\Omega$ is the rotation frequency
 
 This distribution is used as the background for delta-f simulations.
 
@@ -88,21 +90,25 @@ KB = 1.381e-23    # Boltzmann constant [J/K]
 ## Characteristic Scales
 
 ### Alfven Speed
-```
-v_A = B / √(μ_0 ρ)
-```
+
+$$
+v_A = \frac{B}{\sqrt{\mu_0 \rho}}
+$$
 
 ### Ion Cyclotron Frequency
-```
-Ω_ci = q B / m_i
-```
+
+$$
+\Omega_{ci} = \frac{q B}{m_i}
+$$
 
 ### Ion Skin Depth
-```
-d_i = c / ω_pi = √(m_i / (μ_0 n q²))
-```
+
+$$
+d_i = \frac{c}{\omega_{pi}} = \sqrt{\frac{m_i}{\mu_0 n q^2}}
+$$
 
 ### Plasma Beta
-```
-β = 2 μ_0 n k_B T / B²
-```
+
+$$
+\beta = \frac{2 \mu_0 n k_B T}{B^2}
+$$

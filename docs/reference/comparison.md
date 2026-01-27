@@ -6,7 +6,7 @@ Detailed comparison of the three physics models.
 
 | Feature | Resistive MHD | Extended MHD | Hybrid Kinetic |
 |---------|---------------|--------------|----------------|
-| **Primary Equations** | E + v×B = ηJ | E + v×B = ηJ + (J×B)/(ne) | E ← Fluid; Ions ← Particles |
+| **Primary Equations** | $\mathbf{E} + \mathbf{v} \times \mathbf{B} = \eta \mathbf{J}$ | $\mathbf{E} + \mathbf{v} \times \mathbf{B} = \eta \mathbf{J} + \frac{\mathbf{J} \times \mathbf{B}}{ne}$ | $\mathbf{E} \leftarrow$ Fluid; Ions $\leftarrow$ Particles |
 | **Numerical Approach** | Flux Function / Finite Volume | Finite Element + Semi-Implicit | Delta-f PIC |
 | **Computational Cost** | Low (Minutes) | High (Hours/Days) | Extreme (Days/Weeks) |
 | **FRC Stability** | Fails (Predicts instability) | Good (Captures Hall effect) | Excellent (Captures FLR & Beams) |
@@ -25,11 +25,11 @@ Detailed comparison of the three physics models.
 
 ## Computational Requirements
 
-| Model | Typical Grid | Typical dt | Memory | Runtime |
+| Model | Typical Grid | Typical $\Delta t$ | Memory | Runtime |
 |-------|--------------|------------|--------|---------|
-| Resistive MHD | 64×128 | 1e-4 | ~100 MB | Minutes |
-| Extended MHD | 32×64 | 1e-6 | ~1 GB | Hours |
-| Hybrid Kinetic | 32×64 + 10k particles | 1e-8 | ~10 GB | Days |
+| Resistive MHD | 64×128 | $10^{-4}$ s | ~100 MB | Minutes |
+| Extended MHD | 32×64 | $10^{-6}$ s | ~1 GB | Hours |
+| Hybrid Kinetic | 32×64 + 10k particles | $10^{-8}$ s | ~10 GB | Days |
 
 ## Use Case Decision Tree
 
