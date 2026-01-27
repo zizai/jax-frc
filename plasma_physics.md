@@ -41,6 +41,7 @@ $$
 #### Step B: quasi-neutral single-fluid reduction
 
 Assume quasi-neutrality and define bulk variables:
+
 $$
 \rho \approx m_i n,\quad \mathbf{u}\approx \mathbf{u}_i,\quad
 \mathbf{J}=en(\mathbf{u}_i-\mathbf{u}_e).
@@ -55,6 +56,7 @@ $$
 #### Step D: momentum (sum ion+electron momentum)
 
 Electric forces cancel under quasi-neutrality; Lorentz remains:
+
 $$
 \boxed{
 \partial_t(\rho\mathbf{u})+\nabla\cdot(\rho\mathbf{u}\mathbf{u}+p\mathbf{I})
@@ -65,6 +67,7 @@ $$
 #### Step E: Ohm's law (resistive closure)
 
 Start from electron momentum, drop electron inertia and electron pressure terms (this is the key resistive-MHD simplification), and model collisional friction as $\eta\mathbf{J}$:
+
 $$
 \boxed{\mathbf{E}+\mathbf{u}\times\mathbf{B}=\eta \mathbf{J}}
 $$
@@ -80,15 +83,18 @@ $$
 #### Step G: energy (numerically robust form)
 
 Lamy Ridge is explicitly described as having an energy equation with non-adiabatic effects ([jspf.or.jp][1]), so the numerically stable "core" is conservative total energy:
+
 $$
 E=\frac{p}{\gamma-1}+\frac{1}{2}\rho u^2+\frac{B^2}{2\mu_0}
 $$
+
 $$
 \boxed{
 \partial_tE+\nabla\cdot\left[\left(E+p+\frac{B^2}{2\mu_0}\right)\mathbf{u}-\frac{(\mathbf{u}\cdot\mathbf{B})\mathbf{B}}{\mu_0}\right]
 =\eta J^2-\nabla\cdot\mathbf{q}-P_{\rm rad}-P_{\rm ion}+S_E
 }
 $$
+
 where $P_{\rm ion}$ represents ionization energy sinks, and $\mathbf{q}$ includes thermal conduction.
 
 ### 1.2 Neutral-fluid coupling (the "Lamy Ridge" differentiator)
@@ -96,22 +102,26 @@ where $P_{\rm ion}$ represents ionization energy sinks, and $\mathbf{q}$ include
 A minimal neutral subsystem consistent with the public description ([jspf.or.jp][1]):
 
 **Neutral mass**
+
 $$
 \partial_t \rho_n+\nabla\cdot(\rho_n\mathbf{u}_n)= -S_{\rm ion}+S_{\rm rec}
 $$
 
 **Neutral momentum**
+
 $$
 \partial_t(\rho_n\mathbf{u}_n)+\nabla\cdot(\rho_n\mathbf{u}_n\mathbf{u}_n+p_n\mathbf{I})
 = -\mathbf{R}_{\rm ion}-\mathbf{R}_{\rm cx}
 $$
 
 **Neutral energy**
+
 $$
 \partial_t E_n+\nabla\cdot(\cdots)= -Q_{\rm ion}-Q_{\rm cx}+\cdots
 $$
 
 Plasma gets the equal-and-opposite sources:
+
 $$
 S_\rho = +S_{\rm ion}-S_{\rm rec},\quad
 \mathbf{S}_m=+\mathbf{R}_{\rm ion}+\mathbf{R}_{\rm cx},\quad
@@ -168,6 +178,7 @@ $$
 #### Step B: divide by $(-en)$ and model friction
 
 Let $\mathbf{R}_{ei}/(en)=\eta\mathbf{J}$.
+
 $$
 \mathbf{E}+\mathbf{u}_e\times\mathbf{B}
 =-\frac{1}{en}\nabla\cdot\mathbf{P}_e+\eta\mathbf{J}
@@ -177,6 +188,7 @@ $$
 #### Step C: replace $\mathbf{u}_e$ using $\mathbf{J}=en(\mathbf{u}_i-\mathbf{u}_e)$
 
 With $\mathbf{u}\approx\mathbf{u}_i$, $\mathbf{u}_e=\mathbf{u}-\mathbf{J}/(en)$, so
+
 $$
 \mathbf{u}_e\times\mathbf{B}=\mathbf{u}\times\mathbf{B}-\frac{\mathbf{J}\times\mathbf{B}}{en}.
 $$
@@ -199,6 +211,7 @@ Common practical reductions (often used in extended-MHD codes):
 * electron inertia reduced to $(m_e/ne^2)\partial_t\mathbf{J}$ if retained.
 
 Then induction is still:
+
 $$
 \partial_t\mathbf{B}=-\nabla\times\mathbf{E},\qquad \mathbf{J}=\nabla\times\mathbf{B}/\mu_0.
 $$
@@ -266,7 +279,9 @@ $$
 = C[f_i]+S_i
 }
 $$
+
 Moments:
+
 $$
 n=\int f_i\,d^3v,\quad \mathbf{u}_i=\frac{1}{n}\int \mathbf{v} f_i\,d^3v.
 $$
@@ -276,7 +291,9 @@ $$
 $$
 0=-en(\mathbf{E}+\mathbf{u}_e\times\mathbf{B})-\nabla p_e+\eta\mathbf{J}.
 $$
+
 So
+
 $$
 \mathbf{E}=-\mathbf{u}_e\times\mathbf{B}-\frac{\nabla p_e}{en}+\eta\mathbf{J}.
 $$
@@ -286,6 +303,7 @@ $$
 $$
 \mathbf{u}_e=\mathbf{u}_i-\frac{\mathbf{J}}{en}
 $$
+
 $$
 \boxed{
 \mathbf{E}= -\mathbf{u}_i\times\mathbf{B}
