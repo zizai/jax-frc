@@ -230,11 +230,11 @@ def main() -> bool:
     print(f"  Completed in {t_sim:.2f}s")
     print()
 
-    # Extract z-axis profiles (take middle r-slice since physics is 1D in z)
-    z = geometry.z_grid[0, :]  # 1D z coordinates
-    n_sim = final_state.n[geometry.nr // 2, :]  # Density at mid-radius
-    n_init = initial_state.n[geometry.nr // 2, :]  # Initial density
-    Br_sim = final_state.B[geometry.nr // 2, :, 0]  # B_r at mid-radius
+    # Extract z-axis profiles (take middle x-slice since physics is 1D in z)
+    z = geometry.z_grid[0, 0, :]  # 1D z coordinates
+    n_sim = final_state.n[geometry.nx // 2, 0, :]  # Density at mid-x
+    n_init = initial_state.n[geometry.nx // 2, 0, :]  # Initial density
+    Br_sim = final_state.B[geometry.nx // 2, 0, :, 0]  # B_x at mid-x
 
     # Collect warnings
     warnings = []
@@ -353,7 +353,7 @@ def main() -> bool:
     report.add_plot(fig_density, name="density_profile")
 
     # Create B_r profile plot showing initial and final
-    Br_init = initial_state.B[geometry.nr // 2, :, 0]
+    Br_init = initial_state.B[geometry.nx // 2, 0, :, 0]
     fig_Br, ax_Br = plt.subplots(figsize=(10, 6))
     ax_Br.plot(z, Br_init, 'k--', linewidth=1, alpha=0.5, label='Initial')
     ax_Br.plot(z, Br_sim, 'b-', linewidth=1.5, label='Final')
