@@ -58,8 +58,8 @@ class ExtendedMHD(PhysicsModel):
     """Two-fluid extended MHD model with Hall effect and energy equation.
 
     Includes:
-    - Hall term: (J x B) / (ne)
-    - Electron pressure gradient: -grad(p_e) / (ne)
+    - Hall term: (J x B) / (ne) (optional, controlled by include_hall)
+    - Electron pressure gradient: -grad(p_e) / (ne) (optional, controlled by include_electron_pressure)
     - Semi-implicit stepping for Whistler wave stability
     - Optional temperature evolution with anisotropic thermal conduction
     """
@@ -69,6 +69,8 @@ class ExtendedMHD(PhysicsModel):
     thermal: Optional[ThermalTransport] = None  # None = no temperature evolution
     temperature_bc: Optional[TemperatureBoundaryCondition] = None  # None = default Neumann
     external_field: Optional[CoilField] = None  # External field from coils
+    include_hall: bool = True  # Include Hall term
+    include_electron_pressure: bool = True  # Include electron pressure gradient
 
     def get_total_B(self, state: State, geometry: Geometry, t: float = 0.0) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Get total B field including external field contribution.
@@ -126,7 +128,7 @@ class ExtendedMHD(PhysicsModel):
         )
 
         # Faraday's law: dB/dt = -curl(E)
-        dB_r, dB_phi, dB_z = self._compute_curl_E(E_r, E_phi, E_z, dr, dz)
+        dB_r, dB_phi, dB_z = self._compute_curl_E(E_r, E_phi, E_z, dr, dz, r)
         dB_r = -dB_r
         dB_phi = -dB_phi
         dB_z = -dB_z
@@ -302,6 +304,9 @@ class ExtendedMHD(PhysicsModel):
         """Compute E from extended Ohm's law.
 
         E = -v x B + eta*J + (J x B)/(ne) - grad(p_e)/(ne)
+
+        Hall and electron pressure terms are optional (controlled by include_hall
+        and include_electron_pressure flags).
         """
         v_r, v_phi, v_z = v[:, :, 0], v[:, :, 1], v[:, :, 2]
         B_r, B_phi, B_z = B[:, :, 0], B[:, :, 1], B[:, :, 2]
@@ -317,33 +322,41 @@ class ExtendedMHD(PhysicsModel):
         etaJ_phi = eta * J_phi
         etaJ_z = eta * J_z
 
-        # Term 3: (J x B) / (ne) - Hall term
-        JxB_r = J_phi * B_z - J_z * B_phi
-        JxB_phi = J_z * B_r - J_r * B_z
-        JxB_z = J_r * B_phi - J_phi * B_r
+        # Initialize E with resistive and advection terms
+        E_r = -vxB_r + etaJ_r
+        E_phi = -vxB_phi + etaJ_phi
+        E_z = -vxB_z + etaJ_z
 
-        ne = n * QE
-        hall_r = JxB_r / ne
-        hall_phi = JxB_phi / ne
-        hall_z = JxB_z / ne
+        # Term 3: (J x B) / (ne) - Hall term (optional)
+        if self.include_hall:
+            JxB_r = J_phi * B_z - J_z * B_phi
+            JxB_phi = J_z * B_r - J_r * B_z
+            JxB_z = J_r * B_phi - J_phi * B_r
 
-        # Term 4: -grad(p_e) / (ne) - Electron pressure
-        dp_dr = (jnp.roll(p_e, -1, axis=0) - jnp.roll(p_e, 1, axis=0)) / (2 * dr)
-        dp_dz = (jnp.roll(p_e, -1, axis=1) - jnp.roll(p_e, 1, axis=1)) / (2 * dz)
+            ne = n * QE
+            E_r = E_r + JxB_r / ne
+            E_phi = E_phi + JxB_phi / ne
+            E_z = E_z + JxB_z / ne
 
-        pe_r = -dp_dr / ne
-        pe_phi = jnp.zeros_like(p_e)  # No phi gradient (axisymmetric)
-        pe_z = -dp_dz / ne
+        # Term 4: -grad(p_e) / (ne) - Electron pressure (optional)
+        if self.include_electron_pressure:
+            dp_dr = (jnp.roll(p_e, -1, axis=0) - jnp.roll(p_e, 1, axis=0)) / (2 * dr)
+            dp_dz = (jnp.roll(p_e, -1, axis=1) - jnp.roll(p_e, 1, axis=1)) / (2 * dz)
 
-        # Sum all terms
-        E_r = -vxB_r + etaJ_r + hall_r + pe_r
-        E_phi = -vxB_phi + etaJ_phi + hall_phi + pe_phi
-        E_z = -vxB_z + etaJ_z + hall_z + pe_z
+            ne = n * QE
+            E_r = E_r - dp_dr / ne
+            E_z = E_z - dp_dz / ne
 
         return E_r, E_phi, E_z
 
-    def _compute_curl_E(self, E_r, E_phi, E_z, dr, dz):
-        """Compute curl(E) for Faraday's law."""
+    def _compute_curl_E(self, E_r, E_phi, E_z, dr, dz, r):
+        """Compute curl(E) for Faraday's law in cylindrical coordinates.
+
+        curl in cylindrical (r, phi, z) with axisymmetry (d/dphi = 0):
+            curl_r = -dE_phi/dz
+            curl_phi = dE_r/dz - dE_z/dr
+            curl_z = (1/r) * d(r*E_phi)/dr
+        """
         # curl_r = dE_z/dphi/r - dE_phi/dz ~ -dE_phi/dz (axisymmetric)
         dE_phi_dz = (jnp.roll(E_phi, -1, axis=1) - jnp.roll(E_phi, 1, axis=1)) / (2 * dz)
         curl_r = -dE_phi_dz
@@ -353,9 +366,11 @@ class ExtendedMHD(PhysicsModel):
         dE_z_dr = (jnp.roll(E_z, -1, axis=0) - jnp.roll(E_z, 1, axis=0)) / (2 * dr)
         curl_phi = dE_r_dz - dE_z_dr
 
-        # curl_z = (1/r)*d(r*E_phi)/dr ~ dE_phi/dr (simplified)
-        dE_phi_dr = (jnp.roll(E_phi, -1, axis=0) - jnp.roll(E_phi, 1, axis=0)) / (2 * dr)
-        curl_z = dE_phi_dr
+        # curl_z = (1/r) * d(r*E_phi)/dr
+        r_E_phi = r * E_phi
+        d_rEphi_dr = (jnp.roll(r_E_phi, -1, axis=0) - jnp.roll(r_E_phi, 1, axis=0)) / (2 * dr)
+        r_safe = jnp.where(r > 1e-10, r, 1.0)
+        curl_z = d_rEphi_dr / r_safe
 
         return curl_r, curl_phi, curl_z
 

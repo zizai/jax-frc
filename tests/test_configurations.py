@@ -71,14 +71,17 @@ def test_magnetic_diffusion_builds_initial_state():
 
 
 def test_magnetic_diffusion_builds_model():
-    """MagneticDiffusionConfiguration creates ResistiveMHD model."""
+    """MagneticDiffusionConfiguration creates ExtendedMHD model by default."""
     from jax_frc.configurations import MagneticDiffusionConfiguration
-    from jax_frc.models.resistive_mhd import ResistiveMHD
+    from jax_frc.models.extended_mhd import ExtendedMHD
 
     config = MagneticDiffusionConfiguration()
     model = config.build_model()
 
-    assert isinstance(model, ResistiveMHD)
+    assert isinstance(model, ExtendedMHD)
+    # Verify Hall and electron pressure are disabled for diffusion test
+    assert model.include_hall is False
+    assert model.include_electron_pressure is False
 
 
 # FrozenFluxConfiguration tests

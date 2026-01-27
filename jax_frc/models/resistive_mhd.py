@@ -101,8 +101,19 @@ class ResistiveMHD(PhysicsModel):
         dpsi_dz = (jnp.roll(psi, -1, axis=1) - jnp.roll(psi, 1, axis=1)) / (2 * dz)
         d_psi = d_psi - (v_r * dpsi_dr + v_z * dpsi_dz)
 
-        # Return state with d_psi as the RHS (stored in psi temporarily)
-        return state.replace(psi=d_psi)
+        # Return state with d_psi as the RHS, zeros for all other fields
+        return State(
+            psi=d_psi,
+            n=jnp.zeros_like(state.n),
+            p=jnp.zeros_like(state.p),
+            T=jnp.zeros_like(state.T),
+            B=jnp.zeros_like(state.B),
+            E=jnp.zeros_like(state.E),
+            v=jnp.zeros_like(state.v),
+            particles=None,
+            time=0.0,
+            step=0,
+        )
 
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
         """Diffusion CFL: dt < dx^2 / (4D) where D = eta_max/mu_0."""
@@ -157,7 +168,19 @@ class ResistiveMHD(PhysicsModel):
         # Advection: -v . grad(psi)
         advection = -(v_r * dpsi_dr + v_z * dpsi_dz)
 
-        return state.replace(psi=advection)
+        # Return state with zeros for all other fields
+        return State(
+            psi=advection,
+            n=jnp.zeros_like(state.n),
+            p=jnp.zeros_like(state.p),
+            T=jnp.zeros_like(state.T),
+            B=jnp.zeros_like(state.B),
+            E=jnp.zeros_like(state.E),
+            v=jnp.zeros_like(state.v),
+            particles=None,
+            time=0.0,
+            step=0,
+        )
 
     def implicit_rhs(self, state: State, geometry: Geometry, t: float = 0.0) -> State:
         """Diffusion term only: (eta/mu0) * Delta*psi.
@@ -178,7 +201,19 @@ class ResistiveMHD(PhysicsModel):
         # Diffusion: (eta/mu_0)*Delta*psi
         diffusion = (eta / MU0) * delta_star_psi
 
-        return state.replace(psi=diffusion)
+        # Return state with zeros for all other fields
+        return State(
+            psi=diffusion,
+            n=jnp.zeros_like(state.n),
+            p=jnp.zeros_like(state.p),
+            T=jnp.zeros_like(state.T),
+            B=jnp.zeros_like(state.B),
+            E=jnp.zeros_like(state.E),
+            v=jnp.zeros_like(state.v),
+            particles=None,
+            time=0.0,
+            step=0,
+        )
 
     def apply_implicit_operator(
         self, state: State, geometry: Geometry, dt: float, theta: float
