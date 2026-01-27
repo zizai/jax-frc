@@ -8,7 +8,7 @@ Each validation case is a standalone Python script:
 
 ```bash
 # Run a specific validation
-python validation/cases/analytic/diffusion_slab.py
+python validation/cases/analytic/magnetic_diffusion.py
 
 # Run with quick test mode (reduced resolution/time for testing)
 python validation/cases/frc/belova_case1.py --quick
@@ -24,7 +24,7 @@ Each script produces an HTML report in `validation/reports/` with:
 
 ### Analytic (`cases/analytic/`)
 Cases with exact analytic solutions for quantitative comparison:
-- **diffusion_slab.py** - 1D heat diffusion with Gaussian initial condition
+- **magnetic_diffusion.py** - 3D magnetic field diffusion with Gaussian initial condition
 
 ### FRC Merging (`cases/frc/`)
 FRC merging cases validated qualitatively (stability, conservation):
@@ -56,8 +56,8 @@ import jax.numpy as jnp
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from jax_frc.configurations.<module> import <Configuration>
-from jax_frc.solvers import Solver
+from jax_frc.configurations import MagneticDiffusionConfiguration
+from jax_frc.solvers.explicit import EulerSolver
 from validation.utils.reporting import ValidationReport
 from validation.utils.plotting import plot_comparison, plot_error
 
@@ -66,25 +66,36 @@ DESCRIPTION = "Brief description"
 
 def setup_configuration():
     """Define simulation parameters."""
-    return {...}
+    return MagneticDiffusionConfiguration(
+        nx=64, ny=4, nz=64,
+        extent=1.0,
+        sigma=0.1,
+        B_peak=1.0,
+    )
 
-def analytic_solution(x, t, cfg):  # For analytic cases
-    """Exact solution."""
-    return ...
-
-def run_simulation(cfg):
+def run_simulation(config):
     """Run simulation, return state and geometry."""
-    ...
+    geometry = config.build_geometry()
+    state = config.build_initial_state(geometry)
+    model = config.build_model()
+    solver = EulerSolver()
+
+    # Time stepping
+    dt = 0.3
+    for _ in range(100):
+        state = solver.step(state, dt, model, geometry)
+
     return state, geometry
 
 ACCEPTANCE = {
-    'metric_name': {'threshold': 0.1, 'description': '...'},
+    'l2_error': 0.05,
+    'max_error': 0.10,
 }
 
 def main():
     """Run validation and generate report."""
-    cfg = setup_configuration()
-    state, geometry = run_simulation(cfg)
+    config = setup_configuration()
+    state, geometry = run_simulation(config)
 
     # Compute metrics...
     # Check acceptance...
@@ -93,7 +104,7 @@ def main():
         name=NAME,
         description=DESCRIPTION,
         docstring=__doc__,
-        configuration=cfg,
+        configuration=vars(config),
         metrics=results,
         overall_pass=overall_pass,
     )
@@ -112,6 +123,14 @@ if __name__ == "__main__":
 4. For **qualitative cases**: Define stability/conservation checks and use time trace plots
 5. Run and verify report generation
 
+## Coordinate System
+
+All validation cases use 3D Cartesian coordinates:
+- Scalars: shape `(nx, ny, nz)`
+- Vectors: shape `(nx, ny, nz, 3)`
+
+For 2D-like tests, use a thin y dimension (`ny=4`) with periodic boundaries.
+
 ## Utilities
 
 The `validation/utils/` module provides:
@@ -119,8 +138,3 @@ The `validation/utils/` module provides:
 - **ValidationReport** - Generates HTML reports with embedded plots
 - **plot_comparison()** - Overlay plot of simulation vs expected
 - **plot_error()** - Error distribution plot
-
-## Migration from YAML
-
-The previous YAML-based validation system (`ValidationRunner`) is deprecated.
-Each YAML case should be converted to a standalone Python script following the templates above.

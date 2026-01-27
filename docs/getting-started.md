@@ -16,120 +16,150 @@ pip install jax[cuda]
 ### Programmatic Setup
 
 ```python
-from jax_frc import Simulation, Geometry, ResistiveMHD, RK4Solver, TimeController
+from jax_frc import Geometry
+from jax_frc.core import State
+from jax_frc.models.resistive_mhd import ResistiveMHD
+from jax_frc.solvers.explicit import EulerSolver
 import jax.numpy as jnp
 
-# Create geometry
+# Create 3D Cartesian geometry
 geometry = Geometry(
-    coord_system='cylindrical',
-    nr=32, nz=64,
-    r_min=0.01, r_max=1.0,
-    z_min=-1.0, z_max=1.0
+    nx=32, ny=32, nz=64,
+    x_min=-1.0, x_max=1.0,
+    y_min=-1.0, y_max=1.0,
+    z_min=-2.0, z_max=2.0,
+    bc_x="periodic",
+    bc_y="periodic",
+    bc_z="dirichlet",
 )
 
-# Create physics model
-model = ResistiveMHD.from_config({
-    'resistivity': {'type': 'chodura', 'eta_0': 1e-6, 'eta_anom': 1e-3}
-})
+# Create initial state with a Gaussian magnetic field
+x, y, z = geometry.x_grid, geometry.y_grid, geometry.z_grid
+r_sq = x**2 + y**2 + z**2
+B_z = jnp.exp(-r_sq / 0.1)
 
-# Create solver and time controller
-solver = RK4Solver()
-time_controller = TimeController(cfl_safety=0.25, dt_max=1e-4)
+B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+B = B.at[:, :, :, 2].set(B_z)
 
-# Create and run simulation
-sim = Simulation(geometry=geometry, model=model, solver=solver, time_controller=time_controller)
-sim.initialize(psi_init=lambda r, z: (1 - r**2) * jnp.exp(-z**2))
+state = State(
+    B=B,
+    E=jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3)),
+    n=jnp.ones((geometry.nx, geometry.ny, geometry.nz)) * 1e20,
+    p=jnp.ones((geometry.nx, geometry.ny, geometry.nz)) * 1e4,
+)
 
-# Run for 100 steps
-final_state = sim.run_steps(100)
+# Create physics model and solver
+model = ResistiveMHD()
+solver = EulerSolver()
+
+# Time stepping
+dt = 1e-6
+for _ in range(100):
+    state = solver.step(state, dt, model, geometry)
+
+print(f"Final B_z max: {state.B[:, :, :, 2].max():.4f}")
 ```
 
 ### Configuration-Based Setup
 
-```python
-from jax_frc import Simulation
+Use predefined configurations for common validation cases:
 
-# Load from YAML configuration
-sim = Simulation.from_config("configs/example_frc.yaml")
-sim.initialize(psi_init=lambda r, z: jnp.exp(-r**2 - z**2))
-final_state = sim.run_steps(100)
+```python
+from jax_frc.configurations import MagneticDiffusionConfiguration
+from jax_frc.solvers.explicit import EulerSolver
+
+# Create configuration
+config = MagneticDiffusionConfiguration(
+    nx=64, ny=4, nz=64,  # Thin in y for 2D-like behavior
+    extent=1.0,
+    sigma=0.1,
+    B_peak=1.0,
+)
+
+# Build components
+geometry = config.build_geometry()
+state = config.build_initial_state(geometry)
+model = config.build_model()
+solver = EulerSolver()
+
+# Run simulation
+dt = 0.3
+for _ in range(100):
+    state = solver.step(state, dt, model, geometry)
 ```
 
-## Running Examples
+## Running Tests
 
-Run all examples:
 ```bash
-python examples.py
+# Run all tests
+py -m pytest tests/ -v
+
+# Run fast tests only
+py -m pytest tests/ -k "not slow" -v
+
+# Run specific 3D tests
+py -m pytest tests/test_diffusion_3d.py -v
 ```
 
-## Individual Model Usage
+## Running Validation Cases
 
-### Resistive MHD
+Validation cases are standalone Python scripts:
+
+```bash
+# Run magnetic diffusion validation
+python validation/cases/analytic/magnetic_diffusion.py
+
+# Each script produces an HTML report in validation/reports/
+```
+
+## Running Notebooks
+
+Interactive Jupyter notebooks demonstrate physics concepts:
+
+```bash
+jupyter notebook notebooks/magnetic_diffusion.ipynb
+```
+
+## Key Concepts
+
+### 3D Cartesian Coordinates
+
+All simulations use 3D Cartesian coordinates (x, y, z):
+- Scalars have shape `(nx, ny, nz)`
+- Vectors have shape `(nx, ny, nz, 3)` with components `[Fx, Fy, Fz]`
+
+For 2D-like simulations (e.g., diffusion in x-z plane), use a thin y dimension:
 ```python
-from resistive_mhd import run_simulation
-
-final_psi, final_I_coil, history = run_simulation(
-    steps=500,
-    nr=64,
-    nz=128,
-    V_bank=1000.0,
-    L_coil=1e-6,
-    M_plasma_coil=1e-7
-)
+geometry = Geometry(nx=64, ny=4, nz=64, bc_y="periodic")
 ```
 
-### Extended MHD
-```python
-from extended_mhd import run_simulation
+### Boundary Conditions
 
-b_final, history = run_simulation(
-    steps=100,
-    nx=32,
-    ny=32,
-    dt=1e-6,
-    eta=1e-4
-)
-```
+Each axis can have different boundary conditions:
+- `"periodic"` - Wrap-around boundaries
+- `"dirichlet"` - Fixed value at boundary
+- `"neumann"` - Zero gradient at boundary
 
-### Hybrid Kinetic
-```python
-from hybrid_kinetic import run_simulation
+### State Fields
 
-x_final, v_final, w_final, history = run_simulation(
-    steps=100,
-    n_particles=10000,
-    nr=32,
-    nz=64,
-    dt=1e-8,
-    eta=1e-4
-)
-```
+The `State` class holds all field quantities:
+- `B`: Magnetic field [T]
+- `E`: Electric field [V/m]
+- `n`: Number density [m^-3]
+- `p`: Pressure [Pa]
+- `v`: Velocity [m/s] (optional)
+- `Te`, `Ti`: Electron/ion temperature [J] (optional)
 
 ## Physics Utilities
 
 ```python
-from physics_utils import (
-    compute_alfven_speed,
-    compute_cyclotron_frequency,
-    compute_larmor_radius,
-    compute_skin_depth,
-    compute_beta
-)
+from jax_frc.constants import MU0, PROTON_MASS
+import jax.numpy as jnp
 
-# Calculate plasma parameters
-v_A = compute_alfven_speed(B=1.0, n=1e19)
-omega_c = compute_cyclotron_frequency(B=1.0)
-r_L = compute_larmor_radius(v_perp=1e5, B=1.0)
-d_i = compute_skin_depth(n=1e19)
-beta = compute_beta(n=1e19, T=100.0, B=1.0)
-```
-
-## Migration from Old Scripts
-
-Use the migration script to run old-style simulations with the new framework:
-
-```bash
-python scripts/migrate_old_sims.py --model resistive_mhd --steps 100
-python scripts/migrate_old_sims.py --model extended_mhd --steps 50
-python scripts/migrate_old_sims.py --model hybrid_kinetic --steps 100 --particles 1000
+# Alfvén speed: v_A = B / sqrt(mu_0 * rho)
+B = 1.0  # Tesla
+n = 1e20  # m^-3
+rho = n * PROTON_MASS
+v_A = B / jnp.sqrt(MU0 * rho)
+print(f"Alfvén speed: {v_A:.2e} m/s")
 ```
