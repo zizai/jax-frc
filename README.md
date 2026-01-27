@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/your-username/jax-frc/actions/workflows/tests.yml/badge.svg)](https://github.com/your-username/jax-frc/actions)
 
-A JAX-based GPU-accelerated implementation of plasma physics models for Field-Reversed Configuration (FRC) research.
+GPU-accelerated JAX-based multi-physics simulation. Design, build, control production-level FRC fusion reactor.
 
 ## Key Features
 

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-JAX-based plasma physics simulation for FRC research. GPU-accelerated, uses JAX's functional patterns throughout.
+GPU-accelerated JAX-based multi-physics simulation. Design, build, control production-level FRC fusion reactor.
 
 ## Commands
 
