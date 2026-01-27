@@ -51,7 +51,7 @@ class AtomicCoupling:
         # Extract from plasma
         n_e = plasma.n
         n_i = n_e  # Quasi-neutrality
-        T_e = plasma.T
+        T_e = plasma.Te
         v_i = plasma.v
 
         # Extract from neutrals

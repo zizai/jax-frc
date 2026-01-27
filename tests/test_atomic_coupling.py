@@ -14,25 +14,26 @@ def test_compute_sources_returns_opposite_mass_rates():
     coupling = AtomicCoupling(config)
 
     geometry = Geometry(
-        coord_system="cylindrical",
-        nr=8, nz=8,
-        r_min=0.01, r_max=0.5,
+        nx=8, ny=8, nz=8,
+        x_min=-0.5, x_max=0.5,
+        y_min=-0.5, y_max=0.5,
         z_min=-0.5, z_max=0.5
     )
 
-    plasma = State.zeros(8, 8)
+    plasma = State.zeros(8, 8, 8)
     n_e = 1e19
     T_e = 100 * QE
     plasma = plasma.replace(
-        n=jnp.ones((8, 8)) * n_e,
-        T=jnp.ones((8, 8)) * T_e,
-        p=jnp.ones((8, 8)) * n_e * T_e * 2
+        n=jnp.ones((8, 8, 8)) * n_e,
+        Te=jnp.ones((8, 8, 8)) * T_e,
+        p=jnp.ones((8, 8, 8)) * n_e * T_e * 2,
+        v=jnp.zeros((8, 8, 8, 3))
     )
 
     neutral = NeutralState(
-        rho_n=jnp.ones((8, 8)) * 1e-6,
-        mom_n=jnp.zeros((8, 8, 3)),
-        E_n=jnp.ones((8, 8)) * 100.0
+        rho_n=jnp.ones((8, 8, 8)) * 1e-6,
+        mom_n=jnp.zeros((8, 8, 8, 3)),
+        E_n=jnp.ones((8, 8, 8)) * 100.0
     )
 
     plasma_src, neutral_src = coupling.compute_sources(plasma, neutral, geometry)
@@ -48,24 +49,24 @@ def test_compute_sources_momentum_conservation():
     coupling = AtomicCoupling(config)
 
     geometry = Geometry(
-        coord_system="cylindrical",
-        nr=8, nz=8,
-        r_min=0.01, r_max=0.5,
+        nx=8, ny=8, nz=8,
+        x_min=-0.5, x_max=0.5,
+        y_min=-0.5, y_max=0.5,
         z_min=-0.5, z_max=0.5
     )
 
-    plasma = State.zeros(8, 8)
+    plasma = State.zeros(8, 8, 8)
     plasma = plasma.replace(
-        n=jnp.ones((8, 8)) * 1e19,
-        T=jnp.ones((8, 8)) * 100 * QE,
-        p=jnp.ones((8, 8)) * 1e19 * 100 * QE * 2,
-        v=jnp.zeros((8, 8, 3))
+        n=jnp.ones((8, 8, 8)) * 1e19,
+        Te=jnp.ones((8, 8, 8)) * 100 * QE,
+        p=jnp.ones((8, 8, 8)) * 1e19 * 100 * QE * 2,
+        v=jnp.zeros((8, 8, 8, 3))
     )
 
     neutral = NeutralState(
-        rho_n=jnp.ones((8, 8)) * 1e-6,
-        mom_n=jnp.zeros((8, 8, 3)).at[:, :, 2].set(1e-6 * 1000),
-        E_n=jnp.ones((8, 8)) * 100.0
+        rho_n=jnp.ones((8, 8, 8)) * 1e-6,
+        mom_n=jnp.zeros((8, 8, 8, 3)).at[:, :, :, 2].set(1e-6 * 1000),
+        E_n=jnp.ones((8, 8, 8)) * 100.0
     )
 
     plasma_src, neutral_src = coupling.compute_sources(plasma, neutral, geometry)
@@ -85,24 +86,24 @@ def test_compute_sources_with_radiation():
     coupling = AtomicCoupling(config_with_rad)
 
     geometry = Geometry(
-        coord_system="cylindrical",
-        nr=8, nz=8,
-        r_min=0.01, r_max=0.5,
+        nx=8, ny=8, nz=8,
+        x_min=-0.5, x_max=0.5,
+        y_min=-0.5, y_max=0.5,
         z_min=-0.5, z_max=0.5
     )
 
-    plasma = State.zeros(8, 8)
+    plasma = State.zeros(8, 8, 8)
     plasma = plasma.replace(
-        n=jnp.ones((8, 8)) * 1e19,
-        T=jnp.ones((8, 8)) * 100 * QE,
-        p=jnp.ones((8, 8)) * 1e19 * 100 * QE * 2,
-        v=jnp.zeros((8, 8, 3))
+        n=jnp.ones((8, 8, 8)) * 1e19,
+        Te=jnp.ones((8, 8, 8)) * 100 * QE,
+        p=jnp.ones((8, 8, 8)) * 1e19 * 100 * QE * 2,
+        v=jnp.zeros((8, 8, 8, 3))
     )
 
     neutral = NeutralState(
-        rho_n=jnp.ones((8, 8)) * 1e-6,
-        mom_n=jnp.zeros((8, 8, 3)),
-        E_n=jnp.ones((8, 8)) * 100.0
+        rho_n=jnp.ones((8, 8, 8)) * 1e-6,
+        mom_n=jnp.zeros((8, 8, 8, 3)),
+        E_n=jnp.ones((8, 8, 8)) * 100.0
     )
 
     plasma_src, neutral_src = coupling.compute_sources(plasma, neutral, geometry)
@@ -126,26 +127,26 @@ def test_ionization_dominates_at_high_temperature():
     coupling = AtomicCoupling(config)
 
     geometry = Geometry(
-        coord_system="cylindrical",
-        nr=8, nz=8,
-        r_min=0.01, r_max=0.5,
+        nx=8, ny=8, nz=8,
+        x_min=-0.5, x_max=0.5,
+        y_min=-0.5, y_max=0.5,
         z_min=-0.5, z_max=0.5
     )
 
     # High temperature plasma (1 keV)
-    plasma = State.zeros(8, 8)
+    plasma = State.zeros(8, 8, 8)
     plasma = plasma.replace(
-        n=jnp.ones((8, 8)) * 1e19,
-        T=jnp.ones((8, 8)) * 1000 * QE,  # 1 keV
-        p=jnp.ones((8, 8)) * 1e19 * 1000 * QE * 2,
-        v=jnp.zeros((8, 8, 3))
+        n=jnp.ones((8, 8, 8)) * 1e19,
+        Te=jnp.ones((8, 8, 8)) * 1000 * QE,  # 1 keV
+        p=jnp.ones((8, 8, 8)) * 1e19 * 1000 * QE * 2,
+        v=jnp.zeros((8, 8, 8, 3))
     )
 
     # Significant neutral density
     neutral = NeutralState(
-        rho_n=jnp.ones((8, 8)) * 1e-5,
-        mom_n=jnp.zeros((8, 8, 3)),
-        E_n=jnp.ones((8, 8)) * 100.0
+        rho_n=jnp.ones((8, 8, 8)) * 1e-5,
+        mom_n=jnp.zeros((8, 8, 8, 3)),
+        E_n=jnp.ones((8, 8, 8)) * 100.0
     )
 
     plasma_src, neutral_src = coupling.compute_sources(plasma, neutral, geometry)

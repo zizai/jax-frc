@@ -5,9 +5,12 @@ Includes both Cartesian (periodic) and cylindrical (non-periodic) operators.
 Cylindrical operators handle the 1/r singularity at the axis using L'Hopital's rule.
 """
 
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 import jax.numpy as jnp
 from jax import jit
+
+if TYPE_CHECKING:
+    from jax_frc.core.geometry import Geometry
 
 Array = jnp.ndarray
 
@@ -230,11 +233,10 @@ def gradient_2d(f: Array, dx: float, dy: float) -> Tuple[Array, Array]:
     return df_dx, df_dy
 
 
-@jit
-def gradient_3d(
+def _gradient_3d_tuple(
     f: Array, dx: float, dy: float, dz: float
 ) -> Tuple[Array, Array, Array]:
-    """Compute 3D gradient using central differences.
+    """Compute 3D gradient using central differences (internal helper).
 
     Args:
         f: 3D scalar field of shape (nx, ny, nz)
@@ -249,6 +251,30 @@ def gradient_3d(
     df_dy = (jnp.roll(f, -1, axis=1) - jnp.roll(f, 1, axis=1)) / (2 * dy)
     df_dz = (jnp.roll(f, -1, axis=2) - jnp.roll(f, 1, axis=2)) / (2 * dz)
     return df_dx, df_dy, df_dz
+
+
+@jit(static_argnums=(1,))
+def gradient_3d(f: Array, geometry: "Geometry") -> Array:
+    """Compute gradient of scalar field in 3D Cartesian coordinates.
+
+    Uses central differences with periodic wrapping via jnp.roll.
+    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+
+    Args:
+        f: Scalar field, shape (nx, ny, nz)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Gradient vector field, shape (nx, ny, nz, 3) with [df/dx, df/dy, df/dz]
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+
+    # Central differences with periodic wrapping
+    df_dx = (jnp.roll(f, -1, axis=0) - jnp.roll(f, 1, axis=0)) / (2 * dx)
+    df_dy = (jnp.roll(f, -1, axis=1) - jnp.roll(f, 1, axis=1)) / (2 * dy)
+    df_dz = (jnp.roll(f, -1, axis=2) - jnp.roll(f, 1, axis=2)) / (2 * dz)
+
+    return jnp.stack([df_dx, df_dy, df_dz], axis=-1)
 
 
 @jit
@@ -269,8 +295,8 @@ def laplacian_2d(f: Array, dx: float, dy: float) -> Array:
 
 
 @jit
-def laplacian_3d(f: Array, dx: float, dy: float, dz: float) -> Array:
-    """Compute 3D Laplacian using central differences.
+def laplacian_3d_explicit(f: Array, dx: float, dy: float, dz: float) -> Array:
+    """Compute 3D Laplacian using central differences (explicit grid spacing).
 
     Args:
         f: 3D scalar field of shape (nx, ny, nz)
@@ -284,6 +310,29 @@ def laplacian_3d(f: Array, dx: float, dy: float, dz: float) -> Array:
     d2f_dx2 = (jnp.roll(f, -1, axis=0) - 2 * f + jnp.roll(f, 1, axis=0)) / (dx**2)
     d2f_dy2 = (jnp.roll(f, -1, axis=1) - 2 * f + jnp.roll(f, 1, axis=1)) / (dy**2)
     d2f_dz2 = (jnp.roll(f, -1, axis=2) - 2 * f + jnp.roll(f, 1, axis=2)) / (dz**2)
+    return d2f_dx2 + d2f_dy2 + d2f_dz2
+
+
+@jit(static_argnums=(1,))
+def laplacian_3d(f: Array, geometry: "Geometry") -> Array:
+    """Compute Laplacian of scalar field in 3D Cartesian coordinates.
+
+    Uses central differences with periodic wrapping via jnp.roll.
+    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+
+    Args:
+        f: Scalar field, shape (nx, ny, nz)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Laplacian scalar field, shape (nx, ny, nz)
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+
+    d2f_dx2 = (jnp.roll(f, -1, axis=0) - 2*f + jnp.roll(f, 1, axis=0)) / dx**2
+    d2f_dy2 = (jnp.roll(f, -1, axis=1) - 2*f + jnp.roll(f, 1, axis=1)) / dy**2
+    d2f_dz2 = (jnp.roll(f, -1, axis=2) - 2*f + jnp.roll(f, 1, axis=2)) / dz**2
+
     return d2f_dx2 + d2f_dy2 + d2f_dz2
 
 
@@ -332,10 +381,10 @@ def curl_2d(f_x: Array, f_y: Array, dx: float, dy: float) -> Array:
 
 
 @jit
-def curl_3d(
+def curl_3d_components(
     f_x: Array, f_y: Array, f_z: Array, dx: float, dy: float, dz: float
 ) -> Tuple[Array, Array, Array]:
-    """Compute 3D curl of a vector field.
+    """Compute 3D curl of a vector field from separate components.
 
     Args:
         f_x, f_y, f_z: Components of vector field, each shape (nx, ny, nz)
@@ -378,10 +427,10 @@ def divergence_2d(f_x: Array, f_y: Array, dx: float, dy: float) -> Array:
 
 
 @jit
-def divergence_3d(
+def divergence_3d_components(
     f_x: Array, f_y: Array, f_z: Array, dx: float, dy: float, dz: float
 ) -> Array:
-    """Compute 3D divergence of a vector field.
+    """Compute 3D divergence of a vector field from separate components.
 
     Args:
         f_x, f_y, f_z: Components of vector field, each shape (nx, ny, nz)
@@ -394,6 +443,63 @@ def divergence_3d(
     dfy_dy = (jnp.roll(f_y, -1, axis=1) - jnp.roll(f_y, 1, axis=1)) / (2 * dy)
     dfz_dz = (jnp.roll(f_z, -1, axis=2) - jnp.roll(f_z, 1, axis=2)) / (2 * dz)
     return dfx_dx + dfy_dy + dfz_dz
+
+
+@jit(static_argnums=(1,))
+def divergence_3d(F: Array, geometry: "Geometry") -> Array:
+    """Compute divergence of vector field in 3D Cartesian coordinates.
+
+    Uses central differences with periodic wrapping via jnp.roll.
+    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+
+    Args:
+        F: Vector field, shape (nx, ny, nz, 3)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Divergence scalar field, shape (nx, ny, nz)
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+
+    dFx_dx = (jnp.roll(F[..., 0], -1, axis=0) - jnp.roll(F[..., 0], 1, axis=0)) / (2 * dx)
+    dFy_dy = (jnp.roll(F[..., 1], -1, axis=1) - jnp.roll(F[..., 1], 1, axis=1)) / (2 * dy)
+    dFz_dz = (jnp.roll(F[..., 2], -1, axis=2) - jnp.roll(F[..., 2], 1, axis=2)) / (2 * dz)
+
+    return dFx_dx + dFy_dy + dFz_dz
+
+
+@jit(static_argnums=(1,))
+def curl_3d(F: Array, geometry: "Geometry") -> Array:
+    """Compute curl of vector field in 3D Cartesian coordinates.
+
+    curl(F) = (dFz/dy - dFy/dz, dFx/dz - dFz/dx, dFy/dx - dFx/dy)
+
+    Uses central differences with periodic wrapping via jnp.roll.
+    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+
+    Args:
+        F: Vector field, shape (nx, ny, nz, 3)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Curl vector field, shape (nx, ny, nz, 3)
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+    Fx, Fy, Fz = F[..., 0], F[..., 1], F[..., 2]
+
+    # Partial derivatives
+    dFx_dy = (jnp.roll(Fx, -1, axis=1) - jnp.roll(Fx, 1, axis=1)) / (2 * dy)
+    dFx_dz = (jnp.roll(Fx, -1, axis=2) - jnp.roll(Fx, 1, axis=2)) / (2 * dz)
+    dFy_dx = (jnp.roll(Fy, -1, axis=0) - jnp.roll(Fy, 1, axis=0)) / (2 * dx)
+    dFy_dz = (jnp.roll(Fy, -1, axis=2) - jnp.roll(Fy, 1, axis=2)) / (2 * dz)
+    dFz_dx = (jnp.roll(Fz, -1, axis=0) - jnp.roll(Fz, 1, axis=0)) / (2 * dx)
+    dFz_dy = (jnp.roll(Fz, -1, axis=1) - jnp.roll(Fz, 1, axis=1)) / (2 * dy)
+
+    curl_x = dFz_dy - dFy_dz
+    curl_y = dFx_dz - dFz_dx
+    curl_z = dFy_dx - dFx_dy
+
+    return jnp.stack([curl_x, curl_y, curl_z], axis=-1)
 
 
 @jit

@@ -3,129 +3,107 @@
 Numerical errors in field evolution accumulate div(B) != 0, which causes
 unphysical parallel forces and energy conservation violations.
 
-This module provides projection-based cleaning:
+This module provides projection-based cleaning for 3D Cartesian coordinates:
     B_clean = B - grad(phi), where laplacian(phi) = div(B)
 
-Note: Due to boundary condition handling, cleaning is most effective in the
-interior of the domain. Near boundaries, some divergence error may remain.
+Uses periodic boundary conditions with Jacobi iteration for the Poisson solve.
 """
 
 import jax.numpy as jnp
-from jax import jit
-from typing import Tuple
+from jax import jit, lax
+from jax import Array
 
 from jax_frc.core.geometry import Geometry
-from jax_frc.operators import divergence_cylindrical, gradient_r, gradient_z
+from jax_frc.operators import divergence_3d, gradient_3d
 
 
-def clean_divergence_b(B: jnp.ndarray, geometry: Geometry,
-                       tol: float = 1e-10, maxiter: int = 10000) -> jnp.ndarray:
+@jit(static_argnums=(1, 2, 3))
+def clean_divergence(B: Array, geometry: Geometry,
+                     max_iter: int = 100, tol: float = 1e-6) -> Array:
     """Clean divergence from magnetic field using projection method.
 
-    Solves: laplacian(phi) = div(B) in cylindrical coordinates
+    Solves: laplacian(phi) = div(B)
     Then:   B_clean = B - grad(phi)
 
-    Uses iterative Jacobi solver with Dirichlet BCs (phi=0 on boundaries).
-
-    Note: Cleaning is most effective in the interior. Near domain boundaries,
-    the Dirichlet condition on phi creates gradient artifacts. For best results,
-    use a domain larger than the physics region of interest.
+    Uses periodic boundary conditions and Jacobi iteration.
 
     Args:
-        B: Magnetic field array of shape (nr, nz, 3)
-        geometry: Computational geometry
-        tol: Convergence tolerance for Poisson solver
-        maxiter: Maximum iterations
+        B: Magnetic field array of shape (nx, ny, nz, 3)
+        geometry: 3D Cartesian geometry
+        max_iter: Maximum iterations for Poisson solver
+        tol: Convergence tolerance for Poisson solver (unused in fixed iteration)
 
     Returns:
         Cleaned magnetic field with same shape
     """
-    nr, nz = geometry.nr, geometry.nz
-    dr, dz = geometry.dr, geometry.dz
-    r = geometry.r_grid
-
-    B_r = B[:, :, 0]
-    B_phi = B[:, :, 1]
-    B_z = B[:, :, 2]
-
-    # Compute divergence using the existing cylindrical operator
-    div_B = divergence_cylindrical(B_r, B_z, dr, dz, r)
+    # Compute divergence of B
+    div_B = divergence_3d(B, geometry)
 
     # Solve laplacian(phi) = div_B using Jacobi iteration
-    phi = _solve_poisson_jacobi(div_B, dr, dz, r, tol, maxiter)
+    phi = poisson_solve_jacobi(div_B, geometry, max_iter, tol)
 
-    # Compute gradient of phi using the same operators as divergence
-    dphi_dr = gradient_r(phi, dr)
-    dphi_dz = gradient_z(phi, dz)
+    # Compute gradient of phi
+    grad_phi = gradient_3d(phi, geometry)
 
-    # Subtract gradient from B
-    B_r_clean = B_r - dphi_dr
-    B_z_clean = B_z - dphi_dz
-    # B_phi unchanged (no theta dependence in axisymmetric)
-
-    return jnp.stack([B_r_clean, B_phi, B_z_clean], axis=-1)
+    # Subtract gradient from B to make it divergence-free
+    return B - grad_phi
 
 
-def _solve_poisson_jacobi(rhs: jnp.ndarray, dr: float, dz: float,
-                          r: jnp.ndarray, tol: float, maxiter: int) -> jnp.ndarray:
-    """Solve cylindrical Poisson equation laplacian(phi) = rhs using Jacobi iteration.
+@jit(static_argnums=(1, 2, 3))
+def poisson_solve_jacobi(rhs: Array, geometry: Geometry,
+                         max_iter: int = 100, tol: float = 1e-6) -> Array:
+    """Solve 3D Poisson equation laplacian(phi) = rhs using Jacobi iteration.
 
-    The cylindrical Laplacian is:
-        laplacian(phi) = d2phi/dr2 + (1/r)*dphi/dr + d2phi/dz2
+    Uses the 7-point stencil with periodic boundary conditions.
+    The discretization is:
+        (phi[i+1] - 2*phi[i] + phi[i-1])/dx^2 +
+        (phi[j+1] - 2*phi[j] + phi[j-1])/dy^2 +
+        (phi[k+1] - 2*phi[k] + phi[k-1])/dz^2 = rhs
 
-    Uses standard 5-point finite difference discretization.
-    Uses Dirichlet boundary conditions (phi=0 on all boundaries).
+    Rearranging for Jacobi update:
+        phi_new = (sum of neighbors with coefficients - rhs) / center_coeff
+
+    Args:
+        rhs: Right-hand side array of shape (nx, ny, nz)
+        geometry: 3D Cartesian geometry
+        max_iter: Maximum number of iterations
+        tol: Convergence tolerance (unused in this implementation)
+
+    Returns:
+        Solution phi with same shape as rhs
     """
-    nr, nz = rhs.shape
-    phi = jnp.zeros((nr, nz))
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
 
-    # Handle r=0 singularity
-    r_safe = jnp.maximum(r, 1e-10)
+    # Coefficients for the 7-point stencil
+    cx = 1.0 / dx**2
+    cy = 1.0 / dy**2
+    cz = 1.0 / dz**2
+    center_coeff = 2.0 * (cx + cy + cz)
 
-    # Standard 5-point stencil coefficients for cylindrical Laplacian
-    # laplacian ~ (phi[i+1] - 2*phi[i] + phi[i-1])/dr^2
-    #           + (1/r)*(phi[i+1] - phi[i-1])/(2*dr)
-    #           + (phi[j+1] - 2*phi[j] + phi[j-1])/dz^2
-    #
-    # Rearranged: a_c*phi[i,j] = a_ip*phi[i+1,j] + a_im*phi[i-1,j] + a_jp*phi[i,j+1] + a_jm*phi[i,j-1] - rhs
-
-    a_ip = 1.0/dr**2 + 1.0/(2*dr*r_safe)  # coefficient for phi[i+1,j]
-    a_im = 1.0/dr**2 - 1.0/(2*dr*r_safe)  # coefficient for phi[i-1,j]
-    # Ensure non-negative for numerical stability near axis
-    a_im = jnp.maximum(a_im, 0.0)
-    a_jp = 1.0/dz**2  # coefficient for phi[i,j+1]
-    a_jm = 1.0/dz**2  # coefficient for phi[i,j-1]
-    a_c = a_ip + a_im + a_jp + a_jm  # center coefficient
-
-    for iteration in range(maxiter):
-        phi_old = phi
-
-        # Get neighbors - use explicit indexing for Dirichlet BC
-        # Boundaries contribute 0
-        phi_ip = jnp.zeros_like(phi)
-        phi_im = jnp.zeros_like(phi)
-        phi_jp = jnp.zeros_like(phi)
-        phi_jm = jnp.zeros_like(phi)
-
-        phi_ip = phi_ip.at[:-1, :].set(phi[1:, :])   # phi[i+1,j]
-        phi_im = phi_im.at[1:, :].set(phi[:-1, :])   # phi[i-1,j]
-        phi_jp = phi_jp.at[:, :-1].set(phi[:, 1:])   # phi[i,j+1]
-        phi_jm = phi_jm.at[:, 1:].set(phi[:, :-1])   # phi[i,j-1]
+    def jacobi_step(phi: Array, _) -> tuple[Array, None]:
+        """Single Jacobi iteration step."""
+        # Get neighbors using periodic wrapping (jnp.roll)
+        phi_xp = jnp.roll(phi, -1, axis=0)  # phi[i+1, j, k]
+        phi_xm = jnp.roll(phi, 1, axis=0)   # phi[i-1, j, k]
+        phi_yp = jnp.roll(phi, -1, axis=1)  # phi[i, j+1, k]
+        phi_ym = jnp.roll(phi, 1, axis=1)   # phi[i, j-1, k]
+        phi_zp = jnp.roll(phi, -1, axis=2)  # phi[i, j, k+1]
+        phi_zm = jnp.roll(phi, 1, axis=2)   # phi[i, j, k-1]
 
         # Jacobi update
-        phi_new = (a_ip * phi_ip + a_im * phi_im + a_jp * phi_jp + a_jm * phi_jm - rhs) / a_c
+        phi_new = (
+            cx * (phi_xp + phi_xm) +
+            cy * (phi_yp + phi_ym) +
+            cz * (phi_zp + phi_zm) -
+            rhs
+        ) / center_coeff
 
-        # Enforce Dirichlet BC (phi=0) at boundaries
-        phi_new = phi_new.at[0, :].set(0.0)
-        phi_new = phi_new.at[-1, :].set(0.0)
-        phi_new = phi_new.at[:, 0].set(0.0)
-        phi_new = phi_new.at[:, -1].set(0.0)
+        return phi_new, None
 
-        phi = phi_new
+    # Initialize phi to zeros
+    phi_init = jnp.zeros_like(rhs)
 
-        # Check convergence on interior
-        error = jnp.max(jnp.abs(phi[1:-1, 1:-1] - phi_old[1:-1, 1:-1]))
-        if error < tol:
-            break
+    # Run fixed number of iterations using lax.scan (JAX pattern)
+    phi_final, _ = lax.scan(jacobi_step, phi_init, jnp.arange(max_iter))
 
-    return phi
+    return phi_final

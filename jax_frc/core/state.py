@@ -1,70 +1,45 @@
-"""Simulation state containers."""
+"""State container for 3D plasma simulations."""
 
 from dataclasses import dataclass
 from typing import Optional
+import jax
 import jax.numpy as jnp
 from jax import Array
-import jax
+
 
 @dataclass(frozen=True)
 class ParticleState:
-    """State container for kinetic particles."""
+    """Particle state for hybrid kinetic model."""
+    x: Array      # Positions, shape (n_particles, 3)
+    v: Array      # Velocities, shape (n_particles, 3)
+    w: Array      # Delta-f weights, shape (n_particles,)
+    species: str  # Particle species identifier
 
-    x: Array          # Positions (n_particles, 3)
-    v: Array          # Velocities (n_particles, 3)
-    w: Array          # Delta-f weights (n_particles,)
-    species: str      # "ion", "beam", etc.
-
-    @property
-    def n_particles(self) -> int:
-        return self.x.shape[0]
 
 @dataclass(frozen=True)
 class State:
-    """Complete simulation state at a single time."""
+    """State container for 3D plasma simulations.
 
-    # Scalar fields (nr, nz)
-    psi: Array        # Poloidal flux function
-    n: Array          # Number density
-    p: Array          # Pressure
-    T: Array          # Temperature (eV)
-
-    # Vector fields (nr, nz, 3)
-    B: Array          # Magnetic field
-    E: Array          # Electric field
-    v: Array          # Fluid velocity
-
-    # Particles (optional, for hybrid)
-    particles: Optional[ParticleState]
-
-    # Metadata
-    time: float
-    step: int
+    All fields are 3D arrays with shape (nx, ny, nz) for scalars
+    and (nx, ny, nz, 3) for vectors.
+    """
+    B: Array           # Magnetic field [T], shape (nx, ny, nz, 3)
+    E: Array           # Electric field [V/m], shape (nx, ny, nz, 3)
+    n: Array           # Number density [m^-3], shape (nx, ny, nz)
+    p: Array           # Pressure [Pa], shape (nx, ny, nz)
+    v: Optional[Array] = None  # Velocity [m/s], shape (nx, ny, nz, 3)
+    Te: Optional[Array] = None # Electron temp [J], shape (nx, ny, nz)
+    Ti: Optional[Array] = None # Ion temp [J], shape (nx, ny, nz)
+    particles: Optional[ParticleState] = None
 
     @classmethod
-    def zeros(cls, nr: int, nz: int, with_particles: bool = False,
-              n_particles: int = 0) -> "State":
-        """Create a zero-initialized state."""
-        particles = None
-        if with_particles and n_particles > 0:
-            particles = ParticleState(
-                x=jnp.zeros((n_particles, 3)),
-                v=jnp.zeros((n_particles, 3)),
-                w=jnp.zeros(n_particles),
-                species="ion"
-            )
-
+    def zeros(cls, nx: int, ny: int, nz: int) -> "State":
+        """Create zero-initialized state."""
         return cls(
-            psi=jnp.zeros((nr, nz)),
-            n=jnp.zeros((nr, nz)),
-            p=jnp.zeros((nr, nz)),
-            T=jnp.zeros((nr, nz)),
-            B=jnp.zeros((nr, nz, 3)),
-            E=jnp.zeros((nr, nz, 3)),
-            v=jnp.zeros((nr, nz, 3)),
-            particles=particles,
-            time=0.0,
-            step=0
+            B=jnp.zeros((nx, ny, nz, 3)),
+            E=jnp.zeros((nx, ny, nz, 3)),
+            n=jnp.zeros((nx, ny, nz)),
+            p=jnp.zeros((nx, ny, nz)),
         )
 
     def replace(self, **kwargs) -> "State":
@@ -72,16 +47,29 @@ class State:
         from dataclasses import replace as dc_replace
         return dc_replace(self, **kwargs)
 
-# Register State as a JAX pytree for JIT compatibility
+
+# Register as JAX pytree
 def _state_flatten(state):
-    children = (state.psi, state.n, state.p, state.T, state.B, state.E, state.v,
-                state.particles, state.time, state.step)
+    children = (state.B, state.E, state.n, state.p, state.v, state.Te, state.Ti, state.particles)
     aux_data = None
     return children, aux_data
 
+
 def _state_unflatten(aux_data, children):
-    psi, n, p, T, B, E, v, particles, time, step = children
-    return State(psi=psi, n=n, p=p, T=T, B=B, E=E, v=v,
-                 particles=particles, time=time, step=step)
+    B, E, n, p, v, Te, Ti, particles = children
+    return State(B=B, E=E, n=n, p=p, v=v, Te=Te, Ti=Ti, particles=particles)
+
 
 jax.tree_util.register_pytree_node(State, _state_flatten, _state_unflatten)
+
+
+def _particle_state_flatten(state):
+    return (state.x, state.v, state.w), state.species
+
+
+def _particle_state_unflatten(species, children):
+    x, v, w = children
+    return ParticleState(x=x, v=v, w=w, species=species)
+
+
+jax.tree_util.register_pytree_node(ParticleState, _particle_state_flatten, _particle_state_unflatten)

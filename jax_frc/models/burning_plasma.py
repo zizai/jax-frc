@@ -109,7 +109,7 @@ class BurningPlasmaModel:
             Updated BurningPlasmaState
         """
         # 1. Get temperature in keV from MHD state
-        T_keV = state.mhd.T  # Assuming T is already in keV
+        T_keV = state.mhd.Te  # Assuming Te is already in keV
 
         # 2. Compute fusion reaction rates
         rates = self.burn.compute_rates(

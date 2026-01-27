@@ -1,4 +1,4 @@
-"""Hybrid kinetic physics model with delta-f PIC ions."""
+"""Hybrid kinetic physics model with delta-f PIC ions for 3D Cartesian geometry."""
 
 from dataclasses import dataclass
 from typing import Optional
@@ -7,25 +7,36 @@ import jax.random as random
 from jax import jit
 
 from jax_frc.models.base import PhysicsModel
-from jax_frc.models.particle_pusher import boris_push, interpolate_field_to_particles, deposit_particles_to_grid
+from jax_frc.models.particle_pusher import (
+    boris_push,
+    interpolate_field_to_particles_3d,
+    deposit_particles_to_grid_3d,
+)
+from jax_frc.operators import curl_3d, gradient_3d
 from jax_frc.core.state import State, ParticleState
 from jax_frc.core.geometry import Geometry
-
-MU0 = 1.2566e-6
-QE = 1.602e-19
-MI = 1.673e-27
-KB = 1.381e-23
+from jax_frc.constants import MU0, QE, MI
 
 
 @dataclass
 class RigidRotorEquilibrium:
-    """Rigid rotor equilibrium distribution for delta-f method."""
+    """Rigid rotor equilibrium distribution for delta-f method.
+
+    For 3D Cartesian, the rotation is in the xy-plane (about z-axis).
+    """
     n0: float = 1e19           # Reference density (m^-3)
     T0: float = 1000.0         # Temperature (eV converted to J internally)
     Omega: float = 1e5         # Rotation frequency (rad/s)
 
     def f0(self, r, vr, vtheta, vz):
-        """Evaluate equilibrium distribution function."""
+        """Evaluate equilibrium distribution function.
+
+        Args:
+            r: Radial distance from z-axis (sqrt(x^2 + y^2))
+            vr: Radial velocity component
+            vtheta: Azimuthal velocity component
+            vz: Axial velocity component
+        """
         T_joules = self.T0 * QE  # Convert eV to Joules
         v_sq = vr**2 + (vtheta - self.Omega * r)**2 + vz**2
         thermal_factor = (MI / (2 * jnp.pi * T_joules)) ** 1.5
@@ -58,14 +69,14 @@ class RigidRotorEquilibrium:
 
 @dataclass
 class HybridKinetic(PhysicsModel):
-    """Hybrid kinetic model: kinetic ions + fluid electrons.
+    """Hybrid kinetic model: kinetic ions + fluid electrons in 3D Cartesian.
 
     Uses delta-f PIC method for ions to reduce statistical noise.
     Electrons are treated as a massless neutralizing fluid.
 
     Attributes:
         equilibrium: Background distribution for delta-f
-        eta: Resistivity (Ohm·m)
+        eta: Resistivity (Ohm-m)
         collision_frequency: Ion-ion collision frequency (1/s) for Krook operator.
             Typical FRC values: 1e3-1e5 s^-1. Set to 0 to disable collisions.
     """
@@ -75,98 +86,38 @@ class HybridKinetic(PhysicsModel):
     collision_frequency: float = 0.0  # Krook collision frequency (1/s)
 
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
-        """Compute time derivatives for hybrid model.
+        """Compute time derivatives for hybrid model in 3D Cartesian.
 
         This computes the RHS for the electromagnetic fields using Faraday's law
         with E from the electron fluid equation (generalized Ohm's law):
-            E = (J × B)/(ne) + ηJ - ∇p_e/(ne)
+            E = (J x B)/(ne) + eta*J - grad(p_e)/(ne)
         """
-        dr, dz = geometry.dr, geometry.dz
-        r = geometry.r_grid
-
-        # Compute current density from curl(B) / mu_0 for field evolution
-        B_r = state.B[:, :, 0]
-        B_phi = state.B[:, :, 1]
-        B_z = state.B[:, :, 2]
-        J_r, J_phi, J_z = self._compute_current(B_r, B_phi, B_z, dr, dz, r)
-
-        # Safe density to avoid division by zero
+        B = state.B
         n = jnp.maximum(state.n, 1e16)
+
+        # Current density from curl(B) / mu_0
+        J = curl_3d(B, geometry) / MU0
+
+        # Hall term: (J x B) / (ne)
         ne = n * QE
+        J_cross_B = jnp.stack([
+            J[..., 1] * B[..., 2] - J[..., 2] * B[..., 1],
+            J[..., 2] * B[..., 0] - J[..., 0] * B[..., 2],
+            J[..., 0] * B[..., 1] - J[..., 1] * B[..., 0],
+        ], axis=-1)
 
-        # Hall term: (J × B) / (ne)
-        hall_r = (J_phi * B_z - J_z * B_phi) / ne
-        hall_phi = (J_z * B_r - J_r * B_z) / ne
-        hall_z = (J_r * B_phi - J_phi * B_r) / ne
+        # E = eta*J + (J x B) / (ne)
+        E = self.eta * J + J_cross_B / ne[..., None]
 
-        # Electron pressure gradient term: -∇p_e/(ne)
-        dp_dr = (jnp.roll(state.p, -1, axis=0) - jnp.roll(state.p, 1, axis=0)) / (2*dr)
-        dp_dz = (jnp.roll(state.p, -1, axis=1) - jnp.roll(state.p, 1, axis=1)) / (2*dz)
-
-        # Combined E-field: E = Hall + η*J - ∇p_e/(ne)
-        E_r = hall_r + self.eta * J_r - dp_dr / ne
-        E_phi = hall_phi + self.eta * J_phi
-        E_z = hall_z + self.eta * J_z - dp_dz / ne
-
-        E = jnp.stack([E_r, E_phi, E_z], axis=-1)
+        # Pressure gradient term: -grad(p_e) / (ne)
+        if state.p is not None:
+            grad_p = gradient_3d(state.p, geometry)
+            E = E - grad_p / ne[..., None]
 
         # Faraday's law: dB/dt = -curl(E)
-        dB_r, dB_phi, dB_z = self._compute_curl_E(E_r, E_phi, E_z, dr, dz)
-        dB = jnp.stack([-dB_r, -dB_phi, -dB_z], axis=-1)
+        dB = -curl_3d(E, geometry)
 
-        # Store E in state for particle pushing
         return state.replace(B=dB, E=E)
-
-    def _compute_current(self, B_r, B_phi, B_z, dr, dz, r):
-        """Compute J = curl(B) / mu_0 in cylindrical coordinates.
-
-        Curl in cylindrical (r, theta, z) with axisymmetry (d/dtheta = 0):
-            J_r = -(1/mu_0) * dB_phi/dz
-            J_phi = (1/mu_0) * (dB_r/dz - dB_z/dr)
-            J_z = (1/mu_0) * (1/r) * d(r*B_phi)/dr
-                = (1/mu_0) * (B_phi/r + dB_phi/dr)
-
-        At r=0, uses L'Hopital's rule:
-            J_z[0,:] = (1/mu_0) * 2 * dB_phi/dr[0,:]
-        """
-        # J_r = -(1/mu_0) * dB_phi/dz
-        dB_phi_dz = (jnp.roll(B_phi, -1, axis=1) - jnp.roll(B_phi, 1, axis=1)) / (2 * dz)
-        J_r = -(1.0 / MU0) * dB_phi_dz
-
-        # J_phi = (1/mu_0) * (dB_r/dz - dB_z/dr)
-        dB_r_dz = (jnp.roll(B_r, -1, axis=1) - jnp.roll(B_r, 1, axis=1)) / (2 * dz)
-        dB_z_dr = (jnp.roll(B_z, -1, axis=0) - jnp.roll(B_z, 1, axis=0)) / (2 * dr)
-        J_phi = (1.0 / MU0) * (dB_r_dz - dB_z_dr)
-
-        # J_z = (1/mu_0) * (B_phi/r + dB_phi/dr)
-        dB_phi_dr = (jnp.roll(B_phi, -1, axis=0) - jnp.roll(B_phi, 1, axis=0)) / (2 * dr)
-
-        # Handle r=0 singularity
-        r_safe = jnp.where(r > 1e-10, r, 1.0)
-        J_z = (1.0 / MU0) * jnp.where(
-            r > 1e-10,
-            B_phi / r_safe + dB_phi_dr,
-            2.0 * dB_phi_dr  # L'Hopital at r=0
-        )
-
-        return J_r, J_phi, J_z
-
-    def _compute_curl_E(self, E_r, E_phi, E_z, dr, dz):
-        """Compute curl(E) for Faraday's law in cylindrical coordinates."""
-        # curl_r = (1/r)*dE_z/dphi - dE_phi/dz ~ -dE_phi/dz (axisymmetric)
-        dE_phi_dz = (jnp.roll(E_phi, -1, axis=1) - jnp.roll(E_phi, 1, axis=1)) / (2*dz)
-        curl_r = -dE_phi_dz
-
-        # curl_phi = dE_r/dz - dE_z/dr
-        dE_r_dz = (jnp.roll(E_r, -1, axis=1) - jnp.roll(E_r, 1, axis=1)) / (2*dz)
-        dE_z_dr = (jnp.roll(E_z, -1, axis=0) - jnp.roll(E_z, 1, axis=0)) / (2*dr)
-        curl_phi = dE_r_dz - dE_z_dr
-
-        # curl_z = (1/r)*d(r*E_phi)/dr ~ dE_phi/dr (simplified)
-        dE_phi_dr = (jnp.roll(E_phi, -1, axis=0) - jnp.roll(E_phi, 1, axis=0)) / (2*dr)
-        curl_z = dE_phi_dr
-
-        return curl_r, curl_phi, curl_z
 
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
         """Ion cyclotron CFL constraint: dt < 0.1 / omega_ci."""
@@ -177,7 +128,7 @@ class HybridKinetic(PhysicsModel):
         omega_ci = QE * B_max / MI
 
         # Also check particle CFL: dt < dx / v_max
-        dx_min = jnp.minimum(geometry.dr, geometry.dz)
+        dx_min = jnp.minimum(jnp.minimum(geometry.dx, geometry.dy), geometry.dz)
         T_joules = self.equilibrium.T0 * QE
         v_thermal = jnp.sqrt(2 * T_joules / MI)
         dt_cfl = dx_min / (3 * v_thermal)  # Factor of 3 for safety
@@ -185,13 +136,18 @@ class HybridKinetic(PhysicsModel):
         return jnp.minimum(0.1 / omega_ci, dt_cfl)
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
-        """Apply boundary conditions and particle constraints."""
-        # Apply field boundary conditions
+        """Apply boundary conditions and particle constraints for 3D.
+
+        For 3D Cartesian with periodic BC in x/y and Dirichlet in z,
+        we apply zero-field at z boundaries.
+        """
         B = state.B
-        B = B.at[0, :, :].set(B[1, :, :])  # Neumann at r=0
-        B = B.at[-1, :, :].set(0)  # Dirichlet at r_max
-        B = B.at[:, 0, :].set(0)   # Dirichlet at z_min
-        B = B.at[:, -1, :].set(0)  # Dirichlet at z_max
+
+        # For 3D array: shape is (nx, ny, nz, 3)
+        # Apply Dirichlet BC at z boundaries (periodic in x, y by default)
+        if geometry.bc_z == "dirichlet":
+            B = B.at[:, :, 0, :].set(0)
+            B = B.at[:, :, -1, :].set(0)
 
         # Apply particle boundary conditions if particles exist
         if state.particles is not None:
@@ -214,14 +170,9 @@ class HybridKinetic(PhysicsModel):
         v = particles.v
         w = particles.w
 
-        # Geometry parameters for interpolation
-        geom_params = (geometry.r_min, geometry.r_max,
-                       geometry.z_min, geometry.z_max,
-                       geometry.nr, geometry.nz)
-
-        # Interpolate E and B fields to particle positions
-        E_p = interpolate_field_to_particles(state.E, x, geom_params)
-        B_p = interpolate_field_to_particles(state.B, x, geom_params)
+        # Interpolate E and B fields to particle positions using 3D interpolation
+        E_p = interpolate_field_to_particles_3d(state.E, x, geometry)
+        B_p = interpolate_field_to_particles_3d(state.B, x, geometry)
 
         # Boris push
         x_new, v_new = boris_push(x, v, E_p, B_p, QE, MI, dt)
@@ -229,17 +180,29 @@ class HybridKinetic(PhysicsModel):
         # Compute acceleration for weight evolution
         a = QE / MI * (E_p + jnp.cross(v, B_p))
 
-        # Weight evolution: dw/dt = -(1-w) * d(ln f0)/dt
-        r = x[:, 0]
-        vr, vtheta, vz = v[:, 0], v[:, 1], v[:, 2]
-        ar, atheta, az = a[:, 0], a[:, 1], a[:, 2]
+        # For weight evolution, convert to cylindrical-like coordinates
+        # x, y -> r, theta (for equilibrium that depends on r)
+        r = jnp.sqrt(x[:, 0]**2 + x[:, 1]**2)
+        r_safe = jnp.where(r > 1e-10, r, 1.0)
+
+        # Compute vr and vtheta from vx, vy
+        cos_theta = jnp.where(r > 1e-10, x[:, 0] / r_safe, 1.0)
+        sin_theta = jnp.where(r > 1e-10, x[:, 1] / r_safe, 0.0)
+        vr = v[:, 0] * cos_theta + v[:, 1] * sin_theta
+        vtheta = -v[:, 0] * sin_theta + v[:, 1] * cos_theta
+
+        # Similar for acceleration
+        ar = a[:, 0] * cos_theta + a[:, 1] * sin_theta
+        atheta = -a[:, 0] * sin_theta + a[:, 1] * cos_theta
+        az = a[:, 2]
+        vz = v[:, 2]
 
         dlnf0_dt = self.equilibrium.d_ln_f0_dt(r, vr, vtheta, vz, ar, atheta, az)
         dw = -(1 - w) * dlnf0_dt
         w_new = w + dw * dt
 
-        # Krook collision operator: dw/dt = -ν*w
-        # Exact solution: w(t+dt) = w(t) * exp(-ν*dt)
+        # Krook collision operator: dw/dt = -nu*w
+        # Exact solution: w(t+dt) = w(t) * exp(-nu*dt)
         if self.collision_frequency > 0:
             collision_decay = jnp.exp(-self.collision_frequency * dt)
             w_new = w_new * collision_decay
@@ -257,51 +220,59 @@ class HybridKinetic(PhysicsModel):
         return state.replace(particles=new_particles)
 
     def deposit_current(self, state: State, geometry: Geometry) -> jnp.ndarray:
-        """Deposit ion current from particles to grid."""
+        """Deposit ion current from particles to 3D grid."""
         if state.particles is None:
-            return jnp.zeros((geometry.nr, geometry.nz, 3))
+            return jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
 
         particles = state.particles
-        geom_params = (geometry.r_min, geometry.r_max,
-                       geometry.z_min, geometry.z_max,
-                       geometry.nr, geometry.nz)
 
         # Current density: J = n * q * v, weighted by delta-f weights
         # For delta-f: J = J_0 + delta_J, where delta_J comes from weights
-        J = deposit_particles_to_grid(
+        J = deposit_particles_to_grid_3d(
             particles.v * QE,  # q*v per particle
             particles.w,       # delta-f weights
             particles.x,
-            geom_params
+            geometry
         )
 
         # Normalize by cell volume
         cell_vol = geometry.cell_volumes
-        J = J / cell_vol[:, :, None]
+        J = J / cell_vol[..., None]
 
         return J
 
     def _apply_particle_boundaries(self, particles: ParticleState,
                                    geometry: Geometry) -> ParticleState:
-        """Apply reflecting boundaries for particles."""
+        """Apply periodic boundaries for particles in 3D Cartesian."""
         x = particles.x
         v = particles.v
 
-        # Reflect at r boundaries
-        r = x[:, 0]
-        mask_r_min = r < geometry.r_min
-        mask_r_max = r > geometry.r_max
-        x = x.at[:, 0].set(jnp.where(mask_r_min, 2*geometry.r_min - r, x[:, 0]))
-        x = x.at[:, 0].set(jnp.where(mask_r_max, 2*geometry.r_max - r, x[:, 0]))
-        v = v.at[:, 0].set(jnp.where(mask_r_min | mask_r_max, -v[:, 0], v[:, 0]))
+        # Periodic wrapping in x
+        Lx = geometry.x_max - geometry.x_min
+        x = x.at[:, 0].set(
+            geometry.x_min + jnp.mod(x[:, 0] - geometry.x_min, Lx)
+        )
 
-        # Reflect at z boundaries
-        z = x[:, 2]
-        mask_z_min = z < geometry.z_min
-        mask_z_max = z > geometry.z_max
-        x = x.at[:, 2].set(jnp.where(mask_z_min, 2*geometry.z_min - z, x[:, 2]))
-        x = x.at[:, 2].set(jnp.where(mask_z_max, 2*geometry.z_max - z, x[:, 2]))
-        v = v.at[:, 2].set(jnp.where(mask_z_min | mask_z_max, -v[:, 2], v[:, 2]))
+        # Periodic wrapping in y
+        Ly = geometry.y_max - geometry.y_min
+        x = x.at[:, 1].set(
+            geometry.y_min + jnp.mod(x[:, 1] - geometry.y_min, Ly)
+        )
+
+        # Periodic or reflecting in z depending on BC
+        if geometry.bc_z == "periodic":
+            Lz = geometry.z_max - geometry.z_min
+            x = x.at[:, 2].set(
+                geometry.z_min + jnp.mod(x[:, 2] - geometry.z_min, Lz)
+            )
+        else:
+            # Reflecting at z boundaries
+            z = x[:, 2]
+            mask_z_min = z < geometry.z_min
+            mask_z_max = z > geometry.z_max
+            x = x.at[:, 2].set(jnp.where(mask_z_min, 2*geometry.z_min - z, x[:, 2]))
+            x = x.at[:, 2].set(jnp.where(mask_z_max, 2*geometry.z_max - z, x[:, 2]))
+            v = v.at[:, 2].set(jnp.where(mask_z_min | mask_z_max, -v[:, 2], v[:, 2]))
 
         return ParticleState(x=x, v=v, w=particles.w, species=particles.species)
 
@@ -328,7 +299,10 @@ class HybridKinetic(PhysicsModel):
     def initialize_particles(n_particles: int, geometry: Geometry,
                             equilibrium: RigidRotorEquilibrium,
                             key: jnp.ndarray) -> ParticleState:
-        """Initialize particles from equilibrium distribution.
+        """Initialize particles in 3D Cartesian coordinates.
+
+        Particles are uniformly distributed in the domain with
+        Maxwellian velocity distribution plus rigid rotation.
 
         Args:
             n_particles: Number of particles to create
@@ -339,30 +313,32 @@ class HybridKinetic(PhysicsModel):
         Returns:
             ParticleState with initialized particles
         """
-        keys = random.split(key, 5)
+        keys = random.split(key, 6)
 
-        # Positions: uniform in r^2 (for uniform density in cylindrical)
-        r_sq = random.uniform(keys[0], (n_particles,),
-                              minval=geometry.r_min**2,
-                              maxval=geometry.r_max**2)
-        r = jnp.sqrt(r_sq)
-        theta = random.uniform(keys[1], (n_particles,),
-                               minval=0, maxval=2*jnp.pi)
-        z = random.uniform(keys[2], (n_particles,),
-                          minval=geometry.z_min, maxval=geometry.z_max)
+        # Uniform positions in Cartesian coordinates
+        x_pos = random.uniform(keys[0], (n_particles,),
+                               minval=geometry.x_min, maxval=geometry.x_max)
+        y_pos = random.uniform(keys[1], (n_particles,),
+                               minval=geometry.y_min, maxval=geometry.y_max)
+        z_pos = random.uniform(keys[2], (n_particles,),
+                               minval=geometry.z_min, maxval=geometry.z_max)
 
-        # Velocities: Maxwellian + rotation
+        # Velocities: Maxwellian + rotation about z-axis
         T_joules = equilibrium.T0 * QE
         v_thermal = jnp.sqrt(T_joules / MI)
 
-        vr = random.normal(keys[3], (n_particles,)) * v_thermal
-        vz = random.normal(keys[4], (n_particles,)) * v_thermal
-        vtheta = random.normal(random.fold_in(keys[0], 1), (n_particles,)) * v_thermal
-        vtheta = vtheta + equilibrium.Omega * r  # Add rotation
+        vx_thermal = random.normal(keys[3], (n_particles,)) * v_thermal
+        vy_thermal = random.normal(keys[4], (n_particles,)) * v_thermal
+        vz = random.normal(keys[5], (n_particles,)) * v_thermal
 
-        # Position in Cartesian-like (r, theta, z)
-        x = jnp.stack([r, theta, z], axis=-1)
-        v = jnp.stack([vr, vtheta, vz], axis=-1)
+        # Add rotation: v_rot = Omega x r (rotation about z-axis)
+        # v_x += -Omega * y, v_y += Omega * x
+        vx = vx_thermal - equilibrium.Omega * y_pos
+        vy = vy_thermal + equilibrium.Omega * x_pos
+
+        # Stack into arrays
+        x = jnp.stack([x_pos, y_pos, z_pos], axis=-1)
+        v = jnp.stack([vx, vy, vz], axis=-1)
         w = jnp.zeros(n_particles)  # Delta-f weights start at zero
 
         return ParticleState(x=x, v=v, w=w, species="ion")
