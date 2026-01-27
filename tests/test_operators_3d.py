@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 import pytest
-from jax_frc.operators import gradient_3d, divergence_3d
+from jax_frc.operators import gradient_3d, divergence_3d, curl_3d
 from jax_frc.core.geometry import Geometry
 
 
@@ -105,3 +105,47 @@ class TestDivergence3D:
         F = jnp.stack([-geom.y_grid, geom.x_grid, jnp.zeros_like(geom.x_grid)], axis=-1)
         div_F = divergence_3d(F, geom)
         assert jnp.allclose(div_F, 0.0, atol=1e-10)
+
+
+class TestCurl3D:
+    """Test 3D curl operator."""
+
+    def test_curl_constant_field(self):
+        """Curl of constant vector field should be zero."""
+        F = jnp.ones((8, 8, 8, 3)) * 5.0
+        geom = Geometry(nx=8, ny=8, nz=8)
+        curl_F = curl_3d(F, geom)
+        assert curl_F.shape == (8, 8, 8, 3)
+        assert jnp.allclose(curl_F, 0.0, atol=1e-10)
+
+    def test_curl_gradient_is_zero(self):
+        """Curl of gradient should be zero."""
+        geom = Geometry(
+            nx=16, ny=16, nz=16,
+            x_min=0.0, x_max=1.0,
+            y_min=0.0, y_max=1.0,
+            z_min=0.0, z_max=1.0,
+        )
+        # f = x^2 + y^2
+        f = geom.x_grid**2 + geom.y_grid**2
+        grad_f = gradient_3d(f, geom)
+        curl_grad_f = curl_3d(grad_f, geom)
+        # Check interior points (boundary is affected by periodic wrap on non-periodic function)
+        assert jnp.allclose(curl_grad_f[1:-1, 1:-1, :], 0.0, atol=1e-6)
+
+    def test_curl_simple_field(self):
+        """Curl of F = (-y, x, 0) should be (0, 0, 2)."""
+        geom = Geometry(
+            nx=16, ny=16, nz=16,
+            x_min=-1.0, x_max=1.0,
+            y_min=-1.0, y_max=1.0,
+            z_min=-1.0, z_max=1.0,
+        )
+        F = jnp.stack([-geom.y_grid, geom.x_grid, jnp.zeros_like(geom.x_grid)], axis=-1)
+        curl_F = curl_3d(F, geom)
+        # curl(-y, x, 0) = (0 - 0, 0 - 0, 1 - (-1)) = (0, 0, 2)
+        # Note: boundary cells affected by periodic wrap for non-periodic F=(-y, x, 0)
+        # Check interior points only (exclude first and last in x and y)
+        assert jnp.allclose(curl_F[1:-1, 1:-1, :, 0], 0.0, atol=1e-10)
+        assert jnp.allclose(curl_F[1:-1, 1:-1, :, 1], 0.0, atol=1e-10)
+        assert jnp.allclose(curl_F[1:-1, 1:-1, :, 2], 2.0, atol=1e-6)

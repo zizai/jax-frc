@@ -358,10 +358,10 @@ def curl_2d(f_x: Array, f_y: Array, dx: float, dy: float) -> Array:
 
 
 @jit
-def curl_3d(
+def curl_3d_components(
     f_x: Array, f_y: Array, f_z: Array, dx: float, dy: float, dz: float
 ) -> Tuple[Array, Array, Array]:
-    """Compute 3D curl of a vector field.
+    """Compute 3D curl of a vector field from separate components.
 
     Args:
         f_x, f_y, f_z: Components of vector field, each shape (nx, ny, nz)
@@ -443,6 +443,40 @@ def divergence_3d(F: Array, geometry: "Geometry") -> Array:
     dFz_dz = (jnp.roll(F[..., 2], -1, axis=2) - jnp.roll(F[..., 2], 1, axis=2)) / (2 * dz)
 
     return dFx_dx + dFy_dy + dFz_dz
+
+
+@jit(static_argnums=(1,))
+def curl_3d(F: Array, geometry: "Geometry") -> Array:
+    """Compute curl of vector field in 3D Cartesian coordinates.
+
+    curl(F) = (dFz/dy - dFy/dz, dFx/dz - dFz/dx, dFy/dx - dFx/dy)
+
+    Uses central differences with periodic wrapping via jnp.roll.
+    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+
+    Args:
+        F: Vector field, shape (nx, ny, nz, 3)
+        geometry: 3D Cartesian geometry
+
+    Returns:
+        Curl vector field, shape (nx, ny, nz, 3)
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+    Fx, Fy, Fz = F[..., 0], F[..., 1], F[..., 2]
+
+    # Partial derivatives
+    dFx_dy = (jnp.roll(Fx, -1, axis=1) - jnp.roll(Fx, 1, axis=1)) / (2 * dy)
+    dFx_dz = (jnp.roll(Fx, -1, axis=2) - jnp.roll(Fx, 1, axis=2)) / (2 * dz)
+    dFy_dx = (jnp.roll(Fy, -1, axis=0) - jnp.roll(Fy, 1, axis=0)) / (2 * dx)
+    dFy_dz = (jnp.roll(Fy, -1, axis=2) - jnp.roll(Fy, 1, axis=2)) / (2 * dz)
+    dFz_dx = (jnp.roll(Fz, -1, axis=0) - jnp.roll(Fz, 1, axis=0)) / (2 * dx)
+    dFz_dy = (jnp.roll(Fz, -1, axis=1) - jnp.roll(Fz, 1, axis=1)) / (2 * dy)
+
+    curl_x = dFz_dy - dFy_dz
+    curl_y = dFx_dz - dFz_dx
+    curl_z = dFy_dx - dFx_dy
+
+    return jnp.stack([curl_x, curl_y, curl_z], axis=-1)
 
 
 @jit
