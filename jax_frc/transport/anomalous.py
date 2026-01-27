@@ -89,8 +89,9 @@ class TransportModel:
         Returns:
             Divergence field
         """
-        r = geometry.r_grid
-        dr, dz = geometry.dr, geometry.dz
+        y_mid = geometry.ny // 2
+        r = geometry.x_grid[:, y_mid, :]
+        dr, dz = geometry.dx, geometry.dz
 
         # d(r*F_r)/dr
         rFr = r * flux_r
@@ -103,7 +104,7 @@ class TransportModel:
 
     def _gradient_r(self, f: Array, geometry: Geometry) -> Array:
         """Central difference gradient in r."""
-        return (jnp.roll(f, -1, axis=0) - jnp.roll(f, 1, axis=0)) / (2 * geometry.dr)
+        return (jnp.roll(f, -1, axis=0) - jnp.roll(f, 1, axis=0)) / (2 * geometry.dx)
 
     def _gradient_z(self, f: Array, geometry: Geometry) -> Array:
         """Central difference gradient in z."""

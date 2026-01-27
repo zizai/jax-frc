@@ -37,32 +37,26 @@ class SemiImplicitSolver(Solver):
         # Get explicit RHS
         rhs = model.compute_rhs(state, geometry)
 
-        # For psi-based models (Resistive MHD), use explicit stepping
-        new_psi = state.psi + dt * rhs.psi
-
         # For B-based models (Extended MHD), apply semi-implicit correction
         if jnp.any(rhs.B != 0):
             new_B = self._semi_implicit_B_update(state, rhs, dt, geometry)
         else:
             new_B = state.B
 
-        # Temperature evolution with STS (if thermal enabled)
-        # Check if rhs.T contains a derivative (non-zero dT/dt)
-        # This happens when model has thermal transport enabled
-        has_temperature_evolution = jnp.any(jnp.abs(rhs.T) > 1e-20)
+        # Temperature evolution with STS (if Te provided)
+        has_temperature_evolution = rhs.Te is not None and jnp.any(jnp.abs(rhs.Te) > 1e-20)
         if has_temperature_evolution:
             new_T = self._sts_temperature_update(state, rhs, dt, model, geometry)
         else:
-            new_T = state.T
+            new_T = state.Te
 
         # E field (for Hybrid)
         new_E = rhs.E if jnp.any(rhs.E != 0) else state.E
 
         new_state = state.replace(
-            psi=new_psi,
             B=new_B,
-            T=new_T,
             E=new_E,
+            Te=new_T,
             time=state.time + dt,
             step=state.step + 1
         )
@@ -94,8 +88,9 @@ class SemiImplicitSolver(Solver):
 
         return state.B + dt * dB_implicit
 
-    def _sts_temperature_update(self, state: State, rhs: State,
-                                  dt: float, model: PhysicsModel, geometry) -> jnp.ndarray:
+    def _sts_temperature_update(
+        self, state: State, rhs: State, dt: float, model: PhysicsModel, geometry
+    ) -> jnp.ndarray:
         """Apply Super Time Stepping (STS) for temperature evolution.
 
         STS allows larger timesteps for diffusion-dominated equations by using
@@ -107,11 +102,11 @@ class SemiImplicitSolver(Solver):
         This handles the stiff parallel conduction term κ_∥∇_∥²T.
         """
         # Get the temperature RHS (dT/dt) from the already-computed rhs
-        dT_explicit = rhs.T
+        dT_explicit = rhs.Te
 
         # If no temperature change, return as-is
         if jnp.allclose(dT_explicit, 0):
-            return state.T
+            return state.Te
 
         # For simple implementation, use damped explicit with safety factor
         # Full STS would require s stages with Chebyshev coefficients
@@ -131,7 +126,7 @@ class SemiImplicitSolver(Solver):
 
         # Apply damped explicit update
         # The RHS already contains the full dT/dt from energy equation
-        new_T = state.T + dt * dT_explicit
+        new_T = state.Te + dt * dT_explicit
 
         # Ensure T stays positive (minimum temperature)
         new_T = jnp.maximum(new_T, 1e-3)
@@ -146,22 +141,21 @@ class SemiImplicitSolver(Solver):
 
         where κ_eff is the effective thermal diffusivity.
         """
-        # Check if model has thermal transport
-        if not hasattr(model, 'thermal') or model.thermal is None:
+        # Check if model has thermal diffusion configured
+        if not hasattr(model, "kappa_perp"):
             return jnp.inf
 
         # Get minimum grid spacing
-        dx_min = jnp.minimum(geometry.dr, geometry.dz)
+        dx_min = jnp.minimum(geometry.dx, geometry.dz)
 
         # Estimate effective diffusivity from thermal conductivity
         # κ_eff = κ / (3/2 * n) has units of [m²/s]
         # Use max kappa for stability
-        T_max = jnp.maximum(jnp.max(state.T), 1.0)
-        kappa_max = model.thermal.compute_kappa_parallel(jnp.array([[T_max]]))[0, 0]
+        T_max = jnp.maximum(jnp.max(state.Te), 1.0)
+        kappa_max = float(model.kappa_perp)
 
         # Get density from halo model
-        n = model.halo_model.apply(state.n, geometry)
-        n_min = jnp.min(n)
+        n_min = jnp.min(state.n)
 
         # Effective diffusivity: D = κ / (3/2 * n)
         D_eff = kappa_max / (1.5 * n_min)

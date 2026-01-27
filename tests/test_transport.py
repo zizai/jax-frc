@@ -12,10 +12,18 @@ jax.config.update("jax_enable_x64", True)
 @pytest.fixture
 def geometry():
     return Geometry(
-        coord_system="cylindrical",
-        nr=16, nz=32,
-        r_min=0.1, r_max=0.5,
-        z_min=-1.0, z_max=1.0,
+        nx=16,
+        ny=4,
+        nz=32,
+        x_min=0.1,
+        x_max=0.5,
+        y_min=0.0,
+        y_max=2 * jnp.pi,
+        z_min=-1.0,
+        z_max=1.0,
+        bc_x="neumann",
+        bc_y="periodic",
+        bc_z="neumann",
     )
 
 
@@ -39,7 +47,9 @@ class TestTransportModel:
         transport = TransportModel(D_particle=1.0, chi_e=1.0, chi_i=1.0)
 
         # Linear density profile: n(r) = n0 * (1 - r/r_max)
-        n = 1e20 * (1 - geometry.r_grid / geometry.r_max)
+        x_mid = geometry.ny // 2
+        r = geometry.x_grid[:, x_mid, :]
+        n = 1e20 * (1 - r / geometry.x_max)
 
         Gamma_r, Gamma_z = transport.particle_flux(n, geometry)
 
@@ -52,9 +62,11 @@ class TestTransportModel:
         from jax_frc.transport import TransportModel
         transport = TransportModel(D_particle=1.0, chi_e=5.0, chi_i=5.0)
 
-        n = jnp.ones((geometry.nr, geometry.nz)) * 1e20
+        n = jnp.ones((geometry.nx, geometry.nz)) * 1e20
         # Linear temperature profile
-        T = 10.0 * (1 - geometry.r_grid / geometry.r_max)  # keV
+        x_mid = geometry.ny // 2
+        r = geometry.x_grid[:, x_mid, :]
+        T = 10.0 * (1 - r / geometry.x_max)  # keV
 
         q_r, q_z = transport.energy_flux(n, T, geometry)
 
@@ -66,8 +78,8 @@ class TestTransportModel:
         from jax_frc.transport import TransportModel
         transport = TransportModel(D_particle=1.0, chi_e=1.0, chi_i=1.0)
 
-        n = jnp.ones((geometry.nr, geometry.nz)) * 1e20
-        T = jnp.ones((geometry.nr, geometry.nz)) * 10.0
+        n = jnp.ones((geometry.nx, geometry.nz)) * 1e20
+        T = jnp.ones((geometry.nx, geometry.nz)) * 10.0
 
         Gamma_r, Gamma_z = transport.particle_flux(n, geometry)
         q_r, q_z = transport.energy_flux(n, T, geometry)

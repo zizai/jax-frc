@@ -92,6 +92,7 @@ class ExtendedMHD(PhysicsModel):
     kappa_parallel: float = 1e20
     kappa_perp: float = 1e18
     external_field: Optional[CoilField] = None
+    temperature_bc: Optional[TemperatureBoundaryCondition] = None
 
     @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
@@ -178,4 +179,26 @@ class ExtendedMHD(PhysicsModel):
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
         """Apply boundary conditions."""
-        return state
+        if self.temperature_bc is None or state.Te is None:
+            return state
+
+        T = state.Te
+        bc = self.temperature_bc
+
+        # Dirichlet: set boundary to wall temperature
+        if bc.bc_type == "dirichlet":
+            T = T.at[0, :, :].set(bc.T_wall)
+            T = T.at[-1, :, :].set(bc.T_wall)
+            T = T.at[:, :, 0].set(bc.T_wall)
+            T = T.at[:, :, -1].set(bc.T_wall)
+        else:  # Neumann: zero gradient (copy adjacent interior)
+            T = T.at[0, :, :].set(T[1, :, :])
+            T = T.at[-1, :, :].set(T[-2, :, :])
+            T = T.at[:, :, 0].set(T[:, :, 1])
+            T = T.at[:, :, -1].set(T[:, :, -2])
+
+        # Optional axis symmetry (x_min boundary)
+        if bc.apply_axis_symmetry:
+            T = T.at[0, :, :].set(T[1, :, :])
+
+        return state.replace(Te=T)

@@ -81,8 +81,8 @@ def _state_unflatten(aux_data, children):
         Te=Te,
         Ti=Ti,
         particles=particles,
-        time=float(time),
-        step=int(step),
+        time=time,
+        step=step,
     )
 
 
