@@ -1,7 +1,13 @@
-"""Validation runner for executing test cases."""
+"""Validation runner for executing test cases.
+
+.. deprecated::
+    ValidationRunner is deprecated. Use the validation scripts in
+    validation/cases/<category>/<name>.py instead.
+"""
 import json
 import logging
 import time
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -63,6 +69,12 @@ class ValidationRunner:
 
     def run(self, dry_run: bool = False) -> ValidationResult:
         """Execute full validation pipeline."""
+        warnings.warn(
+            "ValidationRunner is deprecated. Use the validation scripts in "
+            "validation/cases/<category>/<name>.py instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         start_time = time.time()
 
         # Setup
