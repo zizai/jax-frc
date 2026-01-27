@@ -205,33 +205,34 @@ class TestBurningPlasmaModelWithCircuits:
         )
 
         # Create initial state
-        mhd = State.zeros(geometry.nr, geometry.nz)
+        nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
+        mhd = State.zeros(nx, ny, nz)
         mhd = mhd.replace(
-            T=jnp.ones((geometry.nr, geometry.nz)) * 10.0,  # 10 keV
-            B=jnp.ones((geometry.nr, geometry.nz, 3)) * 1.0,
+            Te=jnp.ones((nx, ny, nz)) * 10.0,  # 10 keV
+            B=jnp.ones((nx, ny, nz, 3)) * 1.0,
         )
         species = SpeciesState(
-            n_D=jnp.ones((geometry.nr, geometry.nz)) * 1e20,
-            n_T=jnp.ones((geometry.nr, geometry.nz)) * 1e20,
-            n_He3=jnp.zeros((geometry.nr, geometry.nz)),
-            n_He4=jnp.zeros((geometry.nr, geometry.nz)),
-            n_p=jnp.zeros((geometry.nr, geometry.nz)),
+            n_D=jnp.ones((nx, ny, nz)) * 1e20,
+            n_T=jnp.ones((nx, ny, nz)) * 1e20,
+            n_He3=jnp.zeros((nx, ny, nz)),
+            n_He4=jnp.zeros((nx, ny, nz)),
+            n_p=jnp.zeros((nx, ny, nz)),
         )
 
         state = BurningPlasmaState(
             mhd=mhd,
             species=species,
             rates=ReactionRates(
-                DT=jnp.zeros((geometry.nr, geometry.nz)),
-                DD_T=jnp.zeros((geometry.nr, geometry.nz)),
-                DD_HE3=jnp.zeros((geometry.nr, geometry.nz)),
-                DHE3=jnp.zeros((geometry.nr, geometry.nz)),
+                DT=jnp.zeros((nx, ny, nz)),
+                DD_T=jnp.zeros((nx, ny, nz)),
+                DD_HE3=jnp.zeros((nx, ny, nz)),
+                DHE3=jnp.zeros((nx, ny, nz)),
             ),
             power=PowerSources(
-                P_fusion=jnp.zeros((geometry.nr, geometry.nz)),
-                P_alpha=jnp.zeros((geometry.nr, geometry.nz)),
-                P_neutron=jnp.zeros((geometry.nr, geometry.nz)),
-                P_charged=jnp.zeros((geometry.nr, geometry.nz)),
+                P_fusion=jnp.zeros((nx, ny, nz)),
+                P_alpha=jnp.zeros((nx, ny, nz)),
+                P_neutron=jnp.zeros((nx, ny, nz)),
+                P_charged=jnp.zeros((nx, ny, nz)),
             ),
             circuits=CircuitState.zeros(n_pickup=1, n_external=0),
         )
@@ -356,33 +357,34 @@ class TestBackwardCompatibility:
 
         model = BurningPlasmaModel.from_config(config)
 
-        mhd = State.zeros(geometry.nr, geometry.nz)
+        nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
+        mhd = State.zeros(nx, ny, nz)
         mhd = mhd.replace(
-            T=jnp.ones((geometry.nr, geometry.nz)) * 10.0,
-            B=jnp.ones((geometry.nr, geometry.nz, 3)) * 1.0,
+            Te=jnp.ones((nx, ny, nz)) * 10.0,
+            B=jnp.ones((nx, ny, nz, 3)) * 1.0,
         )
         species = SpeciesState(
-            n_D=jnp.ones((geometry.nr, geometry.nz)) * 1e20,
-            n_T=jnp.ones((geometry.nr, geometry.nz)) * 1e20,
-            n_He3=jnp.zeros((geometry.nr, geometry.nz)),
-            n_He4=jnp.zeros((geometry.nr, geometry.nz)),
-            n_p=jnp.zeros((geometry.nr, geometry.nz)),
+            n_D=jnp.ones((nx, ny, nz)) * 1e20,
+            n_T=jnp.ones((nx, ny, nz)) * 1e20,
+            n_He3=jnp.zeros((nx, ny, nz)),
+            n_He4=jnp.zeros((nx, ny, nz)),
+            n_p=jnp.zeros((nx, ny, nz)),
         )
 
         state = BurningPlasmaState(
             mhd=mhd,
             species=species,
             rates=ReactionRates(
-                DT=jnp.zeros((geometry.nr, geometry.nz)),
-                DD_T=jnp.zeros((geometry.nr, geometry.nz)),
-                DD_HE3=jnp.zeros((geometry.nr, geometry.nz)),
-                DHE3=jnp.zeros((geometry.nr, geometry.nz)),
+                DT=jnp.zeros((nx, ny, nz)),
+                DD_T=jnp.zeros((nx, ny, nz)),
+                DD_HE3=jnp.zeros((nx, ny, nz)),
+                DHE3=jnp.zeros((nx, ny, nz)),
             ),
             power=PowerSources(
-                P_fusion=jnp.zeros((geometry.nr, geometry.nz)),
-                P_alpha=jnp.zeros((geometry.nr, geometry.nz)),
-                P_neutron=jnp.zeros((geometry.nr, geometry.nz)),
-                P_charged=jnp.zeros((geometry.nr, geometry.nz)),
+                P_fusion=jnp.zeros((nx, ny, nz)),
+                P_alpha=jnp.zeros((nx, ny, nz)),
+                P_neutron=jnp.zeros((nx, ny, nz)),
+                P_charged=jnp.zeros((nx, ny, nz)),
             ),
             circuits=CircuitState.zeros(n_pickup=1, n_external=0),
         )
@@ -420,18 +422,19 @@ class TestCircuitPowerExtraction:
         model = BurningPlasmaModel.from_config(config)
 
         # Create state with strong B-field
-        mhd = State.zeros(geometry.nr, geometry.nz)
+        nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
+        mhd = State.zeros(nx, ny, nz)
         mhd = mhd.replace(
-            T=jnp.ones((geometry.nr, geometry.nz)) * 10.0,
-            B=jnp.ones((geometry.nr, geometry.nz, 3)) * 2.0,  # 2 T
+            Te=jnp.ones((nx, ny, nz)) * 10.0,
+            B=jnp.ones((nx, ny, nz, 3)) * 2.0,  # 2 T
         )
-        mhd = mhd.replace(B=mhd.B.at[:, :, 2].set(2.0))  # Strong axial field
+        mhd = mhd.replace(B=mhd.B.at[:, :, :, 2].set(2.0))  # Strong axial field
         species = SpeciesState(
-            n_D=jnp.ones((geometry.nr, geometry.nz)) * 1e20,
-            n_T=jnp.ones((geometry.nr, geometry.nz)) * 1e20,
-            n_He3=jnp.zeros((geometry.nr, geometry.nz)),
-            n_He4=jnp.zeros((geometry.nr, geometry.nz)),
-            n_p=jnp.zeros((geometry.nr, geometry.nz)),
+            n_D=jnp.ones((nx, ny, nz)) * 1e20,
+            n_T=jnp.ones((nx, ny, nz)) * 1e20,
+            n_He3=jnp.zeros((nx, ny, nz)),
+            n_He4=jnp.zeros((nx, ny, nz)),
+            n_p=jnp.zeros((nx, ny, nz)),
         )
 
         # Initial circuit state has zero flux linkage
@@ -441,16 +444,16 @@ class TestCircuitPowerExtraction:
             mhd=mhd,
             species=species,
             rates=ReactionRates(
-                DT=jnp.zeros((geometry.nr, geometry.nz)),
-                DD_T=jnp.zeros((geometry.nr, geometry.nz)),
-                DD_HE3=jnp.zeros((geometry.nr, geometry.nz)),
-                DHE3=jnp.zeros((geometry.nr, geometry.nz)),
+                DT=jnp.zeros((nx, ny, nz)),
+                DD_T=jnp.zeros((nx, ny, nz)),
+                DD_HE3=jnp.zeros((nx, ny, nz)),
+                DHE3=jnp.zeros((nx, ny, nz)),
             ),
             power=PowerSources(
-                P_fusion=jnp.zeros((geometry.nr, geometry.nz)),
-                P_alpha=jnp.zeros((geometry.nr, geometry.nz)),
-                P_neutron=jnp.zeros((geometry.nr, geometry.nz)),
-                P_charged=jnp.zeros((geometry.nr, geometry.nz)),
+                P_fusion=jnp.zeros((nx, ny, nz)),
+                P_alpha=jnp.zeros((nx, ny, nz)),
+                P_neutron=jnp.zeros((nx, ny, nz)),
+                P_charged=jnp.zeros((nx, ny, nz)),
             ),
             circuits=initial_circuits,
         )

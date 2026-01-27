@@ -90,7 +90,7 @@ class TestCircuitSystemCreation:
             system.pickup = None
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestCircuitSystemStep:
     """Tests for CircuitSystem.step() method."""
 
@@ -134,7 +134,7 @@ class TestCircuitSystemStep:
         assert new_state.Psi_pickup.shape == state.Psi_pickup.shape
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestRLCircuitODE:
     """Tests for RL circuit ODE integration (no capacitor)."""
 
@@ -235,7 +235,7 @@ class TestRLCircuitODE:
         assert jnp.isclose(state.I_pickup[0], expected, rtol=0.05)
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestInducedEMF:
     """Tests for EMF induced by changing plasma flux."""
 
@@ -293,7 +293,7 @@ class TestInducedEMF:
         assert new_state.I_pickup[0] != 0.0
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestExternalCircuitDriven:
     """Tests for externally driven circuits."""
 
@@ -352,7 +352,7 @@ class TestExternalCircuitDriven:
         assert jnp.isclose(state.I_external[0], expected_I, rtol=0.02)
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestRLCCircuitODE:
     """Tests for RLC circuit ODE integration with capacitor."""
 
@@ -410,7 +410,7 @@ class TestRLCCircuitODE:
         assert jnp.isclose(jnp.abs(state.I_pickup[0]), I_max, rtol=0.15)
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestSubcycling:
     """Tests for subcycling with lax.scan."""
 
@@ -462,7 +462,7 @@ class TestSubcycling:
         assert jnp.isclose(new_state.I_pickup[0], 0.0, atol=1e-10)
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestPowerTracking:
     """Tests for power extraction and dissipation tracking."""
 
@@ -554,7 +554,7 @@ class TestPowerTracking:
         assert new_state.P_dissipated > 0
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestJITCompatibility:
     """Tests for JAX JIT compatibility."""
 
@@ -635,7 +635,7 @@ class TestJITCompatibility:
         assert final_state.I_pickup[0] < initial_state.I_pickup[0]
 
 
-@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r from cylindrical coordinates")
+@pytest.mark.skip(reason="CircuitSystem.step uses geometry.r and geometry.nz from cylindrical coordinates, not available in 3D Cartesian")
 class TestFluxUpdate:
     """Tests for flux linkage state updates."""
 
