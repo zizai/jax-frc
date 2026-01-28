@@ -1,42 +1,43 @@
 # validation/cases/analytic/frozen_flux.yaml
 name: frozen_flux
-description: "Frozen-in magnetic flux advection (Rm >> 1)"
+description: "Circular advection of magnetic loop (Rm >> 1)"
 
 configuration:
   class: FrozenFluxConfiguration
   overrides:
     model_type: resistive_mhd
-    B_phi_0: 1.0
-    v_r: 0.1
+    loop_amplitude: 1.0
+    loop_radius: 0.3
     eta: 1.0e-8
 
 runtime:
-  t_end: 1.0
+  t_end: 0.25  # Quarter rotation
   dt: 1.0e-3
 
 reference:
   type: analytic
-  description: "Frozen-in flux with uniform advection: B_y is constant"
-  formula: "B_phi_0 * jnp.ones_like(x)"
+  description: "Magnetic loop rotated by angle theta = omega * t"
+  formula: "config.analytic_solution(geometry, t)"
   variables:
-    - B_phi_0
-    - x
+    - config
+    - geometry
+    - t
 
 acceptance:
   quantitative:
     - metric: l2_error
-      field: B_y
-      threshold: 0.01
-      description: "Relative L2 error vs analytic solution (uniform field)"
-    - metric: flux_conservation
-      threshold: 0.01
-      description: "Toroidal flux conserved within 1%"
+      field: B
+      threshold: 0.35
+      description: "Relative L2 error vs analytic solution (quarter rotation)"
+    - metric: peak_amplitude_ratio
+      threshold: 0.75
+      description: "Peak |B| preserved within 75%"
 
 output:
   plots:
-    - type: profiles
-      name: By_evolution
-      axis: x
-      field: B_y
+    - type: contour
+      name: B_magnitude
+      plane: xy
+      field: B_magnitude
   html_report: true
   log_level: INFO

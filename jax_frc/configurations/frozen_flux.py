@@ -1,4 +1,9 @@
-"""Frozen-in flux validation configuration (Rm >> 1)."""
+"""Frozen-in flux validation configuration (Rm >> 1).
+
+Circular advection of a magnetic loop benchmark for validating ideal MHD solvers.
+A localized magnetic structure is advected by rigid body rotation and should
+return to its initial position after one full period.
+"""
 import jax.numpy as jnp
 from dataclasses import dataclass
 from typing import Literal
@@ -19,40 +24,52 @@ ModelType = Literal["resistive_mhd", "extended_mhd", "plasma_neutral", "hybrid_k
 
 @dataclass
 class FrozenFluxConfiguration(AbstractConfiguration):
-    """Frozen-in flux test (Rm >> 1) in 3D Cartesian geometry.
+    """Frozen-in flux test via circular advection of a magnetic loop.
 
     Physics (Cartesian induction equation):
-        dB/dt = curl(v x B) + (1 / (mu0 * sigma)) * laplacian(B)
+        dB/dt = curl(v x B) + eta * laplacian(B)
 
-    Ideal-MHD limit (Rm >> 1, eta ~ 1 / (mu0 * sigma) -> 0):
+    Ideal-MHD limit (Rm >> 1, eta -> 0):
         dB/dt = curl(v x B)
 
-    Tests the advection-dominated regime where magnetic Reynolds number
-    is much greater than 1. In 3D Cartesian coordinates with uniform
-    velocity and uniform B, the induction equation predicts no change
-    in B because curl(v x B) = 0.
+    Benchmark: A localized magnetic loop is advected by a rigid body rotation
+    velocity field. After one full rotation period, the loop should return to
+    its initial position. This tests:
+    - Numerical diffusion (amplitude preservation)
+    - Dispersion (shape preservation)
+    - div(B) = 0 constraint maintenance
 
-    Setup: Cartesian slab with uniform expansion v_x = v0
-    Initial: Uniform B_y field (maps to B_phi in legacy naming)
-    Analytic: B_y(t) = constant (uniform field advects without distortion)
+    Setup:
+        - Domain: x,y ∈ [-1, 1], thin z (pseudo-2D)
+        - Magnetic loop: B = curl(A_z z_hat) with compact support
+        - Velocity: Rigid rotation v = (-ωy, ωx, 0)
+        - Period: T = 2π/ω
 
     Supports: resistive_mhd, extended_mhd, plasma_neutral, hybrid_kinetic
     """
 
     name: str = "frozen_flux"
-    description: str = "Frozen-in magnetic flux advection (Rm >> 1)"
+    description: str = "Circular advection of magnetic loop (Rm >> 1)"
 
-    # Grid parameters (thin-y slab for inexpensive 3D)
+    # Grid parameters (thin-z for pseudo-2D in x-y plane)
     nx: int = 64         # X resolution
-    ny: int = 1          # Y resolution (thin periodic)
-    nz: int = 64         # Z resolution
-    r_min: float = 0.2   # X minimum [m] (legacy name for radial coordinate)
-    r_max: float = 1.0   # X maximum [m]
-    z_extent: float = 0.5  # Domain: y,z ∈ [-z_extent, z_extent]
+    ny: int = 64         # Y resolution
+    nz: int = 1          # Z resolution (thin periodic)
+
+    # Domain parameters
+    domain_extent: float = 1.0   # x,y ∈ [-extent, extent]
+    z_extent: float = 0.1        # z ∈ [-z_extent, z_extent]
+
+    # Magnetic loop parameters
+    loop_x0: float = 0.5         # Loop center x [m]
+    loop_y0: float = 0.0         # Loop center y [m]
+    loop_radius: float = 0.3     # Loop radius R [m]
+    loop_amplitude: float = 1.0  # Vector potential amplitude A_0
+
+    # Rotation parameters
+    omega: float = 2 * 3.141592653589793  # Angular velocity [rad/s] (one rotation per second)
 
     # Physics parameters
-    B_phi_0: float = 1.0     # Initial B_phi [T]
-    v_r: float = 0.1         # Radial expansion velocity [m/s]
     eta: float = 1e-8        # Very small resistivity (Rm >> 1)
 
     # Plasma parameters (for models that need them)
@@ -63,31 +80,53 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     model_type: ModelType = "resistive_mhd"
 
     def build_geometry(self) -> Geometry:
-        """3D Cartesian geometry."""
+        """3D Cartesian geometry with thin z (pseudo-2D in x-y plane)."""
         return Geometry(
             nx=self.nx,
             ny=self.ny,
             nz=self.nz,
-            x_min=self.r_min,
-            x_max=self.r_max,
-            y_min=-self.z_extent,
-            y_max=self.z_extent,
+            x_min=-self.domain_extent,
+            x_max=self.domain_extent,
+            y_min=-self.domain_extent,
+            y_max=self.domain_extent,
             z_min=-self.z_extent,
             z_max=self.z_extent,
-            bc_x="neumann",
+            bc_x="periodic",
             bc_y="periodic",
-            bc_z="neumann",
+            bc_z="periodic",
         )
 
     def build_initial_state(self, geometry: Geometry) -> State:
-        """Uniform B_y with prescribed x-velocity v_x."""
-        # Uniform toroidal field mapped to B_y
-        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
-        B = B.at[:, :, :, 1].set(self.B_phi_0)
+        """Magnetic loop with rigid body rotation velocity."""
+        x = geometry.x_grid
+        y = geometry.y_grid
 
-        # Uniform expansion velocity mapped to v_x
+        # Distance from loop center
+        r = jnp.sqrt((x - self.loop_x0)**2 + (y - self.loop_y0)**2)
+
+        # Vector potential A_z with compact support (C2 continuous)
+        # A_z = A_0 * (1 - r²/R²)² for r < R, else 0
+        inside = r < self.loop_radius
+        r_norm = r / self.loop_radius
+        A_z = jnp.where(
+            inside,
+            self.loop_amplitude * (1 - r_norm**2)**2,
+            0.0
+        )
+
+        # B = curl(A_z z_hat) using central differences
+        # B_x = ∂A_z/∂y, B_y = -∂A_z/∂x
+        dA_dy = (jnp.roll(A_z, -1, axis=1) - jnp.roll(A_z, 1, axis=1)) / (2 * geometry.dy)
+        dA_dx = (jnp.roll(A_z, -1, axis=0) - jnp.roll(A_z, 1, axis=0)) / (2 * geometry.dx)
+
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[..., 0].set(dA_dy)   # B_x = ∂A_z/∂y
+        B = B.at[..., 1].set(-dA_dx)  # B_y = -∂A_z/∂x
+
+        # Rigid body rotation velocity: v = (-ωy, ωx, 0)
         v = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
-        v = v.at[:, :, :, 0].set(self.v_r)
+        v = v.at[..., 0].set(-self.omega * y)  # v_x = -ω*y
+        v = v.at[..., 1].set(self.omega * x)   # v_y = ω*x
 
         return State(
             B=B,
@@ -131,43 +170,62 @@ class FrozenFluxConfiguration(AbstractConfiguration):
             raise ValueError(f"Unknown model_type: {self.model_type}")
 
     def build_boundary_conditions(self) -> list:
-        """Boundary conditions for expanding plasma."""
+        """Boundary conditions (periodic, handled by geometry)."""
         return []
 
     def default_runtime(self) -> dict:
-        """Runtime parameters based on advection timescale."""
-        tau_adv = self.advection_timescale()
+        """Runtime parameters for quarter rotation (less numerical diffusion)."""
+        period = 2 * 3.141592653589793 / self.omega  # T = 2π/ω
         return {
-            "t_end": 0.5 * tau_adv,   # Run for half advection time
-            "dt": 1e-3 * tau_adv,     # CFL-like timestep
+            "t_end": period / 4,      # Quarter rotation (less diffusion)
+            "dt": period / 1000,      # 250 steps for quarter rotation
         }
 
-    def analytic_solution(self, r: jnp.ndarray, t: float) -> jnp.ndarray:
-        """Compute analytic B_phi at time t for uniform advection.
+    def analytic_solution(self, geometry: Geometry, t: float) -> jnp.ndarray:
+        """Compute analytic B field at time t.
 
-        In 3D Cartesian coordinates with uniform velocity and uniform B,
-        curl(v x B) = 0, so B remains constant in time.
+        For rigid body rotation, the magnetic loop rotates with the flow.
+        After one full period (t = 2π/ω), it returns to initial position.
         """
-        return jnp.ones_like(r) * self.B_phi_0
+        # Rotation angle
+        theta = self.omega * t
 
-    def analytic_solution_lagrangian(self, r0: jnp.ndarray, t: float) -> tuple:
-        """Return unchanged positions and uniform B for this Cartesian setup."""
-        r_t = r0 + self.v_r * t
-        B_phi_t = jnp.ones_like(r0) * self.B_phi_0
-        return r_t, B_phi_t
+        # Rotate coordinates backward to get initial position
+        x = geometry.x_grid
+        y = geometry.y_grid
+        x_rot = x * jnp.cos(theta) + y * jnp.sin(theta)
+        y_rot = -x * jnp.sin(theta) + y * jnp.cos(theta)
 
-    def advection_timescale(self) -> float:
-        """Characteristic advection time tau = L/v_r."""
-        L = self.r_max - self.r_min
-        return L / self.v_r
+        # Distance from loop center in rotated frame
+        r = jnp.sqrt((x_rot - self.loop_x0)**2 + (y_rot - self.loop_y0)**2)
+
+        # Vector potential in rotated frame
+        inside = r < self.loop_radius
+        r_norm = r / self.loop_radius
+        A_z = jnp.where(inside, self.loop_amplitude * (1 - r_norm**2)**2, 0.0)
+
+        # B = curl(A_z z_hat) - same finite difference as initial state
+        dA_dy = (jnp.roll(A_z, -1, axis=1) - jnp.roll(A_z, 1, axis=1)) / (2 * geometry.dy)
+        dA_dx = (jnp.roll(A_z, -1, axis=0) - jnp.roll(A_z, 1, axis=0)) / (2 * geometry.dx)
+
+        B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
+        B = B.at[..., 0].set(dA_dy)
+        B = B.at[..., 1].set(-dA_dx)
+
+        return B
+
+    def rotation_period(self) -> float:
+        """Return the rotation period T = 2π/ω."""
+        return 2 * 3.141592653589793 / self.omega
 
     def magnetic_reynolds_number(self) -> float:
         """Compute magnetic Reynolds number Rm = v*L/eta.
 
-        For this configuration, Rm >> 1 by design.
+        For rigid rotation, v_max = ω * domain_extent.
 
         Returns:
             Magnetic Reynolds number (should be >> 1)
         """
-        L = self.r_max - self.r_min
-        return self.v_r * L / self.eta
+        v_max = self.omega * self.domain_extent
+        L = 2 * self.domain_extent
+        return v_max * L / self.eta

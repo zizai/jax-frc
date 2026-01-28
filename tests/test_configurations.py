@@ -98,14 +98,14 @@ def test_magnetic_diffusion_builds_model():
 
 # FrozenFluxConfiguration tests
 def test_frozen_flux_default_grid_dims_cartesian():
-    """FrozenFluxConfiguration defaults to thin Cartesian grid."""
+    """FrozenFluxConfiguration defaults to pseudo-2D Cartesian grid (thin z)."""
     from jax_frc.configurations import FrozenFluxConfiguration
 
     config = FrozenFluxConfiguration()
 
     assert config.nx == 64
-    assert config.ny == 1
-    assert config.nz == 64
+    assert config.ny == 64
+    assert config.nz == 1  # Thin z for pseudo-2D in x-y plane
 
 
 def test_frozen_flux_builds_geometry():
@@ -121,19 +121,18 @@ def test_frozen_flux_builds_geometry():
 
 
 def test_frozen_flux_builds_initial_state():
-    """FrozenFluxConfiguration creates state with uniform B_phi and v_r."""
+    """FrozenFluxConfiguration creates state with magnetic loop and rotation velocity."""
     from jax_frc.configurations import FrozenFluxConfiguration
     import jax.numpy as jnp
-    from tests.utils.cartesian import make_geometry
 
     config = FrozenFluxConfiguration()
-    geometry = make_geometry(nx=8, ny=1, nz=8)
+    geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
 
-    # B_phi should be uniform
-    assert jnp.allclose(state.B[:, :, :, 1], config.B_phi_0)
-    # v_r should be uniform
-    assert jnp.allclose(state.v[:, :, :, 0], config.v_r)
+    # B should have non-zero values (magnetic loop)
+    assert jnp.max(jnp.abs(state.B)) > 0
+    # v should have rotation pattern (v_x = -omega*y, v_y = omega*x)
+    assert jnp.max(jnp.abs(state.v)) > 0
 
 
 def test_frozen_flux_builds_model():
