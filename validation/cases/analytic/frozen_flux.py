@@ -137,9 +137,92 @@ def run_simulation_with_snapshots(cfg: dict, n_snapshots: int = 50) -> tuple:
     return times, B_numerical, B_analytic, geometry, config
 
 
+def run_multi_model_simulation(cfg: dict, n_snapshots: int = 50) -> tuple:
+    """Run simulation with multiple models and collect snapshots.
+
+    Returns dict with keys: times, analytic, ResistiveMHD, ExtendedMHD
+    Each model entry contains list of B field snapshots.
+    """
+    geometry = None
+    results = {"times": [], "analytic": []}
+
+    model_configs = {
+        "ResistiveMHD": {
+            "model_type": "resistive_mhd",
+            "advection_scheme": "ct",
+            "eta": 0.0,
+        },
+        "ExtendedMHD": {
+            "model_type": "extended_mhd",
+            "eta": 0.0,
+            "include_hall": False,  # Disable Hall for frozen flux (advection test)
+            "include_electron_pressure": False,  # Disable for pure advection test
+        },
+    }
+
+    first_model = True
+    for model_name, model_params in model_configs.items():
+        try:
+            config = FrozenFluxConfiguration(
+                nx=cfg["nx"], ny=cfg["ny"], nz=cfg["nz"],
+                domain_extent=cfg["domain_extent"],
+                z_extent=cfg["z_extent"],
+                loop_x0=cfg["loop_x0"],
+                loop_y0=cfg["loop_y0"],
+                loop_radius=cfg["loop_radius"],
+                loop_amplitude=cfg["loop_amplitude"],
+                omega=cfg["omega"],
+                **model_params,
+            )
+
+            if geometry is None:
+                geometry = config.build_geometry()
+
+            state = config.build_initial_state(geometry)
+            model = config.build_model()
+            solver = RK4Solver()
+
+            t_end = cfg["t_end"]
+            dt = cfg["dt"]
+            n_steps = int(t_end / dt)
+            snapshot_interval = max(1, n_steps // n_snapshots)
+
+            snapshots = [np.array(state.B)]
+
+            # Compute analytic only once (first model)
+            if not results["times"]:
+                results["times"] = [0.0]
+                results["analytic"] = [np.array(config.analytic_solution(geometry, 0.0))]
+
+            for step in range(n_steps):
+                state = solver.step(state, dt, model, geometry)
+                if (step + 1) % snapshot_interval == 0 or step == n_steps - 1:
+                    snapshots.append(np.array(state.B))
+                    if first_model:  # Only record times once
+                        results["times"].append(float(state.time))
+                        results["analytic"].append(
+                            np.array(config.analytic_solution(geometry, state.time))
+                        )
+
+            results[model_name] = snapshots
+            print(f"  {model_name}: {len(snapshots)} snapshots")
+            first_model = False
+        except Exception as e:
+            print(f"  {model_name}: FAILED - {e}")
+            continue
+
+    return results, geometry, config
+
+
 ACCEPTANCE = {
-    "l2_error": 0.01,              # 1% L2 error threshold
-    "peak_amplitude_ratio": 0.98,  # 98% amplitude preservation
+    "ResistiveMHD": {
+        "l2_error": 0.01,              # 1% L2 error (CT scheme is very accurate)
+        "peak_amplitude_ratio": 0.98,  # 98% amplitude preservation
+    },
+    "ExtendedMHD": {
+        "l2_error": 0.02,              # 2% L2 error (no CT scheme, higher diffusion)
+        "peak_amplitude_ratio": 0.98,  # 98% amplitude preservation
+    },
 }
 
 
@@ -274,6 +357,157 @@ def create_1d_animation(times, B_numerical, B_analytic, geometry, config, save_p
     print(f"  Saved 1D animation: {save_path}")
 
 
+def create_3model_2d_animation(times, results, geometry, save_path):
+    """Create 3-panel 2D animation: Analytic | ResistiveMHD | ExtendedMHD."""
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
+
+    z_idx = geometry.nz // 2
+    x = np.array(geometry.x_grid[:, :, z_idx])
+    y = np.array(geometry.y_grid[:, :, z_idx])
+
+    # Precompute |B| for all snapshots
+    B_mag = {}
+    for name in ["analytic", "ResistiveMHD", "ExtendedMHD"]:
+        B_mag[name] = [
+            np.sqrt(np.sum(B[:, :, z_idx, :]**2, axis=-1))
+            for B in results[name]
+        ]
+
+    # Global colorbar limits
+    vmin = 0
+    vmax = max(
+        max(np.max(frame) for frame in B_mag["analytic"]),
+        max(np.max(frame) for frame in B_mag["ResistiveMHD"]),
+        max(np.max(frame) for frame in B_mag["ExtendedMHD"])
+    ) * 1.1
+    levels = np.linspace(vmin, vmax, 21)
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+    titles = ["Analytic", "ResistiveMHD", "ExtendedMHD"]
+
+    plt.tight_layout()
+
+    def update(frame):
+        for i, (ax, name) in enumerate(zip(axes, ["analytic", "ResistiveMHD", "ExtendedMHD"])):
+            ax.clear()
+            ax.contourf(x, y, B_mag[name][frame], levels=levels, cmap='viridis')
+            ax.set_title(f'{titles[i]} |B| (t={times[frame]:.3f}s)')
+            ax.set_xlabel('x [m]')
+            ax.set_ylabel('y [m]')
+            ax.set_aspect('equal')
+        return axes
+
+    anim = FuncAnimation(fig, update, frames=len(times), interval=100, blit=False)
+    anim.save(str(save_path), writer='pillow', fps=10)
+    plt.close(fig)
+    print(f"  Saved 3-model 2D animation: {save_path}")
+
+
+def create_3model_1d_animation(times, results, geometry, save_path):
+    """Create 1D overlay animation: all three models on same axes."""
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
+
+    z_idx = geometry.nz // 2
+    j_mid = geometry.ny // 2
+    x_1d = np.array(geometry.x_grid[:, j_mid, z_idx])
+
+    # Precompute 1D profiles
+    B_1d = {}
+    for name in ["analytic", "ResistiveMHD", "ExtendedMHD"]:
+        B_1d[name] = [
+            np.sqrt(np.sum(B[:, j_mid, z_idx, :]**2, axis=-1))
+            for B in results[name]
+        ]
+
+    ymax = max(
+        max(np.max(frame) for frame in B_1d["analytic"]),
+        max(np.max(frame) for frame in B_1d["ResistiveMHD"]),
+        max(np.max(frame) for frame in B_1d["ExtendedMHD"])
+    ) * 1.2
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    line_ana, = ax.plot(x_1d, B_1d["analytic"][0], 'b-', lw=2, label='Analytic')
+    line_res, = ax.plot(x_1d, B_1d["ResistiveMHD"][0], 'r--', lw=2, label='ResistiveMHD')
+    line_ext, = ax.plot(x_1d, B_1d["ExtendedMHD"][0], 'g:', lw=2, label='ExtendedMHD')
+
+    ax.set_xlim(x_1d.min(), x_1d.max())
+    ax.set_ylim(0, ymax)
+    ax.set_xlabel('x [m]')
+    ax.set_ylabel('|B| [T]')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+    title = ax.set_title(f'|B| along y=0 (t={times[0]:.3f}s)')
+
+    plt.tight_layout()
+
+    def update(frame):
+        line_ana.set_ydata(B_1d["analytic"][frame])
+        line_res.set_ydata(B_1d["ResistiveMHD"][frame])
+        line_ext.set_ydata(B_1d["ExtendedMHD"][frame])
+        title.set_text(f'|B| along y=0 (t={times[frame]:.3f}s)')
+        return line_ana, line_res, line_ext, title
+
+    anim = FuncAnimation(fig, update, frames=len(times), interval=100, blit=False)
+    anim.save(str(save_path), writer='pillow', fps=10)
+    plt.close(fig)
+    print(f"  Saved 3-model 1D animation: {save_path}")
+
+
+def create_multi_frame_summary(times, results, geometry, save_path):
+    """Create static 3x5 grid: rows=models, cols=time frames."""
+    import matplotlib.pyplot as plt
+
+    z_idx = geometry.nz // 2
+    x = np.array(geometry.x_grid[:, :, z_idx])
+    y = np.array(geometry.y_grid[:, :, z_idx])
+
+    # Select 5 key frames: t=0, T/4, T/2, 3T/4, T
+    n_frames = len(times)
+    frame_indices = [0, n_frames//4, n_frames//2, 3*n_frames//4, n_frames-1]
+
+    # Precompute |B|
+    B_mag = {}
+    for name in ["analytic", "ResistiveMHD", "ExtendedMHD"]:
+        B_mag[name] = [
+            np.sqrt(np.sum(B[:, :, z_idx, :]**2, axis=-1))
+            for B in results[name]
+        ]
+
+    vmin = 0
+    vmax = max(
+        max(np.max(frame) for frame in B_mag["analytic"]),
+        max(np.max(frame) for frame in B_mag["ResistiveMHD"]),
+        max(np.max(frame) for frame in B_mag["ExtendedMHD"])
+    ) * 1.1
+    levels = np.linspace(vmin, vmax, 21)
+
+    fig, axes = plt.subplots(3, 5, figsize=(18, 10))
+    model_names = ["analytic", "ResistiveMHD", "ExtendedMHD"]
+    row_labels = ["Analytic", "ResistiveMHD", "ExtendedMHD"]
+
+    for row, name in enumerate(model_names):
+        for col, frame_idx in enumerate(frame_indices):
+            ax = axes[row, col]
+            ax.contourf(x, y, B_mag[name][frame_idx], levels=levels, cmap='viridis')
+            ax.set_aspect('equal')
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            if row == 0:
+                ax.set_title(f't={times[frame_idx]:.3f}s')
+            if col == 0:
+                ax.set_ylabel(row_labels[row], fontsize=12)
+
+    plt.suptitle('Frozen Flux Evolution: Model Comparison', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(str(save_path), dpi=150)
+    plt.close(fig)
+    print(f"  Saved multi-frame summary: {save_path}")
+
+
 def main() -> bool:
     """Run validation and generate report."""
     print(f"Running validation: {NAME}")
@@ -289,49 +523,59 @@ def main() -> bool:
             print(f"  {key}: {val}")
     print()
 
-    print("Running simulation with snapshots for animation...")
+    print("Running multi-model simulation...")
     t_start = time.time()
-    times, B_numerical, B_analytic, geometry, config = run_simulation_with_snapshots(cfg, n_snapshots=50)
+    results, geometry, config = run_multi_model_simulation(cfg, n_snapshots=50)
     t_sim = time.time() - t_start
     print(f"  Completed in {t_sim:.2f}s")
     print()
 
-    # Get final state for metrics
-    B_final = jnp.array(B_numerical[-1])
-    B_analytic_final = jnp.array(B_analytic[-1])
-    B_initial = jnp.array(B_numerical[0])
+    # Compute metrics for each model
+    model_metrics = {}
+    B_analytic_final = jnp.array(results["analytic"][-1])
+    B_initial = jnp.array(results["analytic"][0])
+    peak_initial = float(jnp.max(jnp.sqrt(jnp.sum(B_initial**2, axis=-1))))
 
-    # Compute L2 error vs analytic
-    l2_err = l2_error(B_final, B_analytic_final)
+    for model_name in ["ResistiveMHD", "ExtendedMHD"]:
+        B_final = jnp.array(results[model_name][-1])
+        l2_err = float(l2_error(B_final, B_analytic_final))
+        peak_final = float(jnp.max(jnp.sqrt(jnp.sum(B_final**2, axis=-1))))
+        peak_ratio = peak_final / peak_initial
 
-    # Compute peak amplitude ratio
-    peak_initial = jnp.max(jnp.sqrt(jnp.sum(B_initial**2, axis=-1)))
-    peak_final = jnp.max(jnp.sqrt(jnp.sum(B_final**2, axis=-1)))
-    peak_ratio = float(peak_final / peak_initial)
+        thresholds = ACCEPTANCE[model_name]
+        l2_pass = l2_err < thresholds["l2_error"]
+        peak_pass = peak_ratio > thresholds["peak_amplitude_ratio"]
+
+        model_metrics[model_name] = {
+            "l2_error": {"value": l2_err, "threshold": thresholds["l2_error"], "passed": l2_pass},
+            "peak_amplitude_ratio": {"value": peak_ratio, "threshold": thresholds["peak_amplitude_ratio"], "passed": peak_pass},
+            "overall_pass": l2_pass and peak_pass,
+        }
+
+    overall_pass = all(m["overall_pass"] for m in model_metrics.values())
 
     print("Metrics:")
-    print(f"  L2 error: {l2_err:.4g} (threshold: {ACCEPTANCE['l2_error']})")
-    print(f"  Peak amplitude ratio: {peak_ratio:.4g} (threshold: {ACCEPTANCE['peak_amplitude_ratio']})")
+    for model_name, m in model_metrics.items():
+        print(f"  {model_name}:")
+        print(f"    L2 error: {m['l2_error']['value']:.4g} (threshold: {m['l2_error']['threshold']})")
+        print(f"    Peak ratio: {m['peak_amplitude_ratio']['value']:.4g} (threshold: {m['peak_amplitude_ratio']['threshold']})")
     print()
 
-    l2_pass = l2_err < ACCEPTANCE["l2_error"]
-    peak_pass = peak_ratio > ACCEPTANCE["peak_amplitude_ratio"]
-    overall_pass = l2_pass and peak_pass
-
-    metrics = {
-        "l2_error": {
-            "value": float(l2_err),
-            "threshold": ACCEPTANCE["l2_error"],
-            "passed": l2_pass,
-            "description": "Relative L2 error between final and analytic B field",
-        },
-        "peak_amplitude_ratio": {
-            "value": peak_ratio,
-            "threshold": ACCEPTANCE["peak_amplitude_ratio"],
-            "passed": peak_pass,
-            "description": "Ratio of peak |B| after one rotation to initial peak",
-        },
-    }
+    # Build metrics dict for report (flatten model metrics)
+    metrics = {}
+    for model_name, m in model_metrics.items():
+        metrics[f"{model_name}_l2_error"] = {
+            "value": m["l2_error"]["value"],
+            "threshold": m["l2_error"]["threshold"],
+            "passed": m["l2_error"]["passed"],
+            "description": f"Relative L2 error between {model_name} and analytic B field",
+        }
+        metrics[f"{model_name}_peak_amplitude_ratio"] = {
+            "value": m["peak_amplitude_ratio"]["value"],
+            "threshold": m["peak_amplitude_ratio"]["threshold"],
+            "passed": m["peak_amplitude_ratio"]["passed"],
+            "description": f"Ratio of peak |B| after one rotation to initial peak ({model_name})",
+        }
 
     report = ValidationReport(
         name=NAME,
@@ -343,7 +587,7 @@ def main() -> bool:
         timing={"simulation": t_sim},
     )
 
-    # Plot B magnitude at z=0 (2D contour)
+    # Plot B magnitude at z=0 (2D contour) - multi-model comparison
     import matplotlib.pyplot as plt
 
     z_idx = geometry.nz // 2
@@ -351,9 +595,10 @@ def main() -> bool:
     y = geometry.y_grid[:, :, z_idx]
 
     B_mag_analytic = jnp.sqrt(jnp.sum(B_analytic_final[:, :, z_idx, :]**2, axis=-1))
-    B_mag_final = jnp.sqrt(jnp.sum(B_final[:, :, z_idx, :]**2, axis=-1))
+    B_mag_resistive = jnp.sqrt(jnp.sum(jnp.array(results["ResistiveMHD"][-1])[:, :, z_idx, :]**2, axis=-1))
+    B_mag_extended = jnp.sqrt(jnp.sum(jnp.array(results["ExtendedMHD"][-1])[:, :, z_idx, :]**2, axis=-1))
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
 
     # Analytic
     im0 = axes[0].contourf(x, y, B_mag_analytic, levels=20, cmap="viridis")
@@ -363,48 +608,52 @@ def main() -> bool:
     axes[0].set_aspect("equal")
     plt.colorbar(im0, ax=axes[0], label="|B| [T]")
 
-    # Final
-    im1 = axes[1].contourf(x, y, B_mag_final, levels=20, cmap="viridis")
-    axes[1].set_title(f"Numerical |B| (t={cfg['t_end']:.2f}s)")
+    # ResistiveMHD
+    im1 = axes[1].contourf(x, y, B_mag_resistive, levels=20, cmap="viridis")
+    axes[1].set_title(f"ResistiveMHD |B| (t={cfg['t_end']:.2f}s)")
     axes[1].set_xlabel("x [m]")
     axes[1].set_ylabel("y [m]")
     axes[1].set_aspect("equal")
     plt.colorbar(im1, ax=axes[1], label="|B| [T]")
 
-    # Error
-    error = B_mag_final - B_mag_analytic
-    im2 = axes[2].contourf(x, y, error, levels=20, cmap="RdBu_r")
-    axes[2].set_title("Error (Numerical - Analytic)")
+    # ExtendedMHD
+    im2 = axes[2].contourf(x, y, B_mag_extended, levels=20, cmap="viridis")
+    axes[2].set_title(f"ExtendedMHD |B| (t={cfg['t_end']:.2f}s)")
     axes[2].set_xlabel("x [m]")
     axes[2].set_ylabel("y [m]")
     axes[2].set_aspect("equal")
-    plt.colorbar(im2, ax=axes[2], label="Error [T]")
+    plt.colorbar(im2, ax=axes[2], label="|B| [T]")
 
     plt.tight_layout()
     report.add_plot(fig, name="B_magnitude_comparison")
 
-    # Generate animations
-    print("Generating animations...")
+    # Generate visualizations
+    print("Generating visualizations...")
     report_dir = report.save()
 
-    anim_2d_path = Path(report_dir) / "frozen_flux_2d_evolution.gif"
-    anim_1d_path = Path(report_dir) / "frozen_flux_1d_evolution.gif"
-
-    create_2d_animation(times, B_numerical, B_analytic, geometry, str(anim_2d_path))
-    create_1d_animation(times, B_numerical, B_analytic, geometry, config, str(anim_1d_path))
+    # 3-model animations
+    create_3model_2d_animation(results["times"], results, geometry,
+                               Path(report_dir) / "frozen_flux_3model_2d.gif")
+    create_3model_1d_animation(results["times"], results, geometry,
+                               Path(report_dir) / "frozen_flux_3model_1d.gif")
+    create_multi_frame_summary(results["times"], results, geometry,
+                               Path(report_dir) / "multi_frame_summary.png")
 
     print()
     print(f"Report saved to: {report_dir}")
     print()
 
     if overall_pass:
-        print("PASS: All acceptance criteria met")
+        print("PASS: All acceptance criteria met for all models")
     else:
         print("FAIL: Some acceptance criteria not met")
-        if not l2_pass:
-            print(f"  - L2 error {l2_err:.4g} exceeds threshold {ACCEPTANCE['l2_error']}")
-        if not peak_pass:
-            print(f"  - Peak ratio {peak_ratio:.4g} below threshold {ACCEPTANCE['peak_amplitude_ratio']}")
+        for model_name, m in model_metrics.items():
+            if not m["overall_pass"]:
+                print(f"  {model_name}:")
+                if not m["l2_error"]["passed"]:
+                    print(f"    - L2 error {m['l2_error']['value']:.4g} exceeds threshold {m['l2_error']['threshold']}")
+                if not m["peak_amplitude_ratio"]["passed"]:
+                    print(f"    - Peak ratio {m['peak_amplitude_ratio']['value']:.4g} below threshold {m['peak_amplitude_ratio']['threshold']}")
 
     return overall_pass
 

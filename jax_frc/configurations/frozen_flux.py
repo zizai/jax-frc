@@ -87,6 +87,10 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     # "central" = Standard central differences
     advection_scheme: str = "ct"
 
+    # ExtendedMHD options
+    include_hall: bool = True  # Include Hall term (J x B)/(ne)
+    include_electron_pressure: bool = True  # Include grad(p_e)/(ne) term
+
     def build_geometry(self) -> Geometry:
         """3D Cartesian geometry with thin z (pseudo-2D in x-y plane)."""
         return Geometry(
@@ -153,7 +157,11 @@ class FrozenFluxConfiguration(AbstractConfiguration):
             return ResistiveMHD(eta=self.eta, advection_scheme=self.advection_scheme)
 
         elif self.model_type == "extended_mhd":
-            return ExtendedMHD(eta=self.eta)
+            return ExtendedMHD(
+                eta=self.eta,
+                include_hall=self.include_hall,
+                include_electron_pressure=self.include_electron_pressure,
+            )
 
         elif self.model_type == "plasma_neutral":
             plasma_model = ResistiveMHD(eta=self.eta, advection_scheme=self.advection_scheme)
