@@ -61,3 +61,29 @@ class TestExtendedMHD3D:
 
         # With Hall term, results should differ
         assert not jnp.allclose(rhs_hall.B, rhs_no_hall.B)
+
+    def test_apply_constraints_cleans_divergence(self):
+        """apply_constraints should reduce div(B) in ExtendedMHD."""
+        from jax_frc.operators import divergence_3d
+
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
+
+        # Create state with non-zero divergence (sinusoidal has zero mean)
+        B = jnp.zeros((16, 16, 16, 3))
+        B = B.at[:, :, :, 0].set(jnp.sin(2 * jnp.pi * geom.x_grid))
+
+        state = State(
+            B=B,
+            E=jnp.zeros((16, 16, 16, 3)),
+            n=jnp.ones((16, 16, 16)) * 1e20,
+            p=jnp.ones((16, 16, 16)) * 1e3,
+            v=jnp.zeros((16, 16, 16, 3)),
+        )
+
+        model = ExtendedMHD(eta=1e-4)
+
+        div_before = jnp.linalg.norm(divergence_3d(state.B, geom))
+        cleaned_state = model.apply_constraints(state, geom)
+        div_after = jnp.linalg.norm(divergence_3d(cleaned_state.B, geom))
+
+        assert div_after < div_before * 0.2  # At least 5x reduction

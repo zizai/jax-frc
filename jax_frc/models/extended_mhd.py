@@ -178,7 +178,14 @@ class ExtendedMHD(PhysicsModel):
         return B_total[:, :, :, 0], B_total[:, :, :, 2]
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
-        """Apply boundary conditions."""
+        """Apply boundary conditions and divergence cleaning."""
+        from jax_frc.solvers.divergence_cleaning import clean_divergence
+
+        # Clean divergence first
+        B_clean = clean_divergence(state.B, geometry, max_iter=200, tol=1e-6)
+        state = state.replace(B=B_clean)
+
+        # Then apply temperature BCs if configured
         if self.temperature_bc is None or state.Te is None:
             return state
 
