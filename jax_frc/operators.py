@@ -357,6 +357,60 @@ def _second_derivative_with_bc(f: Array, dx: float, axis: int, bc: str) -> Array
     return d2f
 
 
+def _reflect_pad(f: Array, axis: int, n_ghost: int, negate: bool) -> Array:
+    """Pad field with reflected ghost cells along a single axis."""
+    left = jnp.take(f, jnp.arange(n_ghost), axis=axis)
+    left = jnp.flip(left, axis=axis)
+    right = jnp.take(f, -1 - jnp.arange(n_ghost), axis=axis)
+    if negate:
+        left = -left
+        right = -right
+    return jnp.concatenate([left, f, right], axis=axis)
+
+
+def _pad_with_bc(f: Array, axis: int, bc: str, n_ghost: int) -> Array:
+    """Pad field with ghost cells based on boundary condition."""
+    if bc == "periodic":
+        left = jnp.take(f, jnp.arange(-n_ghost, 0), axis=axis)
+        right = jnp.take(f, jnp.arange(n_ghost), axis=axis)
+        return jnp.concatenate([left, f, right], axis=axis)
+    if bc == "dirichlet":
+        return _reflect_pad(f, axis, n_ghost, negate=True)
+    if bc == "neumann":
+        return _reflect_pad(f, axis, n_ghost, negate=False)
+    raise ValueError(f"Unknown boundary condition: {bc}")
+
+
+def _derivative_with_bc_pad(f: Array, axis: int, h: float, bc: str, order: int) -> Array:
+    """Compute first derivative with ghost-cell padding for non-periodic BCs."""
+    if bc == "periodic":
+        if order == 4 and f.shape[axis] >= 5:
+            return (
+                -jnp.roll(f, -2, axis=axis)
+                + 8 * jnp.roll(f, -1, axis=axis)
+                - 8 * jnp.roll(f, 1, axis=axis)
+                + jnp.roll(f, 2, axis=axis)
+            ) / (12 * h)
+        return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * h)
+
+    use_4th = order == 4 and f.shape[axis] >= 5
+    n_ghost = 2 if use_4th else 1
+    f_pad = _pad_with_bc(f, axis, bc, n_ghost)
+    if use_4th:
+        df_pad = (
+            -jnp.roll(f_pad, -2, axis=axis)
+            + 8 * jnp.roll(f_pad, -1, axis=axis)
+            - 8 * jnp.roll(f_pad, 1, axis=axis)
+            + jnp.roll(f_pad, 2, axis=axis)
+        ) / (12 * h)
+    else:
+        df_pad = (jnp.roll(f_pad, -1, axis=axis) - jnp.roll(f_pad, 1, axis=axis)) / (2 * h)
+
+    slicer = [slice(None)] * f.ndim
+    slicer[axis] = slice(n_ghost, -n_ghost)
+    return df_pad[tuple(slicer)]
+
+
 @jit(static_argnums=(1,))
 def gradient_3d(f: Array, geometry: "Geometry") -> Array:
     """Compute gradient of scalar field in 3D Cartesian coordinates.
@@ -559,28 +613,14 @@ def divergence_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     """
     dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
 
-    def deriv_4th(f, axis, h):
-        """4th-order central difference."""
-        return (
-            -jnp.roll(f, -2, axis=axis)
-            + 8 * jnp.roll(f, -1, axis=axis)
-            - 8 * jnp.roll(f, 1, axis=axis)
-            + jnp.roll(f, 2, axis=axis)
-        ) / (12 * h)
-
-    def deriv_2nd(f, axis, h):
-        """2nd-order central difference."""
-        return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * h)
-
-    deriv = deriv_4th if order == 4 else deriv_2nd
-
-    # Use 2nd order for thin dimensions
     use_2nd_y = geometry.ny < 5
     use_2nd_z = geometry.nz < 5
+    order_y = 2 if use_2nd_y else order
+    order_z = 2 if use_2nd_z else order
 
-    dFx_dx = deriv(F[..., 0], 0, dx)
-    dFy_dy = deriv_2nd(F[..., 1], 1, dy) if use_2nd_y else deriv(F[..., 1], 1, dy)
-    dFz_dz = deriv_2nd(F[..., 2], 2, dz) if use_2nd_z else deriv(F[..., 2], 2, dz)
+    dFx_dx = _derivative_with_bc_pad(F[..., 0], 0, dx, geometry.bc_x, order)
+    dFy_dy = _derivative_with_bc_pad(F[..., 1], 1, dy, geometry.bc_y, order_y)
+    dFz_dz = _derivative_with_bc_pad(F[..., 2], 2, dz, geometry.bc_z, order_z)
 
     return dFx_dx + dFy_dy + dFz_dz
 
@@ -605,36 +645,17 @@ def curl_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
     Fx, Fy, Fz = F[..., 0], F[..., 1], F[..., 2]
 
-    # 4th-order central differences: (-f[i+2] + 8*f[i+1] - 8*f[i-1] + f[i-2]) / (12*h)
-    # 2nd-order central differences: (f[i+1] - f[i-1]) / (2*h)
-
-    def deriv_4th(f, axis, h):
-        """4th-order central difference."""
-        return (
-            -jnp.roll(f, -2, axis=axis)
-            + 8 * jnp.roll(f, -1, axis=axis)
-            - 8 * jnp.roll(f, 1, axis=axis)
-            + jnp.roll(f, 2, axis=axis)
-        ) / (12 * h)
-
-    def deriv_2nd(f, axis, h):
-        """2nd-order central difference."""
-        return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * h)
-
-    # Select derivative function based on order
-    # Note: For thin dimensions (size 1), use 2nd order to avoid issues
-    deriv = deriv_4th if order == 4 else deriv_2nd
-
-    # Partial derivatives - use 2nd order for thin dimensions
     use_2nd_y = geometry.ny < 5
     use_2nd_z = geometry.nz < 5
+    order_y = 2 if use_2nd_y else order
+    order_z = 2 if use_2nd_z else order
 
-    dFx_dy = deriv_2nd(Fx, 1, dy) if use_2nd_y else deriv(Fx, 1, dy)
-    dFx_dz = deriv_2nd(Fx, 2, dz) if use_2nd_z else deriv(Fx, 2, dz)
-    dFy_dx = deriv(Fy, 0, dx)
-    dFy_dz = deriv_2nd(Fy, 2, dz) if use_2nd_z else deriv(Fy, 2, dz)
-    dFz_dx = deriv(Fz, 0, dx)
-    dFz_dy = deriv_2nd(Fz, 1, dy) if use_2nd_y else deriv(Fz, 1, dy)
+    dFx_dy = _derivative_with_bc_pad(Fx, 1, dy, geometry.bc_y, order_y)
+    dFx_dz = _derivative_with_bc_pad(Fx, 2, dz, geometry.bc_z, order_z)
+    dFy_dx = _derivative_with_bc_pad(Fy, 0, dx, geometry.bc_x, order)
+    dFy_dz = _derivative_with_bc_pad(Fy, 2, dz, geometry.bc_z, order_z)
+    dFz_dx = _derivative_with_bc_pad(Fz, 0, dx, geometry.bc_x, order)
+    dFz_dy = _derivative_with_bc_pad(Fz, 1, dy, geometry.bc_y, order_y)
 
     curl_x = dFz_dy - dFy_dz
     curl_y = dFx_dz - dFz_dx

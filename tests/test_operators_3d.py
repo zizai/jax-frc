@@ -124,6 +124,31 @@ class TestDivergence3D:
         div_F = divergence_3d(F, geom)
         assert jnp.allclose(div_F, 0.0, atol=1e-10)
 
+    def test_divergence_neumann_zero_gradient(self):
+        """Divergence of constant field should be zero with Neumann BCs."""
+        geom = Geometry(nx=8, ny=8, nz=8, bc_x="neumann", bc_y="neumann", bc_z="neumann")
+        F = jnp.zeros((8, 8, 8, 3))
+        F = F.at[..., 0].set(1.0)
+        div_F = divergence_3d(F, geom)
+        assert jnp.allclose(div_F, 0.0, atol=1e-6)
+
+    def test_divergence_dirichlet_sine_boundary(self):
+        """Dirichlet BCs should match analytic derivative at boundaries."""
+        geom = Geometry(
+            nx=8, ny=8, nz=8,
+            x_min=0.0, x_max=1.0,
+            y_min=0.0, y_max=1.0,
+            z_min=0.0, z_max=1.0,
+            bc_x="dirichlet", bc_y="dirichlet", bc_z="dirichlet"
+        )
+        F = jnp.zeros((8, 8, 8, 3))
+        L = geom.x_max - geom.x_min
+        F = F.at[..., 0].set(jnp.sin(jnp.pi * geom.x_grid / L))
+        div_F = divergence_3d(F, geom)
+        expected = (jnp.pi / L) * jnp.cos(jnp.pi * geom.x_grid / L)
+        assert jnp.allclose(div_F[0, :, :], expected[0, :, :], atol=1e-2)
+        assert jnp.allclose(div_F[-1, :, :], expected[-1, :, :], atol=1e-2)
+
 
 class TestCurl3D:
     """Test 3D curl operator."""
@@ -167,6 +192,23 @@ class TestCurl3D:
         assert jnp.allclose(curl_F[2:-2, 2:-2, :, 0], 0.0, atol=1e-7)
         assert jnp.allclose(curl_F[2:-2, 2:-2, :, 1], 0.0, atol=1e-7)
         assert jnp.allclose(curl_F[2:-2, 2:-2, :, 2], 2.0, atol=1e-6)
+
+    def test_curl_dirichlet_zero_boundary(self):
+        """Dirichlet BCs should match analytic derivative at boundaries."""
+        geom = Geometry(
+            nx=8, ny=8, nz=8,
+            x_min=0.0, x_max=1.0,
+            y_min=0.0, y_max=1.0,
+            z_min=0.0, z_max=1.0,
+            bc_x="dirichlet", bc_y="dirichlet", bc_z="dirichlet"
+        )
+        F = jnp.zeros((8, 8, 8, 3))
+        L = geom.x_max - geom.x_min
+        F = F.at[..., 1].set(jnp.sin(jnp.pi * geom.x_grid / L))
+        curl_F = curl_3d(F, geom)
+        expected = (jnp.pi / L) * jnp.cos(jnp.pi * geom.x_grid / L)
+        assert jnp.allclose(curl_F[0, :, :, 2], expected[0, :, :], atol=1e-2)
+        assert jnp.allclose(curl_F[-1, :, :, 2], expected[-1, :, :], atol=1e-2)
 
 
 class TestLaplacian3D:
