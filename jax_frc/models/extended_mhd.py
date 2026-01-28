@@ -91,6 +91,7 @@ class ExtendedMHD(PhysicsModel):
     include_electron_pressure: bool = True
     kappa_parallel: float = 1e20
     kappa_perp: float = 1e18
+    apply_divergence_cleaning: bool = True
     external_field: Optional[CoilField] = None
     temperature_bc: Optional[TemperatureBoundaryCondition] = None
 
@@ -100,39 +101,56 @@ class ExtendedMHD(PhysicsModel):
         B = state.B
         n = jnp.maximum(state.n, 1e16)  # Avoid division by zero
 
-        # Current density: J = curl(B) / mu_0
-        J = curl_3d(B, geometry) / MU0
+        use_ct_advection = (
+            not self.include_hall
+            and not self.include_electron_pressure
+            and state.v is not None
+        )
+        if use_ct_advection:
+            from jax_frc.solvers.constrained_transport import induction_rhs_ct
 
-        # Start with resistive term: E = eta*J
-        E = self.eta * J
+            # Advection via CT for ideal-MHD limit
+            dB_dt_advection = induction_rhs_ct(state.v, B, geometry)
+            dB_dt_resistive = (
+                self.eta / MU0 * laplacian_3d(B, geometry)
+                if self.eta > 0
+                else jnp.zeros_like(B)
+            )
+            dB_dt = dB_dt_advection + dB_dt_resistive
+        else:
+            # Current density: J = curl(B) / mu_0
+            J = curl_3d(B, geometry) / MU0
 
-        # Hall term: (J x B) / (ne)
-        if self.include_hall:
-            J_cross_B = jnp.stack([
-                J[..., 1] * B[..., 2] - J[..., 2] * B[..., 1],
-                J[..., 2] * B[..., 0] - J[..., 0] * B[..., 2],
-                J[..., 0] * B[..., 1] - J[..., 1] * B[..., 0],
-            ], axis=-1)
-            E = E + J_cross_B / (n[..., None] * QE)
+            # Start with resistive term: E = eta*J
+            E = self.eta * J
 
-        # Electron pressure term: -grad(p_e) / (ne)
-        if self.include_electron_pressure and state.Te is not None:
-            p_e = n * state.Te  # Electron pressure
-            grad_pe = gradient_3d(p_e, geometry)
-            E = E - grad_pe / (n[..., None] * QE)
+            # Hall term: (J x B) / (ne)
+            if self.include_hall:
+                J_cross_B = jnp.stack([
+                    J[..., 1] * B[..., 2] - J[..., 2] * B[..., 1],
+                    J[..., 2] * B[..., 0] - J[..., 0] * B[..., 2],
+                    J[..., 0] * B[..., 1] - J[..., 1] * B[..., 0],
+                ], axis=-1)
+                E = E + J_cross_B / (n[..., None] * QE)
 
-        # Convective term: -v x B
-        if state.v is not None:
-            v = state.v
-            v_cross_B = jnp.stack([
-                v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
-                v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
-                v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
-            ], axis=-1)
-            E = E - v_cross_B
+            # Electron pressure term: -grad(p_e) / (ne)
+            if self.include_electron_pressure and state.Te is not None:
+                p_e = n * state.Te  # Electron pressure
+                grad_pe = gradient_3d(p_e, geometry)
+                E = E - grad_pe / (n[..., None] * QE)
 
-        # Faraday's law: dB/dt = -curl(E)
-        dB_dt = -curl_3d(E, geometry)
+            # Convective term: -v x B
+            if state.v is not None:
+                v = state.v
+                v_cross_B = jnp.stack([
+                    v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
+                    v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
+                    v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
+                ], axis=-1)
+                E = E - v_cross_B
+
+            # Faraday's law: dB/dt = -curl(E)
+            dB_dt = -curl_3d(E, geometry)
 
         # Temperature evolution with thermal conduction
         dTe_dt = None
@@ -179,11 +197,12 @@ class ExtendedMHD(PhysicsModel):
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
         """Apply boundary conditions and divergence cleaning."""
-        from jax_frc.solvers.divergence_cleaning import clean_divergence
+        if self.apply_divergence_cleaning:
+            from jax_frc.solvers.divergence_cleaning import clean_divergence
 
-        # Clean divergence first
-        B_clean = clean_divergence(state.B, geometry, max_iter=200, tol=1e-6)
-        state = state.replace(B=B_clean)
+            # Clean divergence first
+            B_clean = clean_divergence(state.B, geometry, max_iter=200, tol=1e-6)
+            state = state.replace(B=B_clean)
 
         # Then apply temperature BCs if configured
         if self.temperature_bc is None or state.Te is None:

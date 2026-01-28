@@ -21,6 +21,7 @@ from jax_frc.core.geometry import Geometry
 from jax_frc.core.state import State
 from jax_frc.models.resistive_mhd import ResistiveMHD
 from jax_frc.solvers.explicit import RK4Solver
+from jax_frc.operators import apply_boundary_dirichlet
 from jax_frc.validation.metrics import l2_error
 from validation.utils.reporting import ValidationReport
 
@@ -107,6 +108,12 @@ def run_simulation(cfg: dict) -> tuple[State, Geometry]:
     n_steps = int(t_end / dt)
     for _ in range(n_steps):
         state = solver.step(state, dt, model, geom)
+        # Enforce Dirichlet B=0 at boundaries (conducting walls).
+        B = state.B
+        for comp in range(3):
+            B_slice = apply_boundary_dirichlet(B[:, :, 0, comp], value=0.0)
+            B = B.at[:, :, 0, comp].set(B_slice)
+        state = state.replace(B=B)
 
     return state, geom
 
@@ -168,6 +175,11 @@ def run_validation() -> bool:
     return overall_pass
 
 
+def main() -> bool:
+    """Entry point for validation runner."""
+    return run_validation()
+
+
 if __name__ == "__main__":
-    success = run_validation()
+    success = main()
     sys.exit(0 if success else 1)

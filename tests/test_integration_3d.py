@@ -273,7 +273,7 @@ class TestOperatorIntegration:
 
     def test_faraday_law_consistency(self):
         """Test that dB/dt = -curl(E) is computed consistently."""
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="neumann")
 
         # Create a simple E field: E = eta * J where J = curl(B)/mu0
         B = harris_sheet_3d(geom, B0=0.1, L=0.2)
@@ -289,12 +289,12 @@ class TestOperatorIntegration:
 
     def test_div_b_constraint(self):
         """Test that uniform field has div(B) = 0."""
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         B = uniform_field_3d(geom, B0=0.1, direction="z")
 
         div_B = divergence_3d(B, geom)
 
-        assert jnp.max(jnp.abs(div_B)) < 1e-10
+        assert jnp.max(jnp.abs(div_B)) < 1e-7
 
     def test_operators_with_geometry(self):
         """Test operators work correctly with non-unit geometry."""

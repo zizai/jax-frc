@@ -270,41 +270,45 @@ def _derivative_with_bc(f: Array, dx: float, axis: int, bc: str, order: int = 4)
 
     if bc == "periodic":
         if order == 4 and n >= 5:
-            # 4th-order central differences with periodic wrap
+            # 4th-order central differences with periodic wrap.
             return (
                 -jnp.roll(f, -2, axis=axis)
                 + 8 * jnp.roll(f, -1, axis=axis)
                 - 8 * jnp.roll(f, 1, axis=axis)
                 + jnp.roll(f, 2, axis=axis)
             ) / (12 * dx)
-        else:
-            # 2nd-order central differences with periodic wrap
-            return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * dx)
+        # 2nd-order central differences with periodic wrap.
+        return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * dx)
 
-    # Non-periodic: central interior, one-sided at boundaries
-    # Interior: central difference
-    f_plus = jnp.roll(f, -1, axis=axis)
-    f_minus = jnp.roll(f, 1, axis=axis)
-    df = (f_plus - f_minus) / (2 * dx)
+    # Non-periodic: use 4th-order ghost-cell padding when requested,
+    # otherwise central differences with one-sided boundary stencils.
+    if order == 4 and n >= 5:
+        return _derivative_with_bc_pad(f, axis, dx, bc, order=4)
 
-    # Boundary corrections using slicing
     ndim = f.ndim
+    df = jnp.zeros_like(f)
 
-    # Left boundary: forward difference (f[1] - f[0]) / dx
-    left_slice = [slice(None)] * ndim
-    left_slice[axis] = 0
-    next_slice = [slice(None)] * ndim
-    next_slice[axis] = 1
-    df_left = (f[tuple(next_slice)] - f[tuple(left_slice)]) / dx
-    df = df.at[tuple(left_slice)].set(df_left)
+    # Interior: 2nd-order central differences (no wrap).
+    center = [slice(None)] * ndim
+    plus = [slice(None)] * ndim
+    minus = [slice(None)] * ndim
+    center[axis] = slice(1, -1)
+    plus[axis] = slice(2, None)
+    minus[axis] = slice(None, -2)
+    df = df.at[tuple(center)].set((f[tuple(plus)] - f[tuple(minus)]) / (2 * dx))
 
-    # Right boundary: backward difference (f[-1] - f[-2]) / dx
-    right_slice = [slice(None)] * ndim
-    right_slice[axis] = -1
-    prev_slice = [slice(None)] * ndim
-    prev_slice[axis] = -2
-    df_right = (f[tuple(right_slice)] - f[tuple(prev_slice)]) / dx
-    df = df.at[tuple(right_slice)].set(df_right)
+    # Boundaries: one-sided differences.
+    left = [slice(None)] * ndim
+    left[axis] = 0
+    left_next = [slice(None)] * ndim
+    left_next[axis] = 1
+    df = df.at[tuple(left)].set((f[tuple(left_next)] - f[tuple(left)]) / dx)
+
+    right = [slice(None)] * ndim
+    right[axis] = -1
+    right_prev = [slice(None)] * ndim
+    right_prev[axis] = -2
+    df = df.at[tuple(right)].set((f[tuple(right)] - f[tuple(right_prev)]) / dx)
 
     return df
 
@@ -424,9 +428,12 @@ def gradient_3d(f: Array, geometry: "Geometry") -> Array:
     Returns:
         Gradient vector field, shape (nx, ny, nz, 3) with [df/dx, df/dy, df/dz]
     """
-    df_dx = _derivative_with_bc(f, geometry.dx, axis=0, bc=geometry.bc_x)
-    df_dy = _derivative_with_bc(f, geometry.dy, axis=1, bc=geometry.bc_y)
-    df_dz = _derivative_with_bc(f, geometry.dz, axis=2, bc=geometry.bc_z)
+    order_x = 4 if geometry.bc_x == "periodic" else 2
+    order_y = 4 if geometry.bc_y == "periodic" else 2
+    order_z = 4 if geometry.bc_z == "periodic" else 2
+    df_dx = _derivative_with_bc(f, geometry.dx, 0, geometry.bc_x, order=order_x)
+    df_dy = _derivative_with_bc(f, geometry.dy, 1, geometry.bc_y, order=order_y)
+    df_dz = _derivative_with_bc(f, geometry.dz, 2, geometry.bc_z, order=order_z)
 
     return jnp.stack([df_dx, df_dy, df_dz], axis=-1)
 
@@ -471,17 +478,11 @@ def laplacian_3d_explicit(f: Array, dx: float, dy: float, dz: float) -> Array:
 def laplacian_3d(f: Array, geometry: "Geometry") -> Array:
     """Compute Laplacian of scalar field in 3D Cartesian coordinates.
 
-    Args:
-        f: Scalar field, shape (nx, ny, nz)
-        geometry: 3D Cartesian geometry with bc_x, bc_y, bc_z settings
-
-    Returns:
-        Laplacian scalar field, shape (nx, ny, nz)
+    Uses second-derivative stencils with boundary-aware ghost cells.
     """
-    d2f_dx2 = _second_derivative_with_bc(f, geometry.dx, axis=0, bc=geometry.bc_x)
-    d2f_dy2 = _second_derivative_with_bc(f, geometry.dy, axis=1, bc=geometry.bc_y)
-    d2f_dz2 = _second_derivative_with_bc(f, geometry.dz, axis=2, bc=geometry.bc_z)
-
+    d2f_dx2 = _second_derivative_with_bc(f, geometry.dx, 0, geometry.bc_x)
+    d2f_dy2 = _second_derivative_with_bc(f, geometry.dy, 1, geometry.bc_y)
+    d2f_dz2 = _second_derivative_with_bc(f, geometry.dz, 2, geometry.bc_z)
     return d2f_dx2 + d2f_dy2 + d2f_dz2
 
 
@@ -612,15 +613,11 @@ def divergence_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
         Divergence scalar field, shape (nx, ny, nz)
     """
     dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+    bc_x, bc_y, bc_z = geometry.bc_x, geometry.bc_y, geometry.bc_z
 
-    use_2nd_y = geometry.ny < 5
-    use_2nd_z = geometry.nz < 5
-    order_y = 2 if use_2nd_y else order
-    order_z = 2 if use_2nd_z else order
-
-    dFx_dx = _derivative_with_bc_pad(F[..., 0], 0, dx, geometry.bc_x, order)
-    dFy_dy = _derivative_with_bc_pad(F[..., 1], 1, dy, geometry.bc_y, order_y)
-    dFz_dz = _derivative_with_bc_pad(F[..., 2], 2, dz, geometry.bc_z, order_z)
+    dFx_dx = _derivative_with_bc(F[..., 0], dx, 0, bc_x, order=order)
+    dFy_dy = _derivative_with_bc(F[..., 1], dy, 1, bc_y, order=order)
+    dFz_dz = _derivative_with_bc(F[..., 2], dz, 2, bc_z, order=order)
 
     return dFx_dx + dFy_dy + dFz_dz
 
@@ -643,6 +640,7 @@ def curl_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
         Curl vector field, shape (nx, ny, nz, 3)
     """
     dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+    bc_x, bc_y, bc_z = geometry.bc_x, geometry.bc_y, geometry.bc_z
     Fx, Fy, Fz = F[..., 0], F[..., 1], F[..., 2]
 
     use_2nd_y = geometry.ny < 5
@@ -650,12 +648,12 @@ def curl_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     order_y = 2 if use_2nd_y else order
     order_z = 2 if use_2nd_z else order
 
-    dFx_dy = _derivative_with_bc_pad(Fx, 1, dy, geometry.bc_y, order_y)
-    dFx_dz = _derivative_with_bc_pad(Fx, 2, dz, geometry.bc_z, order_z)
-    dFy_dx = _derivative_with_bc_pad(Fy, 0, dx, geometry.bc_x, order)
-    dFy_dz = _derivative_with_bc_pad(Fy, 2, dz, geometry.bc_z, order_z)
-    dFz_dx = _derivative_with_bc_pad(Fz, 0, dx, geometry.bc_x, order)
-    dFz_dy = _derivative_with_bc_pad(Fz, 1, dy, geometry.bc_y, order_y)
+    dFx_dy = _derivative_with_bc(Fx, dy, 1, bc_y, order=order_y)
+    dFx_dz = _derivative_with_bc(Fx, dz, 2, bc_z, order=order_z)
+    dFy_dx = _derivative_with_bc(Fy, dx, 0, bc_x, order=order)
+    dFy_dz = _derivative_with_bc(Fy, dz, 2, bc_z, order=order_z)
+    dFz_dx = _derivative_with_bc(Fz, dx, 0, bc_x, order=order)
+    dFz_dy = _derivative_with_bc(Fz, dy, 1, bc_y, order=order_y)
 
     curl_x = dFz_dy - dFy_dz
     curl_y = dFx_dz - dFz_dx

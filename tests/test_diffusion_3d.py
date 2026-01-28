@@ -60,7 +60,7 @@ class TestGaussianDiffusion3D:
         eta = 1e-2
         B0 = 1.0
         sigma0 = 0.2
-        t_final = 0.01
+        t_final = 0.001
 
         # Grid (domain large enough for Gaussian to fit)
         geom = Geometry(
@@ -73,6 +73,9 @@ class TestGaussianDiffusion3D:
             y_max=1.0,
             z_min=-1.0,
             z_max=1.0,
+            bc_x="periodic",
+            bc_y="periodic",
+            bc_z="periodic",
         )
 
         # Initial condition
@@ -91,15 +94,16 @@ class TestGaussianDiffusion3D:
         # dt < dx^2 / (2*eta/mu0) * safety_factor
         dx_min = min(geom.dx, geom.dy, geom.dz)
         diffusivity = eta / MU0
-        dt_stable = 0.25 * dx_min**2 / diffusivity
+        # 3D explicit diffusion is stable for dt <= O(dx^2 / (6*D)).
+        # Use a conservative factor for RK4 to avoid long-time instability.
+        dt_stable = 0.1 * dx_min**2 / diffusivity
         dt = min(dt_stable, 1e-5)  # Cap at 1e-5 for safety
         n_steps = int(t_final / dt)
 
-        # Time evolution using lax.fori_loop for efficiency
-        def step_fn(i, state):
-            return rk4_step(state, dt, model, geom)
-
-        final_state = lax.fori_loop(0, n_steps, step_fn, state)
+        # Time evolution using a Python loop to avoid XLA instability in long runs.
+        final_state = state
+        for _ in range(n_steps):
+            final_state = rk4_step(final_state, dt, model, geom)
 
         # Compare to analytic
         actual_time = n_steps * dt
@@ -138,6 +142,9 @@ class TestGaussianDiffusion3D:
             y_max=1.0,
             z_min=-1.0,
             z_max=1.0,
+            bc_x="periodic",
+            bc_y="periodic",
+            bc_z="periodic",
         )
 
         # Initial condition

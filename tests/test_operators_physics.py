@@ -221,10 +221,12 @@ class TestDivergenceCleaning:
 
         nx, ny, nz = geometry.nx, geometry.ny, geometry.nz
 
-        # Create B field with non-zero divergence: B = (x, 0, z)
+        # Create B field with non-zero, zero-mean divergence.
         B = jnp.zeros((nx, ny, nz, 3))
-        B = B.at[:, :, :, 0].set(geometry.x_grid)
-        B = B.at[:, :, :, 2].set(geometry.z_grid)
+        Lx = geometry.x_max - geometry.x_min
+        Lz = geometry.z_max - geometry.z_min
+        B = B.at[:, :, :, 0].set(jnp.sin(jnp.pi * geometry.x_grid / Lx))
+        B = B.at[:, :, :, 2].set(jnp.sin(jnp.pi * geometry.z_grid / Lz))
 
         # Compute initial divergence - check interior region
         div_B_initial = divergence_3d(B, geometry)

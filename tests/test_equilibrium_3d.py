@@ -35,6 +35,7 @@ class TestForceBalanceSolver:
             x_min=-1.0, x_max=1.0,
             y_min=-1.0, y_max=1.0,
             z_min=-1.0, z_max=1.0,
+            bc_x="periodic", bc_y="periodic", bc_z="periodic",
         )
         solver = ForceBalanceSolver()
 
@@ -94,6 +95,7 @@ class TestForceBalanceSolver:
             x_min=-1.0, x_max=1.0,
             y_min=-1.0, y_max=1.0,
             z_min=-0.5, z_max=0.5,
+            bc_x="periodic", bc_y="periodic", bc_z="periodic",
         )
         solver = ForceBalanceSolver(max_iterations=10, tolerance=1e-4)
 
@@ -279,7 +281,7 @@ class TestEquilibriumPhysics:
         """Test uniform field is divergence-free."""
         from jax_frc.operators import divergence_3d
 
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="neumann")
         B = uniform_field_3d(geom, B0=0.1, direction="z")
 
         div_B = divergence_3d(B, geom)

@@ -151,18 +151,23 @@ def run_multi_model_simulation(cfg: dict, n_snapshots: int = 50) -> tuple:
             "model_type": "resistive_mhd",
             "advection_scheme": "ct",
             "eta": 0.0,
+            "dt_scale": 1.0,
         },
         "ExtendedMHD": {
             "model_type": "extended_mhd",
             "eta": 0.0,
             "include_hall": False,  # Disable Hall for frozen flux (advection test)
             "include_electron_pressure": False,  # Disable for pure advection test
+            "apply_divergence_cleaning": False,
+            "dt_scale": 1.0,
         },
     }
 
     first_model = True
     for model_name, model_params in model_configs.items():
         try:
+            model_params = dict(model_params)
+            dt_scale = model_params.pop("dt_scale", 1.0)
             config = FrozenFluxConfiguration(
                 nx=cfg["nx"], ny=cfg["ny"], nz=cfg["nz"],
                 domain_extent=cfg["domain_extent"],
@@ -183,7 +188,7 @@ def run_multi_model_simulation(cfg: dict, n_snapshots: int = 50) -> tuple:
             solver = RK4Solver()
 
             t_end = cfg["t_end"]
-            dt = cfg["dt"]
+            dt = cfg["dt"] * dt_scale
             n_steps = int(t_end / dt)
             snapshot_interval = max(1, n_steps // n_snapshots)
 
