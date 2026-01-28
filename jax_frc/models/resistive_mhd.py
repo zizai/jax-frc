@@ -87,6 +87,11 @@ class ResistiveMHD(PhysicsModel):
         return B_total[:, :, :, 0], B_total[:, :, :, 2]
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
-        """Apply boundary conditions based on geometry.bc_* settings."""
-        # For now, return state unchanged (periodic BCs handled by operators)
-        return state
+        """Apply divergence cleaning to magnetic field.
+
+        Uses projection method: B_clean = B - grad(phi) where laplacian(phi) = div(B)
+        """
+        from jax_frc.solvers.divergence_cleaning import clean_divergence
+
+        B_clean = clean_divergence(state.B, geometry, max_iter=200, tol=1e-6)
+        return state.replace(B=B_clean)
