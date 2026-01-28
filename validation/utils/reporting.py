@@ -23,8 +23,10 @@ class ValidationReport:
             - description: Human-readable description (optional)
         overall_pass: Whether the validation passed overall.
         plots: List of embedded plots (added via add_plot method).
+        animations: List of embedded animations (added via add_animation method).
         timing: Dictionary of timing measurements in seconds.
         warnings: List of warning messages.
+        summary: Optional summary text for the report.
     """
 
     name: str
@@ -34,16 +36,19 @@ class ValidationReport:
     metrics: dict
     overall_pass: bool
     plots: list = field(default_factory=list)
+    animations: list = field(default_factory=list)
     timing: Optional[dict] = None
     warnings: Optional[list] = None
+    summary: Optional[str] = None
 
-    def add_plot(self, fig, name: str = None):
+    def add_plot(self, fig, name: str = None, caption: str = None):
         """Add matplotlib figure, converts to base64 PNG for embedding.
 
         Args:
             fig: A matplotlib Figure object.
             name: Optional name for the plot. If not provided, generates
                   an automatic name like 'plot_0', 'plot_1', etc.
+            caption: Optional caption describing the plot.
         """
         buf = io.BytesIO()
         fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
@@ -52,6 +57,68 @@ class ValidationReport:
         self.plots.append({
             'name': name or f'plot_{len(self.plots)}',
             'data': img_base64,
+            'caption': caption,
+        })
+
+    def add_animation(self, anim, name: str = None, caption: str = None, fps: int = 10):
+        """Add matplotlib animation, converts to base64 GIF for embedding.
+
+        Args:
+            anim: A matplotlib FuncAnimation object.
+            name: Optional name for the animation.
+            caption: Optional caption describing the animation.
+            fps: Frames per second for the GIF.
+        """
+        import tempfile
+        import os
+
+        # Save to temporary file (pillow writer doesn't support BytesIO)
+        with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            anim.save(tmp_path, writer='pillow', fps=fps)
+            with open(tmp_path, 'rb') as f:
+                gif_base64 = base64.b64encode(f.read()).decode('utf-8')
+        finally:
+            os.unlink(tmp_path)
+
+        self.animations.append({
+            'name': name or f'animation_{len(self.animations)}',
+            'data': gif_base64,
+            'caption': caption,
+        })
+
+    def add_animation_from_file(self, filepath: Path, name: str = None, caption: str = None):
+        """Add animation from existing GIF file.
+
+        Args:
+            filepath: Path to the GIF file.
+            name: Optional name for the animation.
+            caption: Optional caption describing the animation.
+        """
+        with open(filepath, 'rb') as f:
+            gif_base64 = base64.b64encode(f.read()).decode('utf-8')
+        self.animations.append({
+            'name': name or filepath.stem,
+            'data': gif_base64,
+            'caption': caption,
+        })
+
+    def add_plot_from_file(self, filepath: Path, name: str = None, caption: str = None):
+        """Add plot from existing PNG file.
+
+        Args:
+            filepath: Path to the PNG file.
+            name: Optional name for the plot.
+            caption: Optional caption describing the plot.
+        """
+        with open(filepath, 'rb') as f:
+            img_base64 = base64.b64encode(f.read()).decode('utf-8')
+        self.plots.append({
+            'name': name or filepath.stem,
+            'data': img_base64,
+            'caption': caption,
         })
 
     def save(self, base_dir: Path = None) -> Path:
@@ -84,6 +151,15 @@ class ValidationReport:
         pass_badge = "PASS" if self.overall_pass else "FAIL"
         badge_color = "#28a745" if self.overall_pass else "#dc3545"
 
+        # Summary section
+        summary_html = ""
+        if self.summary:
+            summary_html = f"""
+            <div class="summary">
+                <h2>Summary</h2>
+                <p>{self.summary}</p>
+            </div>"""
+
         # Configuration table
         config_rows = "\n".join(
             f"<tr><td><code>{k}</code></td><td>{v}</td></tr>"
@@ -108,14 +184,31 @@ class ValidationReport:
                 <td>{desc}</td>
             </tr>"""
 
+        # Animations
+        animations_html = ""
+        if self.animations:
+            animations_html = "<h2>Animations</h2>"
+            for anim in self.animations:
+                caption_html = f"<p class='caption'>{anim['caption']}</p>" if anim.get('caption') else ""
+                animations_html += f"""
+                <div class="animation">
+                    <h3>{anim['name']}</h3>
+                    <img src="data:image/gif;base64,{anim['data']}" alt="{anim['name']}">
+                    {caption_html}
+                </div>"""
+
         # Plots
         plots_html = ""
-        for plot in self.plots:
-            plots_html += f"""
-            <div class="plot">
-                <h3>{plot['name']}</h3>
-                <img src="data:image/png;base64,{plot['data']}" alt="{plot['name']}">
-            </div>"""
+        if self.plots:
+            plots_html = "<h2>Plots</h2>"
+            for plot in self.plots:
+                caption_html = f"<p class='caption'>{plot['caption']}</p>" if plot.get('caption') else ""
+                plots_html += f"""
+                <div class="plot">
+                    <h3>{plot['name']}</h3>
+                    <img src="data:image/png;base64,{plot['data']}" alt="{plot['name']}">
+                    {caption_html}
+                </div>"""
 
         # Timing
         timing_html = ""
@@ -150,16 +243,21 @@ class ValidationReport:
         table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
         th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
         th {{ background: #f5f5f5; }}
-        .plot {{ margin: 20px 0; }}
-        .plot img {{ max-width: 100%; border: 1px solid #ddd; }}
+        .plot, .animation {{ margin: 20px 0; text-align: center; }}
+        .plot img, .animation img {{ max-width: 100%; border: 1px solid #ddd; }}
+        .caption {{ font-style: italic; color: #666; margin-top: 8px; }}
         .physics {{ background: #f8f9fa; padding: 15px; border-left: 4px solid #007bff; margin: 20px 0; }}
+        .summary {{ background: #e8f4f8; padding: 15px; border-left: 4px solid #17a2b8; margin: 20px 0; }}
         .warnings {{ color: #856404; background: #fff3cd; padding: 15px; border-radius: 4px; }}
         code {{ background: #f5f5f5; padding: 2px 5px; border-radius: 3px; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
     </style>
 </head>
 <body>
     <h1>{self.name} <span class="badge" style="background: {badge_color}">{pass_badge}</span></h1>
     <p><strong>{self.description}</strong></p>
+
+    {summary_html}
 
     <div class="physics">
         <h2>Physics Background</h2>
@@ -178,7 +276,7 @@ class ValidationReport:
         <tbody>{metrics_rows}</tbody>
     </table>
 
-    <h2>Plots</h2>
+    {animations_html}
     {plots_html}
 
     {timing_html}

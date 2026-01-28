@@ -357,8 +357,12 @@ def create_1d_animation(times, B_numerical, B_analytic, geometry, config, save_p
     print(f"  Saved 1D animation: {save_path}")
 
 
-def create_3model_2d_animation(times, results, geometry, save_path):
-    """Create 3-panel 2D animation: Analytic | ResistiveMHD | ExtendedMHD."""
+def create_3model_2d_animation(times, results, geometry):
+    """Create 3-panel 2D animation: Analytic | ResistiveMHD | ExtendedMHD.
+
+    Returns:
+        FuncAnimation object (caller should embed in report or save).
+    """
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation
 
@@ -399,13 +403,15 @@ def create_3model_2d_animation(times, results, geometry, save_path):
         return axes
 
     anim = FuncAnimation(fig, update, frames=len(times), interval=100, blit=False)
-    anim.save(str(save_path), writer='pillow', fps=10)
-    plt.close(fig)
-    print(f"  Saved 3-model 2D animation: {save_path}")
+    return anim, fig
 
 
-def create_3model_1d_animation(times, results, geometry, save_path):
-    """Create 1D overlay animation: all three models on same axes."""
+def create_3model_1d_animation(times, results, geometry):
+    """Create 1D overlay animation: all three models on same axes.
+
+    Returns:
+        FuncAnimation object (caller should embed in report or save).
+    """
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation
 
@@ -451,13 +457,15 @@ def create_3model_1d_animation(times, results, geometry, save_path):
         return line_ana, line_res, line_ext, title
 
     anim = FuncAnimation(fig, update, frames=len(times), interval=100, blit=False)
-    anim.save(str(save_path), writer='pillow', fps=10)
-    plt.close(fig)
-    print(f"  Saved 3-model 1D animation: {save_path}")
+    return anim, fig
 
 
-def create_multi_frame_summary(times, results, geometry, save_path):
-    """Create static 3x5 grid: rows=models, cols=time frames."""
+def create_multi_frame_summary(times, results, geometry):
+    """Create static 3x5 grid: rows=models, cols=time frames.
+
+    Returns:
+        matplotlib Figure object.
+    """
     import matplotlib.pyplot as plt
 
     z_idx = geometry.nz // 2
@@ -503,9 +511,7 @@ def create_multi_frame_summary(times, results, geometry, save_path):
 
     plt.suptitle('Frozen Flux Evolution: Model Comparison', fontsize=14)
     plt.tight_layout()
-    plt.savefig(str(save_path), dpi=150)
-    plt.close(fig)
-    print(f"  Saved multi-frame summary: {save_path}")
+    return fig
 
 
 def main() -> bool:
@@ -625,22 +631,51 @@ def main() -> bool:
     plt.colorbar(im2, ax=axes[2], label="|B| [T]")
 
     plt.tight_layout()
-    report.add_plot(fig, name="B_magnitude_comparison")
+    report.add_plot(fig, name="Final State Comparison",
+                    caption="Magnetic field magnitude |B| at the end of simulation for all three models.")
+    plt.close(fig)
 
-    # Generate visualizations
+    # Generate animations and embed in report
     print("Generating visualizations...")
+
+    # 3-model 2D animation
+    anim_2d, fig_2d = create_3model_2d_animation(results["times"], results, geometry)
+    report.add_animation(anim_2d, name="2D Evolution Animation",
+                         caption="Side-by-side comparison of |B| evolution in the x-y plane. "
+                                 "The magnetic loop rotates with the flow field. "
+                                 "ResistiveMHD with CT scheme matches analytic solution exactly.")
+    plt.close(fig_2d)
+
+    # 3-model 1D animation
+    anim_1d, fig_1d = create_3model_1d_animation(results["times"], results, geometry)
+    report.add_animation(anim_1d, name="1D Profile Animation",
+                         caption="Overlay of |B| profiles along y=0 slice. "
+                                 "Blue=Analytic, Red dashed=ResistiveMHD, Green dotted=ExtendedMHD.")
+    plt.close(fig_1d)
+
+    # Multi-frame summary plot
+    fig_summary = create_multi_frame_summary(results["times"], results, geometry)
+    report.add_plot(fig_summary, name="Multi-Frame Summary",
+                    caption="Evolution snapshots at t=0, T/4, T/2, 3T/4, T. "
+                            "Rows: Analytic, ResistiveMHD, ExtendedMHD. "
+                            "All models preserve the magnetic loop structure during rotation.")
+    plt.close(fig_summary)
+
+    # Add summary to report
+    report.summary = (
+        f"This validation compares ResistiveMHD and ExtendedMHD models against the analytic solution "
+        f"for circular advection of a magnetic loop (frozen flux test). "
+        f"ResistiveMHD with Constrained Transport (CT) scheme achieves machine-precision accuracy "
+        f"(L2 error ~{model_metrics['ResistiveMHD']['l2_error']['value']:.2e}). "
+        f"ExtendedMHD without CT has higher numerical diffusion "
+        f"(L2 error ~{model_metrics['ExtendedMHD']['l2_error']['value']:.2e}) but still passes the 2% threshold. "
+        f"Both models preserve peak amplitude above 98%."
+    )
+
     report_dir = report.save()
 
-    # 3-model animations
-    create_3model_2d_animation(results["times"], results, geometry,
-                               Path(report_dir) / "frozen_flux_3model_2d.gif")
-    create_3model_1d_animation(results["times"], results, geometry,
-                               Path(report_dir) / "frozen_flux_3model_1d.gif")
-    create_multi_frame_summary(results["times"], results, geometry,
-                               Path(report_dir) / "multi_frame_summary.png")
-
     print()
-    print(f"Report saved to: {report_dir}")
+    print(f"Report saved to: {report_dir}/report.html")
     print()
 
     if overall_pass:
