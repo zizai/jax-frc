@@ -65,11 +65,25 @@ class ResistiveMHD(PhysicsModel):
         return state.replace(B=dB_dt)
 
     def explicit_rhs(self, state: State, geometry: Geometry, t: float) -> State:
-        """Return explicit terms for IMEX (none for pure resistive diffusion)."""
-        zero_B = jnp.zeros_like(state.B)
+        """Return explicit IMEX terms (ideal induction via v x B)."""
         zero_E = jnp.zeros_like(state.E) if state.E is not None else None
         zero_Te = jnp.zeros_like(state.Te) if state.Te is not None else None
-        return state.replace(B=zero_B, E=zero_E, Te=zero_Te)
+
+        if state.v is None:
+            zero_B = jnp.zeros_like(state.B)
+            return state.replace(B=zero_B, E=zero_E, Te=zero_Te)
+
+        B = state.B
+        v = state.v
+        v_cross_B = jnp.stack([
+            v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
+            v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
+            v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
+        ], axis=-1)
+        E = -v_cross_B
+        dB_dt = -curl_3d(E, geometry)
+
+        return state.replace(B=dB_dt, E=zero_E, Te=zero_Te)
 
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
         """Resistive diffusion CFL: dt < dx^2 / (2*eta/mu0)."""
