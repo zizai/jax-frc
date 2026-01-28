@@ -95,8 +95,8 @@ def run_simulation(cfg: dict) -> tuple:
 
 
 ACCEPTANCE = {
-    "l2_error": 0.35,              # 35% L2 error (quarter rotation, central diff)
-    "peak_amplitude_ratio": 0.75,  # 75% amplitude preservation
+    "l2_error": 0.01,              # 1% L2 error threshold
+    "peak_amplitude_ratio": 0.98,  # 98% amplitude preservation
 }
 
 

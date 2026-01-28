@@ -9,6 +9,7 @@ from jax_frc.solvers.base import Solver
 from jax_frc.core.state import State
 from jax_frc.models.base import PhysicsModel
 
+
 @dataclass(frozen=True)
 class EulerSolver(Solver):
     """Simple forward Euler integration.
@@ -43,6 +44,7 @@ class EulerSolver(Solver):
             step=state.step + 1,
         )
         return model.apply_constraints(new_state, geometry)
+
 
 @dataclass(frozen=True)
 class RK4Solver(Solver):
@@ -94,6 +96,57 @@ class RK4Solver(Solver):
             B=new_B,
             E=new_E,
             Te=new_Te,
+            time=state.time + dt,
+            step=state.step + 1,
+        )
+        return model.apply_constraints(new_state, geometry)
+
+
+@dataclass(frozen=True)
+class SemiLagrangianSolver(Solver):
+    """Semi-Lagrangian solver for advection-dominated problems.
+
+    Uses backward characteristic tracing to eliminate numerical diffusion
+    from the advection term. Ideal for high magnetic Reynolds number (Rm >> 1)
+    flows where advection dominates over diffusion.
+
+    The advection term is handled by tracing characteristics backward:
+        B(x, t+dt) = B(x - v*dt, t)
+
+    The diffusion term (if any) is handled with standard finite differences.
+    """
+
+    @partial(jax.jit, static_argnums=(0, 3, 4))
+    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        """Semi-Lagrangian time step.
+
+        1. Advect B using backward characteristic tracing
+        2. Add diffusion term using finite differences
+        """
+        from jax_frc.solvers.constrained_transport import advect_semi_lagrangian
+        from jax_frc.operators import laplacian_3d
+        from jax_frc.constants import MU0
+
+        B = state.B
+        v = state.v
+
+        # Step 1: Advect B using semi-Lagrangian method
+        if v is not None:
+            B_advected = advect_semi_lagrangian(B, v, geometry, dt)
+        else:
+            B_advected = B
+
+        # Step 2: Add diffusion term if model has resistivity
+        eta = getattr(model, 'eta', 0.0)
+        if eta > 0:
+            # Diffusion: dB/dt = eta/mu0 * laplacian(B)
+            diffusion_term = eta / MU0 * laplacian_3d(B_advected, geometry)
+            new_B = B_advected + dt * diffusion_term
+        else:
+            new_B = B_advected
+
+        new_state = state.replace(
+            B=new_B,
             time=state.time + dt,
             step=state.step + 1,
         )

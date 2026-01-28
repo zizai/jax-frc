@@ -253,7 +253,7 @@ def _gradient_3d_tuple(
     return df_dx, df_dy, df_dz
 
 
-def _derivative_with_bc(f: Array, dx: float, axis: int, bc: str) -> Array:
+def _derivative_with_bc(f: Array, dx: float, axis: int, bc: str, order: int = 4) -> Array:
     """Compute derivative along axis respecting boundary condition.
 
     Args:
@@ -261,13 +261,25 @@ def _derivative_with_bc(f: Array, dx: float, axis: int, bc: str) -> Array:
         dx: Grid spacing
         axis: Axis to differentiate along (0=x, 1=y, 2=z)
         bc: Boundary condition type ("periodic", "dirichlet", "neumann")
+        order: Finite difference order (2 or 4, default 4)
 
     Returns:
         Derivative array with same shape as f
     """
+    n = f.shape[axis]
+
     if bc == "periodic":
-        # Central differences with periodic wrap
-        return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * dx)
+        if order == 4 and n >= 5:
+            # 4th-order central differences with periodic wrap
+            return (
+                -jnp.roll(f, -2, axis=axis)
+                + 8 * jnp.roll(f, -1, axis=axis)
+                - 8 * jnp.roll(f, 1, axis=axis)
+                + jnp.roll(f, 2, axis=axis)
+            ) / (12 * dx)
+        else:
+            # 2nd-order central differences with periodic wrap
+            return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * dx)
 
     # Non-periodic: central interior, one-sided at boundaries
     # Interior: central difference
@@ -529,40 +541,63 @@ def divergence_3d_components(
 
 
 @jit(static_argnums=(1,))
-def divergence_3d(F: Array, geometry: "Geometry") -> Array:
+def divergence_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     """Compute divergence of vector field in 3D Cartesian coordinates.
 
+    div(F) = dFx/dx + dFy/dy + dFz/dz
+
     Uses central differences with periodic wrapping via jnp.roll.
-    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+    Supports 2nd-order (3-point stencil) or 4th-order (5-point stencil).
 
     Args:
         F: Vector field, shape (nx, ny, nz, 3)
         geometry: 3D Cartesian geometry
+        order: Finite difference order (2 or 4, default 4)
 
     Returns:
         Divergence scalar field, shape (nx, ny, nz)
     """
     dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
 
-    dFx_dx = (jnp.roll(F[..., 0], -1, axis=0) - jnp.roll(F[..., 0], 1, axis=0)) / (2 * dx)
-    dFy_dy = (jnp.roll(F[..., 1], -1, axis=1) - jnp.roll(F[..., 1], 1, axis=1)) / (2 * dy)
-    dFz_dz = (jnp.roll(F[..., 2], -1, axis=2) - jnp.roll(F[..., 2], 1, axis=2)) / (2 * dz)
+    def deriv_4th(f, axis, h):
+        """4th-order central difference."""
+        return (
+            -jnp.roll(f, -2, axis=axis)
+            + 8 * jnp.roll(f, -1, axis=axis)
+            - 8 * jnp.roll(f, 1, axis=axis)
+            + jnp.roll(f, 2, axis=axis)
+        ) / (12 * h)
+
+    def deriv_2nd(f, axis, h):
+        """2nd-order central difference."""
+        return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * h)
+
+    deriv = deriv_4th if order == 4 else deriv_2nd
+
+    # Use 2nd order for thin dimensions
+    use_2nd_y = geometry.ny < 5
+    use_2nd_z = geometry.nz < 5
+
+    dFx_dx = deriv(F[..., 0], 0, dx)
+    dFy_dy = deriv_2nd(F[..., 1], 1, dy) if use_2nd_y else deriv(F[..., 1], 1, dy)
+    dFz_dz = deriv_2nd(F[..., 2], 2, dz) if use_2nd_z else deriv(F[..., 2], 2, dz)
 
     return dFx_dx + dFy_dy + dFz_dz
 
 
 @jit(static_argnums=(1,))
-def curl_3d(F: Array, geometry: "Geometry") -> Array:
+def curl_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     """Compute curl of vector field in 3D Cartesian coordinates.
 
     curl(F) = (dFz/dy - dFy/dz, dFx/dz - dFz/dx, dFy/dx - dFx/dy)
 
     Uses central differences with periodic wrapping via jnp.roll.
-    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+    Supports 2nd-order (3-point stencil) or 4th-order (5-point stencil).
 
     Args:
         F: Vector field, shape (nx, ny, nz, 3)
         geometry: 3D Cartesian geometry
+        order: Finite difference order (2 or 4, default 4)
 
     Returns:
         Curl vector field, shape (nx, ny, nz, 3)
@@ -570,13 +605,36 @@ def curl_3d(F: Array, geometry: "Geometry") -> Array:
     dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
     Fx, Fy, Fz = F[..., 0], F[..., 1], F[..., 2]
 
-    # Partial derivatives
-    dFx_dy = (jnp.roll(Fx, -1, axis=1) - jnp.roll(Fx, 1, axis=1)) / (2 * dy)
-    dFx_dz = (jnp.roll(Fx, -1, axis=2) - jnp.roll(Fx, 1, axis=2)) / (2 * dz)
-    dFy_dx = (jnp.roll(Fy, -1, axis=0) - jnp.roll(Fy, 1, axis=0)) / (2 * dx)
-    dFy_dz = (jnp.roll(Fy, -1, axis=2) - jnp.roll(Fy, 1, axis=2)) / (2 * dz)
-    dFz_dx = (jnp.roll(Fz, -1, axis=0) - jnp.roll(Fz, 1, axis=0)) / (2 * dx)
-    dFz_dy = (jnp.roll(Fz, -1, axis=1) - jnp.roll(Fz, 1, axis=1)) / (2 * dy)
+    # 4th-order central differences: (-f[i+2] + 8*f[i+1] - 8*f[i-1] + f[i-2]) / (12*h)
+    # 2nd-order central differences: (f[i+1] - f[i-1]) / (2*h)
+
+    def deriv_4th(f, axis, h):
+        """4th-order central difference."""
+        return (
+            -jnp.roll(f, -2, axis=axis)
+            + 8 * jnp.roll(f, -1, axis=axis)
+            - 8 * jnp.roll(f, 1, axis=axis)
+            + jnp.roll(f, 2, axis=axis)
+        ) / (12 * h)
+
+    def deriv_2nd(f, axis, h):
+        """2nd-order central difference."""
+        return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * h)
+
+    # Select derivative function based on order
+    # Note: For thin dimensions (size 1), use 2nd order to avoid issues
+    deriv = deriv_4th if order == 4 else deriv_2nd
+
+    # Partial derivatives - use 2nd order for thin dimensions
+    use_2nd_y = geometry.ny < 5
+    use_2nd_z = geometry.nz < 5
+
+    dFx_dy = deriv_2nd(Fx, 1, dy) if use_2nd_y else deriv(Fx, 1, dy)
+    dFx_dz = deriv_2nd(Fx, 2, dz) if use_2nd_z else deriv(Fx, 2, dz)
+    dFy_dx = deriv(Fy, 0, dx)
+    dFy_dz = deriv_2nd(Fy, 2, dz) if use_2nd_z else deriv(Fy, 2, dz)
+    dFz_dx = deriv(Fz, 0, dx)
+    dFz_dy = deriv_2nd(Fz, 1, dy) if use_2nd_y else deriv(Fz, 1, dy)
 
     curl_x = dFz_dy - dFy_dz
     curl_y = dFx_dz - dFz_dx

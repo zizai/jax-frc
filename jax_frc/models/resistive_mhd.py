@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Optional
+from typing import Optional, Literal
 import jax
 import jax.numpy as jnp
 from jax import jit
@@ -10,9 +10,12 @@ from jax import jit
 from jax_frc.models.base import PhysicsModel
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
-from jax_frc.operators import curl_3d
+from jax_frc.operators import curl_3d, laplacian_3d
 from jax_frc.constants import MU0
 from jax_frc.fields import CoilField
+
+
+AdvectionScheme = Literal["central", "ct", "skew_symmetric"]
 
 
 @dataclass(frozen=True)
@@ -26,9 +29,14 @@ class ResistiveMHD(PhysicsModel):
 
     Args:
         eta: Resistivity [Ohm*m]
+        advection_scheme: Numerical scheme for advection term curl(v×B).
+            - "central": Standard central differences (default, backward compatible)
+            - "ct": Constrained Transport scheme (preserves div(B)=0, less diffusive)
+            - "skew_symmetric": Energy-conserving skew-symmetric formulation
     """
     eta: float = 1e-4  # Resistivity [Ohm*m]
     external_field: Optional[CoilField] = None
+    advection_scheme: AdvectionScheme = "central"
 
     @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
@@ -43,24 +51,33 @@ class ResistiveMHD(PhysicsModel):
         """
         B = state.B
 
-        # Current density: J = curl(B) / mu_0
-        J = curl_3d(B, geometry) / MU0
+        # Resistive term: eta * laplacian(B) / mu0
+        # (equivalent to -curl(eta*J) for uniform eta)
+        dB_dt_resistive = self.eta / MU0 * laplacian_3d(B, geometry)
 
-        # Electric field: E = eta*J (assuming v=0 for pure resistive case)
-        # For moving plasma: E = -v x B + eta*J
+        # Advection term: curl(v × B)
         if state.v is not None:
             v = state.v
-            v_cross_B = jnp.stack([
-                v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
-                v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
-                v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
-            ], axis=-1)
-            E = -v_cross_B + self.eta * J
+            if self.advection_scheme == "ct":
+                # Constrained Transport scheme - preserves div(B)=0
+                from jax_frc.solvers.constrained_transport import induction_rhs_ct
+                dB_dt_advection = induction_rhs_ct(v, B, geometry)
+            elif self.advection_scheme == "skew_symmetric":
+                # Energy-conserving skew-symmetric formulation
+                from jax_frc.solvers.constrained_transport import induction_rhs_skew_symmetric
+                dB_dt_advection = induction_rhs_skew_symmetric(v, B, geometry)
+            else:
+                # Standard central difference scheme
+                v_cross_B = jnp.stack([
+                    v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
+                    v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
+                    v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
+                ], axis=-1)
+                dB_dt_advection = curl_3d(v_cross_B, geometry)
         else:
-            E = self.eta * J
+            dB_dt_advection = jnp.zeros_like(B)
 
-        # Faraday's law: dB/dt = -curl(E)
-        dB_dt = -curl_3d(E, geometry)
+        dB_dt = dB_dt_advection + dB_dt_resistive
 
         return state.replace(B=dB_dt)
 
@@ -75,13 +92,20 @@ class ResistiveMHD(PhysicsModel):
 
         B = state.B
         v = state.v
-        v_cross_B = jnp.stack([
-            v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
-            v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
-            v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
-        ], axis=-1)
-        E = -v_cross_B
-        dB_dt = -curl_3d(E, geometry)
+
+        if self.advection_scheme == "ct":
+            from jax_frc.solvers.constrained_transport import induction_rhs_ct
+            dB_dt = induction_rhs_ct(v, B, geometry)
+        elif self.advection_scheme == "skew_symmetric":
+            from jax_frc.solvers.constrained_transport import induction_rhs_skew_symmetric
+            dB_dt = induction_rhs_skew_symmetric(v, B, geometry)
+        else:
+            v_cross_B = jnp.stack([
+                v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
+                v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
+                v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
+            ], axis=-1)
+            dB_dt = curl_3d(v_cross_B, geometry)
 
         return state.replace(B=dB_dt, E=zero_E, Te=zero_Te)
 
@@ -111,7 +135,14 @@ class ResistiveMHD(PhysicsModel):
         """Apply divergence cleaning to magnetic field.
 
         Uses projection method: B_clean = B - grad(phi) where laplacian(phi) = div(B)
+
+        Note: When using CT scheme, div(B)=0 is preserved exactly, so cleaning
+        is skipped to avoid introducing numerical errors.
         """
+        # CT and skew_symmetric schemes preserve div(B)=0 exactly - no cleaning needed
+        if self.advection_scheme in ("ct", "skew_symmetric"):
+            return state
+
         if not (
             geometry.bc_x == "periodic"
             and geometry.bc_y == "periodic"

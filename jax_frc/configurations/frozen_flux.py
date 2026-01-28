@@ -41,9 +41,12 @@ class FrozenFluxConfiguration(AbstractConfiguration):
 
     Setup:
         - Domain: x,y ∈ [-1, 1], thin z (pseudo-2D)
-        - Magnetic loop: B = curl(A_z z_hat) with compact support
+        - Magnetic loop: B = curl(A_z z_hat) with Gaussian profile
         - Velocity: Rigid rotation v = (-ωy, ωx, 0)
         - Period: T = 2π/ω
+
+    Note: Uses Gaussian profile (smooth) instead of compact support to avoid
+    numerical issues with discontinuities in spectral methods.
 
     Supports: resistive_mhd, extended_mhd, plasma_neutral, hybrid_kinetic
     """
@@ -61,16 +64,16 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     z_extent: float = 0.1        # z ∈ [-z_extent, z_extent]
 
     # Magnetic loop parameters
-    loop_x0: float = 0.5         # Loop center x [m]
+    loop_x0: float = 0.3         # Loop center x [m] (off-center for advection test)
     loop_y0: float = 0.0         # Loop center y [m]
-    loop_radius: float = 0.3     # Loop radius R [m]
+    loop_radius: float = 0.2     # Gaussian width sigma = loop_radius/2 [m]
     loop_amplitude: float = 1.0  # Vector potential amplitude A_0
 
     # Rotation parameters
     omega: float = 2 * 3.141592653589793  # Angular velocity [rad/s] (one rotation per second)
 
     # Physics parameters
-    eta: float = 1e-8        # Very small resistivity (Rm >> 1)
+    eta: float = 0.0         # Zero resistivity for ideal MHD (frozen flux)
 
     # Plasma parameters (for models that need them)
     n0: float = 1e19         # Density [m^-3]
@@ -78,6 +81,11 @@ class FrozenFluxConfiguration(AbstractConfiguration):
 
     # Model selection
     model_type: ModelType = "resistive_mhd"
+
+    # Advection scheme for resistive_mhd model
+    # "ct" = Constrained Transport (preserves div(B)=0, less diffusive)
+    # "central" = Standard central differences
+    advection_scheme: str = "ct"
 
     def build_geometry(self) -> Geometry:
         """3D Cartesian geometry with thin z (pseudo-2D in x-y plane)."""
@@ -97,31 +105,34 @@ class FrozenFluxConfiguration(AbstractConfiguration):
         )
 
     def build_initial_state(self, geometry: Geometry) -> State:
-        """Magnetic loop with rigid body rotation velocity."""
+        """Magnetic loop with rigid body rotation velocity.
+
+        Uses Gaussian vector potential: A_z = A_0 * exp(-r²/(2σ²))
+        where σ = loop_radius/2 for smooth, well-resolved profile.
+
+        B = curl(A_z z_hat) = (∂A_z/∂y, -∂A_z/∂x, 0)
+        """
         x = geometry.x_grid
         y = geometry.y_grid
 
-        # Distance from loop center
-        r = jnp.sqrt((x - self.loop_x0)**2 + (y - self.loop_y0)**2)
+        dx = x - self.loop_x0
+        dy = y - self.loop_y0
+        r_sq = dx**2 + dy**2
+        sigma = self.loop_radius / 2  # Gaussian width
+        A0 = self.loop_amplitude
 
-        # Vector potential A_z with compact support (C2 continuous)
-        # A_z = A_0 * (1 - r²/R²)² for r < R, else 0
-        inside = r < self.loop_radius
-        r_norm = r / self.loop_radius
-        A_z = jnp.where(
-            inside,
-            self.loop_amplitude * (1 - r_norm**2)**2,
-            0.0
-        )
+        # Gaussian vector potential: A_z = A0 * exp(-r²/(2σ²))
+        gaussian = A0 * jnp.exp(-r_sq / (2 * sigma**2))
 
-        # B = curl(A_z z_hat) using central differences
-        # B_x = ∂A_z/∂y, B_y = -∂A_z/∂x
-        dA_dy = (jnp.roll(A_z, -1, axis=1) - jnp.roll(A_z, 1, axis=1)) / (2 * geometry.dy)
-        dA_dx = (jnp.roll(A_z, -1, axis=0) - jnp.roll(A_z, 1, axis=0)) / (2 * geometry.dx)
+        # B = curl(A_z z_hat):
+        # B_x = ∂A_z/∂y = A0 * exp(-r²/(2σ²)) * (-dy/σ²)
+        # B_y = -∂A_z/∂x = A0 * exp(-r²/(2σ²)) * (dx/σ²)
+        Bx = gaussian * (-dy / sigma**2)
+        By = gaussian * (dx / sigma**2)
 
         B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
-        B = B.at[..., 0].set(dA_dy)   # B_x = ∂A_z/∂y
-        B = B.at[..., 1].set(-dA_dx)  # B_y = -∂A_z/∂x
+        B = B.at[..., 0].set(Bx)
+        B = B.at[..., 1].set(By)
 
         # Rigid body rotation velocity: v = (-ωy, ωx, 0)
         v = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
@@ -139,13 +150,13 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     def build_model(self):
         """Build physics model with minimal resistivity (Rm >> 1)."""
         if self.model_type == "resistive_mhd":
-            return ResistiveMHD(eta=self.eta)
+            return ResistiveMHD(eta=self.eta, advection_scheme=self.advection_scheme)
 
         elif self.model_type == "extended_mhd":
             return ExtendedMHD(eta=self.eta)
 
         elif self.model_type == "plasma_neutral":
-            plasma_model = ResistiveMHD(eta=self.eta)
+            plasma_model = ResistiveMHD(eta=self.eta, advection_scheme=self.advection_scheme)
             neutral_model = NeutralFluid()
             coupling = AtomicCoupling()
             return CoupledModel(
@@ -186,6 +197,8 @@ class FrozenFluxConfiguration(AbstractConfiguration):
 
         For rigid body rotation, the magnetic loop rotates with the flow.
         After one full period (t = 2π/ω), it returns to initial position.
+
+        Uses Gaussian profile matching build_initial_state.
         """
         # Rotation angle
         theta = self.omega * t
@@ -196,21 +209,24 @@ class FrozenFluxConfiguration(AbstractConfiguration):
         x_rot = x * jnp.cos(theta) + y * jnp.sin(theta)
         y_rot = -x * jnp.sin(theta) + y * jnp.cos(theta)
 
-        # Distance from loop center in rotated frame
-        r = jnp.sqrt((x_rot - self.loop_x0)**2 + (y_rot - self.loop_y0)**2)
+        # Compute B analytically in rotated frame using Gaussian profile
+        dx = x_rot - self.loop_x0
+        dy = y_rot - self.loop_y0
+        r_sq = dx**2 + dy**2
+        sigma = self.loop_radius / 2
+        A0 = self.loop_amplitude
 
-        # Vector potential in rotated frame
-        inside = r < self.loop_radius
-        r_norm = r / self.loop_radius
-        A_z = jnp.where(inside, self.loop_amplitude * (1 - r_norm**2)**2, 0.0)
+        gaussian = A0 * jnp.exp(-r_sq / (2 * sigma**2))
+        Bx_rot = gaussian * (-dy / sigma**2)
+        By_rot = gaussian * (dx / sigma**2)
 
-        # B = curl(A_z z_hat) - same finite difference as initial state
-        dA_dy = (jnp.roll(A_z, -1, axis=1) - jnp.roll(A_z, 1, axis=1)) / (2 * geometry.dy)
-        dA_dx = (jnp.roll(A_z, -1, axis=0) - jnp.roll(A_z, 1, axis=0)) / (2 * geometry.dx)
+        # Rotate B back to lab frame
+        Bx = Bx_rot * jnp.cos(theta) - By_rot * jnp.sin(theta)
+        By = Bx_rot * jnp.sin(theta) + By_rot * jnp.cos(theta)
 
         B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
-        B = B.at[..., 0].set(dA_dy)
-        B = B.at[..., 1].set(-dA_dx)
+        B = B.at[..., 0].set(Bx)
+        B = B.at[..., 1].set(By)
 
         return B
 
