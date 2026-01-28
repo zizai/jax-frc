@@ -1,2 +1,0 @@
-- refactor validation module to show explicitly the validation logic of each case. The nuances of may not be captured in the yaml file. there should be a example_validation.py for each case where the validation logic is expressed explicitly.
-- each validation run should output the results of simulation. the output needs to contain the plots of numerical solution and analytic/expected solution. if analytic or expected solution exists for a type of value from the simulation, the plot contains both the value from the simulation and the benchmark value for each comparison.

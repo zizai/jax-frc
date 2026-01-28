@@ -106,10 +106,8 @@ Thumbs.db
 
 # Project specific
 .outputs/
-outputs/
 .worktrees/
 *.hdf5
 *.h5
 .claude/
 .serena/
-uv.lock
