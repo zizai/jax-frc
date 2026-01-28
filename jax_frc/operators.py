@@ -594,7 +594,7 @@ def divergence_3d_components(
     return dfx_dx + dfy_dy + dfz_dz
 
 
-@jit(static_argnums=(1,))
+@jit(static_argnums=(1, 2))
 def divergence_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     """Compute divergence of vector field in 3D Cartesian coordinates.
 
@@ -625,7 +625,7 @@ def divergence_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     return dFx_dx + dFy_dy + dFz_dz
 
 
-@jit(static_argnums=(1,))
+@jit(static_argnums=(1, 2))
 def curl_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     """Compute curl of vector field in 3D Cartesian coordinates.
 
