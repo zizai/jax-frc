@@ -97,6 +97,17 @@ def test_magnetic_diffusion_builds_model():
 
 
 # FrozenFluxConfiguration tests
+def test_frozen_flux_default_grid_dims_cartesian():
+    """FrozenFluxConfiguration defaults to thin Cartesian grid."""
+    from jax_frc.configurations import FrozenFluxConfiguration
+
+    config = FrozenFluxConfiguration()
+
+    assert config.nx == 64
+    assert config.ny == 1
+    assert config.nz == 64
+
+
 def test_frozen_flux_builds_geometry():
     """FrozenFluxConfiguration creates valid geometry."""
     from jax_frc.configurations import FrozenFluxConfiguration

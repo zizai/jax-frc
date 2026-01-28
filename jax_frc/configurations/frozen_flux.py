@@ -21,7 +21,11 @@ ModelType = Literal["resistive_mhd", "extended_mhd", "plasma_neutral", "hybrid_k
 class FrozenFluxConfiguration(AbstractConfiguration):
     """Frozen-in flux test (Rm >> 1) in 3D Cartesian geometry.
 
-    Physics: dB/dt ≈ -curl(v x B) (ideal MHD, flux frozen to plasma)
+    Physics (Cartesian induction equation):
+        ∂B/∂t = ∇×(v×B) + (1/μ0σ)∇²B
+
+    Ideal-MHD limit (Rm >> 1, η ≈ 1/μ0σ → 0):
+        ∂B/∂t = ∇×(v×B)
 
     Tests the advection-dominated regime where magnetic Reynolds number
     is much greater than 1. In 3D Cartesian coordinates with uniform
@@ -29,7 +33,7 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     in B because curl(v x B) = 0.
 
     Setup: Cartesian slab with uniform expansion v_x = v0
-    Initial: Uniform B_y field (maps to B_phi)
+    Initial: Uniform B_y field (maps to B_phi in legacy naming)
     Analytic: B_y(t) = constant (uniform field advects without distortion)
 
     Supports: resistive_mhd, extended_mhd, plasma_neutral, hybrid_kinetic
@@ -38,10 +42,10 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     name: str = "frozen_flux"
     description: str = "Frozen-in magnetic flux advection (Rm >> 1)"
 
-    # Grid parameters (thin-y slab for 2D-like behavior)
+    # Grid parameters (thin-y slab for inexpensive 3D)
     nx: int = 64         # X resolution
-    ny: int = 4          # Y resolution (thin periodic)
-    nz: int = 8          # Z resolution
+    ny: int = 1          # Y resolution (thin periodic)
+    nz: int = 64         # Z resolution
     r_min: float = 0.2   # X minimum [m] (legacy name for radial coordinate)
     r_max: float = 1.0   # X maximum [m]
     z_extent: float = 0.5  # Domain: y,z ∈ [-z_extent, z_extent]
