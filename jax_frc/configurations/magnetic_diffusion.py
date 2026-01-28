@@ -46,6 +46,9 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
     ny: int = 64          # Y resolution
     nz: int = 1           # Z resolution (pseudo-dimension for 2D-like behavior)
     extent: float = 1.0   # Domain: [-extent, extent] in each direction
+    bc_x: str = "neumann"
+    bc_y: str = "neumann"
+    bc_z: str = "neumann"
 
     # Physics parameters
     B_peak: float = 1.0        # Peak B_z [T]
@@ -74,9 +77,9 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
             y_max=self.extent,
             z_min=-self.extent,
             z_max=self.extent,
-            bc_x="periodic",  # Operators only support periodic BCs
-            bc_y="periodic",  # Operators only support periodic BCs
-            bc_z="periodic",  # Pseudo-dimension
+            bc_x=self.bc_x,
+            bc_y=self.bc_y,
+            bc_z=self.bc_z,
         )
 
     def build_initial_state(self, geometry: Geometry) -> State:
