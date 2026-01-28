@@ -48,39 +48,52 @@ class EulerSolver(Solver):
 class RK4Solver(Solver):
     """4th-order Runge-Kutta integration.
 
-    Updates B field based on model RHS (dB/dt).
+    Updates B field and Te field based on model RHS.
     """
 
     @partial(jax.jit, static_argnums=(0, 3, 4))  # self, model, geometry static
     def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        """RK4 time step updating all state fields."""
+
+        def add_scaled_rhs(base: State, rhs: State, scale: float) -> State:
+            """Add scaled RHS to base state for all fields."""
+            new_B = base.B + scale * rhs.B
+            new_E = base.E + scale * rhs.E if rhs.E is not None else base.E
+            new_Te = None
+            if base.Te is not None and rhs.Te is not None:
+                new_Te = base.Te + scale * rhs.Te
+            return base.replace(B=new_B, E=new_E, Te=new_Te)
+
         # k1
         k1 = model.compute_rhs(state, geometry)
 
         # k2
-        state_k2 = state.replace(B=state.B + 0.5*dt*k1.B)
+        state_k2 = add_scaled_rhs(state, k1, 0.5 * dt)
         k2 = model.compute_rhs(state_k2, geometry)
 
         # k3
-        state_k3 = state.replace(B=state.B + 0.5*dt*k2.B)
+        state_k3 = add_scaled_rhs(state, k2, 0.5 * dt)
         k3 = model.compute_rhs(state_k3, geometry)
 
         # k4
-        state_k4 = state.replace(B=state.B + dt*k3.B)
+        state_k4 = add_scaled_rhs(state, k3, dt)
         k4 = model.compute_rhs(state_k4, geometry)
 
-        # Combine
+        # Combine: y_new = y + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
         new_B = state.B + (dt/6) * (k1.B + 2*k2.B + 2*k3.B + k4.B)
 
-        # Get E from final RHS (for Hybrid) - use lax.cond for JIT compatibility
-        new_E = lax.cond(
-            jnp.any(k4.E != 0),
-            lambda: k4.E,
-            lambda: state.E
-        )
+        new_E = state.E
+        if k1.E is not None:
+            new_E = state.E + (dt/6) * (k1.E + 2*k2.E + 2*k3.E + k4.E)
+
+        new_Te = None
+        if state.Te is not None and k1.Te is not None:
+            new_Te = state.Te + (dt/6) * (k1.Te + 2*k2.Te + 2*k3.Te + k4.Te)
 
         new_state = state.replace(
             B=new_B,
             E=new_E,
+            Te=new_Te,
             time=state.time + dt,
             step=state.step + 1,
         )

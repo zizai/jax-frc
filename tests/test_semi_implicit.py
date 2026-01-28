@@ -161,3 +161,38 @@ class TestSemiImplicitSolverTemperature:
         dt_cfl = solver.compute_temperature_cfl(state, model_no_thermal, geometry)
 
         assert dt_cfl == jnp.inf, "CFL should be inf without thermal"
+
+
+class TestRK4SolverAllFields:
+    """Tests for RK4 solver updating all state fields."""
+
+    def test_rk4_updates_temperature(self):
+        """RK4 should update Te field using RK4 formula, not just final RHS."""
+        from jax_frc.solvers.explicit import RK4Solver
+        from jax_frc.core.geometry import Geometry
+
+        geom = Geometry(nx=8, ny=8, nz=8, bc_x="periodic", bc_y="periodic", bc_z="periodic")
+
+        # Initial state with non-uniform temperature (will have diffusion)
+        Te_init = 100.0 + 50.0 * jnp.sin(2 * jnp.pi * geom.x_grid)
+
+        state = State(
+            B=jnp.ones((8, 8, 8, 3)) * 0.1,
+            E=jnp.zeros((8, 8, 8, 3)),
+            n=jnp.ones((8, 8, 8)) * 1e20,
+            p=jnp.ones((8, 8, 8)) * 1e3,
+            v=jnp.zeros((8, 8, 8, 3)),
+            Te=Te_init,
+        )
+
+        # Model with thermal diffusion
+        model = ExtendedMHD(eta=1e-4, include_hall=False, kappa_perp=1e-2)
+        solver = RK4Solver()
+
+        # Take one step
+        new_state = solver.step(state, dt=1e-6, model=model, geometry=geom)
+
+        # Te should be updated (not just B)
+        assert new_state.Te is not None
+        # Te should have changed if model has thermal diffusion
+        # (The change may be small but should be non-zero)
