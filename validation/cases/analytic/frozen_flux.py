@@ -1,12 +1,14 @@
 """3D Frozen Flux Validation (Cartesian Geometry).
 
-Physics:
-    Ideal MHD induction equation with uniform velocity and uniform B:
-        dB/dt = -curl(v x B)
+Physics (Cartesian induction equation):
+    ∂B/∂t = ∇×(v×B) + (1/μ0σ)∇²B
 
-    For uniform v and uniform B in Cartesian coordinates, curl(v x B) = 0,
+    In the ideal-MHD limit (Rm >> 1, η ≈ 1/μ0σ → 0):
+        ∂B/∂t = ∇×(v×B)
+
+    For uniform v and uniform B in Cartesian coordinates, ∇×(v×B) = 0,
     so B remains constant in time. This validates that the solver preserves
-    a frozen-in uniform toroidal field under uniform advection.
+    a frozen-in uniform field under uniform advection.
 
 Coordinate System:
     3D Cartesian (x, y, z). We use a thin y dimension to keep the case
@@ -31,7 +33,7 @@ from validation.utils.plotting import plot_comparison, plot_error
 
 
 NAME = "frozen_flux"
-DESCRIPTION = "3D frozen flux validation in Cartesian geometry (uniform B remains constant)"
+DESCRIPTION = "3D frozen flux validation in Cartesian geometry (uniform B_y remains constant)"
 
 
 def setup_configuration() -> dict:
@@ -107,11 +109,11 @@ def main() -> bool:
     print(f"  Completed in {t_sim:.2f}s")
     print()
 
-    # Expected B_theta is uniform and constant
-    B_theta = final_state.B[..., 1]
-    B_expected = jnp.ones_like(B_theta) * cfg["B_phi_0"]
+    # Expected B_y is uniform and constant
+    B_y = final_state.B[..., 1]
+    B_expected = jnp.ones_like(B_y) * cfg["B_phi_0"]
 
-    l2_err = l2_error(B_theta, B_expected)
+    l2_err = l2_error(B_y, B_expected)
 
     print("Metrics:")
     print(f"  L2 error: {l2_err:.4g} (threshold: {ACCEPTANCE['l2_error']})")
@@ -143,29 +145,29 @@ def main() -> bool:
     y_idx = geometry.ny // 2
     z_idx = geometry.nz // 2
     x = geometry.x_grid[:, y_idx, z_idx]
-    B_theta_line = B_theta[:, y_idx, z_idx]
+    B_y_line = B_y[:, y_idx, z_idx]
     B_expected_line = B_expected[:, y_idx, z_idx]
 
     fig_comp = plot_comparison(
         x=x,
-        actual=B_theta_line,
+        actual=B_y_line,
         expected=B_expected_line,
         labels=("Simulation", "Analytic"),
-        title=f"B_theta at y=0, z=0, t={cfg['t_end']:.2e}s",
+        title=f"B_y at y=0, z=0, t={cfg['t_end']:.2e}s",
         xlabel="x [m]",
-        ylabel="B_theta [T]",
+        ylabel="B_y [T]",
     )
-    report.add_plot(fig_comp, name="Btheta_comparison")
+    report.add_plot(fig_comp, name="By_comparison")
 
     fig_err = plot_error(
         x=x,
-        actual=B_theta_line,
+        actual=B_y_line,
         expected=B_expected_line,
-        title="B_theta Error (Simulation - Analytic)",
+        title="B_y Error (Simulation - Analytic)",
         xlabel="x [m]",
         ylabel="Error [T]",
     )
-    report.add_plot(fig_err, name="Btheta_error")
+    report.add_plot(fig_err, name="By_error")
 
     report_dir = report.save()
     print(f"Report saved to: {report_dir}")

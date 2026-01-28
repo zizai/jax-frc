@@ -16,16 +16,16 @@ runtime:
 
 reference:
   type: analytic
-  description: "Frozen-in flux with uniform advection: B_phi is constant"
-  formula: "B_phi_0 * jnp.ones_like(z)"
+  description: "Frozen-in flux with uniform advection: B_y is constant"
+  formula: "B_phi_0 * jnp.ones_like(x)"
   variables:
     - B_phi_0
-    - z
+    - x
 
 acceptance:
   quantitative:
     - metric: l2_error
-      field: B_theta
+      field: B_y
       threshold: 0.01
       description: "Relative L2 error vs analytic solution (uniform field)"
     - metric: flux_conservation
@@ -35,8 +35,8 @@ acceptance:
 output:
   plots:
     - type: profiles
-      name: Bphi_evolution
-      axis: r
-      field: B_phi
+      name: By_evolution
+      axis: x
+      field: B_y
   html_report: true
   log_level: INFO
