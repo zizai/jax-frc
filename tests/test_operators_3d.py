@@ -174,7 +174,7 @@ class TestLaplacian3D:
     def test_laplacian_constant(self):
         """Laplacian of constant should be zero."""
         f = jnp.ones((8, 8, 8)) * 7.0
-        geom = Geometry(nx=8, ny=8, nz=8)
+        geom = Geometry(nx=8, ny=8, nz=8, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         lap_f = laplacian_3d(f, geom)
         assert lap_f.shape == (8, 8, 8)
         assert jnp.allclose(lap_f, 0.0, atol=1e-10)
@@ -201,10 +201,25 @@ class TestLaplacian3D:
         uses a 5-point stencil, so they differ by O(dx^2) truncation error.
         We check relative tolerance rather than absolute.
         """
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         f = jnp.sin(2 * jnp.pi * geom.x_grid) * jnp.cos(2 * jnp.pi * geom.y_grid)
         lap_f = laplacian_3d(f, geom)
         grad_f = gradient_3d(f, geom)
         div_grad_f = divergence_3d(grad_f, geom)
         # Different stencils give ~15% relative difference at this resolution
         assert jnp.allclose(lap_f, div_grad_f, rtol=0.2, atol=1e-6)
+
+    def test_laplacian_neumann_bc(self):
+        """Laplacian with Neumann BC uses zero-gradient at boundaries."""
+        geom = Geometry(
+            nx=16, ny=16, nz=8,
+            x_min=-1.0, x_max=1.0,
+            y_min=-1.0, y_max=1.0,
+            z_min=0.0, z_max=1.0,
+            bc_x="neumann", bc_y="neumann", bc_z="periodic"
+        )
+        # Constant function: laplacian should be 0 everywhere with any BC
+        f = jnp.ones_like(geom.x_grid) * 5.0
+        lap_f = laplacian_3d(f, geom)
+        # d^2(const)/dx^2 = 0 everywhere including boundaries
+        assert jnp.allclose(lap_f, 0.0, atol=1e-6)

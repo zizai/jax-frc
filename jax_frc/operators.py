@@ -297,6 +297,54 @@ def _derivative_with_bc(f: Array, dx: float, axis: int, bc: str) -> Array:
     return df
 
 
+def _second_derivative_with_bc(f: Array, dx: float, axis: int, bc: str) -> Array:
+    """Compute second derivative along axis respecting boundary condition."""
+    if bc == "periodic":
+        f_plus = jnp.roll(f, -1, axis=axis)
+        f_minus = jnp.roll(f, 1, axis=axis)
+        return (f_plus - 2*f + f_minus) / (dx**2)
+
+    # Non-periodic: use ghost cell approach
+    # For Neumann: ghost = interior (zero gradient)
+    # For Dirichlet: ghost = -interior (zero value)
+    ndim = f.ndim
+
+    # Interior: standard central difference
+    f_plus = jnp.roll(f, -1, axis=axis)
+    f_minus = jnp.roll(f, 1, axis=axis)
+    d2f = (f_plus - 2*f + f_minus) / (dx**2)
+
+    # Left boundary correction
+    left_slice = [slice(None)] * ndim
+    left_slice[axis] = 0
+    next_slice = [slice(None)] * ndim
+    next_slice[axis] = 1
+
+    if bc == "neumann":
+        # Ghost cell = f[0] (zero gradient), so f[-1] = f[0]
+        # d2f = (f[1] - 2*f[0] + f[0]) / dx^2 = (f[1] - f[0]) / dx^2
+        d2f_left = (f[tuple(next_slice)] - f[tuple(left_slice)]) / (dx**2)
+    else:  # dirichlet
+        # Ghost cell = -f[0] (zero value at boundary)
+        # d2f = (f[1] - 2*f[0] + (-f[0])) / dx^2 = (f[1] - 3*f[0]) / dx^2
+        d2f_left = (f[tuple(next_slice)] - 3*f[tuple(left_slice)]) / (dx**2)
+    d2f = d2f.at[tuple(left_slice)].set(d2f_left)
+
+    # Right boundary correction
+    right_slice = [slice(None)] * ndim
+    right_slice[axis] = -1
+    prev_slice = [slice(None)] * ndim
+    prev_slice[axis] = -2
+
+    if bc == "neumann":
+        d2f_right = (f[tuple(prev_slice)] - f[tuple(right_slice)]) / (dx**2)
+    else:  # dirichlet
+        d2f_right = (f[tuple(prev_slice)] - 3*f[tuple(right_slice)]) / (dx**2)
+    d2f = d2f.at[tuple(right_slice)].set(d2f_right)
+
+    return d2f
+
+
 @jit(static_argnums=(1,))
 def gradient_3d(f: Array, geometry: "Geometry") -> Array:
     """Compute gradient of scalar field in 3D Cartesian coordinates.
@@ -357,21 +405,16 @@ def laplacian_3d_explicit(f: Array, dx: float, dy: float, dz: float) -> Array:
 def laplacian_3d(f: Array, geometry: "Geometry") -> Array:
     """Compute Laplacian of scalar field in 3D Cartesian coordinates.
 
-    Uses central differences with periodic wrapping via jnp.roll.
-    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
-
     Args:
         f: Scalar field, shape (nx, ny, nz)
-        geometry: 3D Cartesian geometry
+        geometry: 3D Cartesian geometry with bc_x, bc_y, bc_z settings
 
     Returns:
         Laplacian scalar field, shape (nx, ny, nz)
     """
-    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
-
-    d2f_dx2 = (jnp.roll(f, -1, axis=0) - 2*f + jnp.roll(f, 1, axis=0)) / dx**2
-    d2f_dy2 = (jnp.roll(f, -1, axis=1) - 2*f + jnp.roll(f, 1, axis=1)) / dy**2
-    d2f_dz2 = (jnp.roll(f, -1, axis=2) - 2*f + jnp.roll(f, 1, axis=2)) / dz**2
+    d2f_dx2 = _second_derivative_with_bc(f, geometry.dx, axis=0, bc=geometry.bc_x)
+    d2f_dy2 = _second_derivative_with_bc(f, geometry.dy, axis=1, bc=geometry.bc_y)
+    d2f_dz2 = _second_derivative_with_bc(f, geometry.dz, axis=2, bc=geometry.bc_z)
 
     return d2f_dx2 + d2f_dy2 + d2f_dz2
 
