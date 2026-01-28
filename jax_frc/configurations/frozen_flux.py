@@ -22,10 +22,10 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     """Frozen-in flux test (Rm >> 1) in 3D Cartesian geometry.
 
     Physics (Cartesian induction equation):
-        ∂B/∂t = ∇×(v×B) + (1/μ0σ)∇²B
+        dB/dt = curl(v x B) + (1 / (mu0 * sigma)) * laplacian(B)
 
-    Ideal-MHD limit (Rm >> 1, η ≈ 1/μ0σ → 0):
-        ∂B/∂t = ∇×(v×B)
+    Ideal-MHD limit (Rm >> 1, eta ~ 1 / (mu0 * sigma) -> 0):
+        dB/dt = curl(v x B)
 
     Tests the advection-dominated regime where magnetic Reynolds number
     is much greater than 1. In 3D Cartesian coordinates with uniform
@@ -51,7 +51,7 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     z_extent: float = 0.5  # Domain: y,z ∈ [-z_extent, z_extent]
 
     # Physics parameters
-    B_phi_0: float = 1.0     # Initial B_φ [T]
+    B_phi_0: float = 1.0     # Initial B_phi [T]
     v_r: float = 0.1         # Radial expansion velocity [m/s]
     eta: float = 1e-8        # Very small resistivity (Rm >> 1)
 
@@ -157,12 +157,12 @@ class FrozenFluxConfiguration(AbstractConfiguration):
         return r_t, B_phi_t
 
     def advection_timescale(self) -> float:
-        """Characteristic advection time τ = L/v_r."""
+        """Characteristic advection time tau = L/v_r."""
         L = self.r_max - self.r_min
         return L / self.v_r
 
     def magnetic_reynolds_number(self) -> float:
-        """Compute magnetic Reynolds number Rm = v·L/η.
+        """Compute magnetic Reynolds number Rm = v*L/eta.
 
         For this configuration, Rm >> 1 by design.
 
