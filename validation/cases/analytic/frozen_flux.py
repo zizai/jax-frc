@@ -1,12 +1,12 @@
 """3D Frozen Flux Validation (Cartesian Geometry).
 
 Physics (Cartesian induction equation):
-    ∂B/∂t = ∇×(v×B) + (1/μ0σ)∇²B
+    dB/dt = curl(v x B) + (1 / (mu0 * sigma)) * laplacian(B)
 
-    In the ideal-MHD limit (Rm >> 1, η ≈ 1/μ0σ → 0):
-        ∂B/∂t = ∇×(v×B)
+    In the ideal-MHD limit (Rm >> 1, eta ~ 1 / (mu0 * sigma) -> 0):
+        dB/dt = curl(v x B)
 
-    For uniform v and uniform B in Cartesian coordinates, ∇×(v×B) = 0,
+    For uniform v and uniform B in Cartesian coordinates, curl(v x B) = 0,
     so B remains constant in time. This validates that the solver preserves
     a frozen-in uniform field under uniform advection.
 
