@@ -14,6 +14,7 @@ from jax import Array
 from jax.scipy.ndimage import map_coordinates
 
 from jax_frc.core.geometry import Geometry
+from jax_frc.operators import curl_3d
 
 
 @jit(static_argnums=(2,))
@@ -39,6 +40,30 @@ def compute_emf_upwind(v: Array, B: Array, geometry: Geometry) -> Array:
     Ez = -(vx * By - vy * Bx)
 
     return jnp.stack([Ex, Ey, Ez], axis=-1)
+
+
+def _extrapolate_boundary(field: Array, axis: int) -> Array:
+    """Copy interior values to boundary cells along axis (zero-gradient)."""
+    ndim = field.ndim
+    left_slice = [slice(None)] * ndim
+    left_slice[axis] = 0
+    left_src = [slice(None)] * ndim
+    left_src[axis] = 1
+    right_slice = [slice(None)] * ndim
+    right_slice[axis] = -1
+    right_src = [slice(None)] * ndim
+    right_src[axis] = -2
+    field = field.at[tuple(left_slice)].set(field[tuple(left_src)])
+    field = field.at[tuple(right_slice)].set(field[tuple(right_src)])
+    return field
+
+
+def _apply_boundary_E(E: Array, geometry: Geometry) -> Array:
+    """Apply non-periodic boundary handling to electric field."""
+    for axis, bc in enumerate([geometry.bc_x, geometry.bc_y, geometry.bc_z]):
+        if bc != "periodic":
+            E = _extrapolate_boundary(E, axis)
+    return E
 
 
 @jit(static_argnums=(1,))
@@ -109,33 +134,8 @@ def curl_ct(E: Array, geometry: Geometry) -> Array:
         geometry.bc_z == "periodic"):
         return curl_spectral(E, geometry)
 
-    # Fall back to 4th-order finite differences for non-periodic
-    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
-    Ex, Ey, Ez = E[..., 0], E[..., 1], E[..., 2]
-
-    def deriv_4th(f, axis, h):
-        n = f.shape[axis]
-        if n < 5:
-            return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * h)
-        return (
-            -jnp.roll(f, -2, axis=axis)
-            + 8 * jnp.roll(f, -1, axis=axis)
-            - 8 * jnp.roll(f, 1, axis=axis)
-            + jnp.roll(f, 2, axis=axis)
-        ) / (12 * h)
-
-    dEz_dy = deriv_4th(Ez, 1, dy)
-    dEy_dz = deriv_4th(Ey, 2, dz)
-    dEx_dz = deriv_4th(Ex, 2, dz)
-    dEz_dx = deriv_4th(Ez, 0, dx)
-    dEy_dx = deriv_4th(Ey, 0, dx)
-    dEx_dy = deriv_4th(Ex, 1, dy)
-
-    curl_x = dEz_dy - dEy_dz
-    curl_y = dEx_dz - dEz_dx
-    curl_z = dEy_dx - dEx_dy
-
-    return jnp.stack([curl_x, curl_y, curl_z], axis=-1)
+    # Fall back to BC-aware finite differences for non-periodic
+    return curl_3d(E, geometry, order=4)
 
 
 def _interp_periodic_3d(f: Array, coords: Array) -> Array:
@@ -232,6 +232,7 @@ def induction_rhs_ct(v: Array, B: Array, geometry: Geometry) -> Array:
     """
     # Compute EMF: E = -v × B
     E = compute_emf_upwind(v, B, geometry)
+    E = _apply_boundary_E(E, geometry)
 
     # Compute curl(E) using spectral method
     curl_E = curl_ct(E, geometry)

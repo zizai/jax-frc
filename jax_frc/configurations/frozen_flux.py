@@ -90,6 +90,7 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     # ExtendedMHD options
     include_hall: bool = True  # Include Hall term (J x B)/(ne)
     include_electron_pressure: bool = True  # Include grad(p_e)/(ne) term
+    apply_divergence_cleaning: bool = True
 
     def build_geometry(self) -> Geometry:
         """3D Cartesian geometry with thin z (pseudo-2D in x-y plane)."""
@@ -161,6 +162,7 @@ class FrozenFluxConfiguration(AbstractConfiguration):
                 eta=self.eta,
                 include_hall=self.include_hall,
                 include_electron_pressure=self.include_electron_pressure,
+                apply_divergence_cleaning=self.apply_divergence_cleaning,
             )
 
         elif self.model_type == "plasma_neutral":

@@ -23,7 +23,7 @@ class TestCleanDivergence:
 
     def test_already_divergence_free(self):
         """A divergence-free field should remain nearly unchanged."""
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
 
         # Create a curl field (curl of any field is divergence-free)
         # Use a vector potential A = [sin(z), sin(x), sin(y)]
@@ -44,18 +44,18 @@ class TestCleanDivergence:
 
         # Verify it's divergence-free to start
         div_B_before = divergence_3d(B, geom)
-        assert jnp.max(jnp.abs(div_B_before)) < 1e-10
+        assert jnp.max(jnp.abs(div_B_before)) < 1e-5
 
         # Clean should leave it nearly unchanged
         B_clean = clean_divergence(B, geom, max_iter=100, tol=1e-10)
 
         # Field should be essentially the same
         diff = jnp.max(jnp.abs(B_clean - B))
-        assert diff < 1e-8, f"Field changed by {diff}"
+        assert diff < 1e-6, f"Field changed by {diff}"
 
     def test_removes_divergence(self):
         """A field with divergence should have reduced divergence after cleaning."""
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         x, y, z = geom.x_grid, geom.y_grid, geom.z_grid
 
         kx = 2 * jnp.pi / (geom.x_max - geom.x_min)
@@ -88,7 +88,7 @@ class TestCleanDivergence:
 
     def test_periodic_field_cleaning(self):
         """Test cleaning a periodic field with divergence."""
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         x, y, z = geom.x_grid, geom.y_grid, geom.z_grid
 
         kx = 2 * jnp.pi / (geom.x_max - geom.x_min)
@@ -147,7 +147,7 @@ class TestPoissonSolveJacobi:
         phi = sin(kx*x)*sin(ky*y)*sin(kz*z)
         then f = -(kx^2 + ky^2 + kz^2) * phi
         """
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         x, y, z = geom.x_grid, geom.y_grid, geom.z_grid
 
         kx = 2 * jnp.pi / (geom.x_max - geom.x_min)

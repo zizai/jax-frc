@@ -12,7 +12,7 @@ class TestGradient3D:
     def test_gradient_constant_field(self):
         """Gradient of constant should be zero."""
         f = jnp.ones((8, 8, 8)) * 5.0
-        geom = Geometry(nx=8, ny=8, nz=8)
+        geom = Geometry(nx=8, ny=8, nz=8, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         grad_f = gradient_3d(f, geom)
         assert grad_f.shape == (8, 8, 8, 3)
         assert jnp.allclose(grad_f, 0.0, atol=1e-10)
@@ -42,6 +42,7 @@ class TestGradient3D:
             x_min=0.0, x_max=1.0,
             y_min=0.0, y_max=1.0,
             z_min=0.0, z_max=1.0,
+            bc_x="periodic", bc_y="periodic", bc_z="periodic",
         )
         f = geom.y_grid  # f = y
         grad_f = gradient_3d(f, geom)
@@ -95,7 +96,7 @@ class TestDivergence3D:
     def test_divergence_constant_field(self):
         """Divergence of constant vector field should be zero."""
         F = jnp.ones((8, 8, 8, 3)) * 3.0
-        geom = Geometry(nx=8, ny=8, nz=8)
+        geom = Geometry(nx=8, ny=8, nz=8, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         div_F = divergence_3d(F, geom)
         assert div_F.shape == (8, 8, 8)
         assert jnp.allclose(div_F, 0.0, atol=1e-10)
@@ -124,6 +125,31 @@ class TestDivergence3D:
         div_F = divergence_3d(F, geom)
         assert jnp.allclose(div_F, 0.0, atol=1e-10)
 
+    def test_divergence_neumann_zero_gradient(self):
+        """Divergence of constant field should be zero with Neumann BCs."""
+        geom = Geometry(nx=8, ny=8, nz=8, bc_x="neumann", bc_y="neumann", bc_z="neumann")
+        F = jnp.zeros((8, 8, 8, 3))
+        F = F.at[..., 0].set(1.0)
+        div_F = divergence_3d(F, geom)
+        assert jnp.allclose(div_F, 0.0, atol=1e-6)
+
+    def test_divergence_dirichlet_sine_boundary(self):
+        """Dirichlet BCs should match analytic derivative at boundaries."""
+        geom = Geometry(
+            nx=8, ny=8, nz=8,
+            x_min=0.0, x_max=1.0,
+            y_min=0.0, y_max=1.0,
+            z_min=0.0, z_max=1.0,
+            bc_x="dirichlet", bc_y="dirichlet", bc_z="dirichlet"
+        )
+        F = jnp.zeros((8, 8, 8, 3))
+        L = geom.x_max - geom.x_min
+        F = F.at[..., 0].set(jnp.sin(jnp.pi * geom.x_grid / L))
+        div_F = divergence_3d(F, geom)
+        expected = (jnp.pi / L) * jnp.cos(jnp.pi * geom.x_grid / L)
+        assert jnp.allclose(div_F[0, :, :], expected[0, :, :], atol=1e-2)
+        assert jnp.allclose(div_F[-1, :, :], expected[-1, :, :], atol=1e-2)
+
 
 class TestCurl3D:
     """Test 3D curl operator."""
@@ -131,7 +157,7 @@ class TestCurl3D:
     def test_curl_constant_field(self):
         """Curl of constant vector field should be zero."""
         F = jnp.ones((8, 8, 8, 3)) * 5.0
-        geom = Geometry(nx=8, ny=8, nz=8)
+        geom = Geometry(nx=8, ny=8, nz=8, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         curl_F = curl_3d(F, geom)
         assert curl_F.shape == (8, 8, 8, 3)
         assert jnp.allclose(curl_F, 0.0, atol=1e-10)
@@ -143,13 +169,14 @@ class TestCurl3D:
             x_min=0.0, x_max=1.0,
             y_min=0.0, y_max=1.0,
             z_min=0.0, z_max=1.0,
+            bc_x="periodic", bc_y="periodic", bc_z="periodic",
         )
         # f = x^2 + y^2
         f = geom.x_grid**2 + geom.y_grid**2
         grad_f = gradient_3d(f, geom)
-        curl_grad_f = curl_3d(grad_f, geom)
-        # Check interior points (boundary is affected by periodic wrap on non-periodic function)
-        assert jnp.allclose(curl_grad_f[1:-1, 1:-1, :], 0.0, atol=1e-6)
+        curl_grad_f = curl_3d(grad_f, geom, order=2)
+        # Check interior points (exclude 2 cells for 4th-order stencil wrapping)
+        assert jnp.allclose(curl_grad_f[2:-2, 2:-2, :, :], 0.0, atol=1e-5)
 
     def test_curl_simple_field(self):
         """Curl of F = (-y, x, 0) should be (0, 0, 2)."""
@@ -158,6 +185,7 @@ class TestCurl3D:
             x_min=-1.0, x_max=1.0,
             y_min=-1.0, y_max=1.0,
             z_min=-1.0, z_max=1.0,
+            bc_x="periodic", bc_y="periodic", bc_z="periodic",
         )
         F = jnp.stack([-geom.y_grid, geom.x_grid, jnp.zeros_like(geom.x_grid)], axis=-1)
         curl_F = curl_3d(F, geom)
@@ -167,6 +195,23 @@ class TestCurl3D:
         assert jnp.allclose(curl_F[2:-2, 2:-2, :, 0], 0.0, atol=1e-7)
         assert jnp.allclose(curl_F[2:-2, 2:-2, :, 1], 0.0, atol=1e-7)
         assert jnp.allclose(curl_F[2:-2, 2:-2, :, 2], 2.0, atol=1e-6)
+
+    def test_curl_dirichlet_zero_boundary(self):
+        """Dirichlet BCs should match analytic derivative at boundaries."""
+        geom = Geometry(
+            nx=8, ny=8, nz=8,
+            x_min=0.0, x_max=1.0,
+            y_min=0.0, y_max=1.0,
+            z_min=0.0, z_max=1.0,
+            bc_x="dirichlet", bc_y="dirichlet", bc_z="dirichlet"
+        )
+        F = jnp.zeros((8, 8, 8, 3))
+        L = geom.x_max - geom.x_min
+        F = F.at[..., 1].set(jnp.sin(jnp.pi * geom.x_grid / L))
+        curl_F = curl_3d(F, geom)
+        expected = (jnp.pi / L) * jnp.cos(jnp.pi * geom.x_grid / L)
+        assert jnp.allclose(curl_F[0, :, :, 2], expected[0, :, :], atol=1e-2)
+        assert jnp.allclose(curl_F[-1, :, :, 2], expected[-1, :, :], atol=1e-2)
 
 
 class TestLaplacian3D:
