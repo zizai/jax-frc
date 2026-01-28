@@ -78,7 +78,11 @@ class ImexSolver(Solver):
                             model: PhysicsModel, geometry: Geometry) -> State:
         """Advance explicit terms by dt for B-based models."""
         state = model.apply_constraints(state, geometry)
-        rhs = model.compute_rhs(state, geometry)
+        explicit_fn = getattr(model, "explicit_rhs", None)
+        if callable(explicit_fn):
+            rhs = explicit_fn(state, geometry, state.time)
+        else:
+            rhs = model.compute_rhs(state, geometry)
 
         new_B = state.B + dt * rhs.B
 

@@ -64,6 +64,13 @@ class ResistiveMHD(PhysicsModel):
 
         return state.replace(B=dB_dt)
 
+    def explicit_rhs(self, state: State, geometry: Geometry, t: float) -> State:
+        """Return explicit terms for IMEX (none for pure resistive diffusion)."""
+        zero_B = jnp.zeros_like(state.B)
+        zero_E = jnp.zeros_like(state.E) if state.E is not None else None
+        zero_Te = jnp.zeros_like(state.Te) if state.Te is not None else None
+        return state.replace(B=zero_B, E=zero_E, Te=zero_Te)
+
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
         """Resistive diffusion CFL: dt < dx^2 / (2*eta/mu0)."""
         dx_min = min(geometry.dx, geometry.dy, geometry.dz)
@@ -91,6 +98,13 @@ class ResistiveMHD(PhysicsModel):
 
         Uses projection method: B_clean = B - grad(phi) where laplacian(phi) = div(B)
         """
+        if not (
+            geometry.bc_x == "periodic"
+            and geometry.bc_y == "periodic"
+            and geometry.bc_z == "periodic"
+        ):
+            return state
+
         from jax_frc.solvers.divergence_cleaning import clean_divergence
 
         B_clean = clean_divergence(state.B, geometry, max_iter=200, tol=1e-6)
