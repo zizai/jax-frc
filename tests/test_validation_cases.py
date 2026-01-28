@@ -24,3 +24,9 @@ def test_magnetic_diffusion_open_bc_defaults():
     assert config.bc_x == "neumann"
     assert config.bc_y == "neumann"
     assert config.bc_z == "neumann"
+
+
+def test_magnetic_diffusion_dirichlet_case_exists():
+    from validation.cases.analytic.magnetic_diffusion_dirichlet import run_validation
+
+    assert callable(run_validation)
