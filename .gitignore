@@ -105,7 +105,8 @@ cython_debug/
 Thumbs.db
 
 # Project specific
-.outputs/
+outputs/
+uv.lock
 .worktrees/
 *.hdf5
 *.h5
