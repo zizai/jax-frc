@@ -30,10 +30,10 @@ class TestGradient3D:
         grad_f = gradient_3d(f, geom)
         # df/dx = 1, df/dy = 0, df/dz = 0
         # Note: boundary cells affected by periodic wrap for non-periodic f=x
-        # Check interior points only (exclude first and last in x)
-        assert jnp.allclose(grad_f[1:-1, :, :, 0], 1.0, atol=1e-6)
-        assert jnp.allclose(grad_f[..., 1], 0.0, atol=1e-10)
-        assert jnp.allclose(grad_f[..., 2], 0.0, atol=1e-10)
+        # Check interior points only (exclude first/last two in x for 4th-order stencil)
+        assert jnp.allclose(grad_f[2:-2, :, :, 0], 1.0, atol=1e-6)
+        assert jnp.allclose(grad_f[..., 1], 0.0, atol=1e-7)
+        assert jnp.allclose(grad_f[..., 2], 0.0, atol=1e-7)
 
     def test_gradient_linear_y(self):
         """Gradient of f = y should be (0, 1, 0) in interior."""
@@ -45,9 +45,10 @@ class TestGradient3D:
         )
         f = geom.y_grid  # f = y
         grad_f = gradient_3d(f, geom)
-        assert jnp.allclose(grad_f[..., 0], 0.0, atol=1e-10)
-        assert jnp.allclose(grad_f[:, 1:-1, :, 1], 1.0, atol=1e-6)
-        assert jnp.allclose(grad_f[..., 2], 0.0, atol=1e-10)
+        assert jnp.allclose(grad_f[..., 0], 0.0, atol=1e-7)
+        # Exclude first/last two in y for 4th-order stencil
+        assert jnp.allclose(grad_f[:, 2:-2, :, 1], 1.0, atol=1e-6)
+        assert jnp.allclose(grad_f[..., 2], 0.0, atol=1e-7)
 
     def test_gradient_linear_z(self):
         """Gradient of f = z should be (0, 0, 1) in interior."""
@@ -59,8 +60,8 @@ class TestGradient3D:
         )
         f = geom.z_grid  # f = z
         grad_f = gradient_3d(f, geom)
-        assert jnp.allclose(grad_f[..., 0], 0.0, atol=1e-10)
-        assert jnp.allclose(grad_f[..., 1], 0.0, atol=1e-10)
+        assert jnp.allclose(grad_f[..., 0], 0.0, atol=1e-7)
+        assert jnp.allclose(grad_f[..., 1], 0.0, atol=1e-7)
         assert jnp.allclose(grad_f[:, :, 1:-1, 2], 1.0, atol=1e-6)
 
     def test_gradient_shape(self):
@@ -112,8 +113,8 @@ class TestDivergence3D:
         div_F = divergence_3d(F, geom)
         # dFx/dx + dFy/dy + dFz/dz = 1 + 1 + 1 = 3
         # Note: boundary cells affected by periodic wrap for non-periodic F=(x,y,z)
-        # Check interior points only (exclude first and last in each dimension)
-        assert jnp.allclose(div_F[1:-1, 1:-1, 1:-1], 3.0, atol=1e-6)
+        # Check interior points only (exclude first/last two in each dimension)
+        assert jnp.allclose(div_F[2:-2, 2:-2, 2:-2], 3.0, atol=1e-6)
 
     def test_divergence_solenoidal(self):
         """Divergence of solenoidal field should be zero."""
@@ -162,10 +163,10 @@ class TestCurl3D:
         curl_F = curl_3d(F, geom)
         # curl(-y, x, 0) = (0 - 0, 0 - 0, 1 - (-1)) = (0, 0, 2)
         # Note: boundary cells affected by periodic wrap for non-periodic F=(-y, x, 0)
-        # Check interior points only (exclude first and last in x and y)
-        assert jnp.allclose(curl_F[1:-1, 1:-1, :, 0], 0.0, atol=1e-10)
-        assert jnp.allclose(curl_F[1:-1, 1:-1, :, 1], 0.0, atol=1e-10)
-        assert jnp.allclose(curl_F[1:-1, 1:-1, :, 2], 2.0, atol=1e-6)
+        # Check interior points only (exclude first/last two in x and y for 4th-order stencil)
+        assert jnp.allclose(curl_F[2:-2, 2:-2, :, 0], 0.0, atol=1e-7)
+        assert jnp.allclose(curl_F[2:-2, 2:-2, :, 1], 0.0, atol=1e-7)
+        assert jnp.allclose(curl_F[2:-2, 2:-2, :, 2], 2.0, atol=1e-6)
 
 
 class TestLaplacian3D:

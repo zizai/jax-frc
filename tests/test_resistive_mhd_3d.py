@@ -31,7 +31,7 @@ class TestResistiveMHD3D:
     def test_uniform_field_no_change(self):
         """Uniform B field should have zero dB/dt (no current)."""
         model = ResistiveMHD(eta=1e-4)
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
         state = State.zeros(nx=16, ny=16, nz=16)
         B = jnp.zeros((16, 16, 16, 3))
         B = B.at[..., 2].set(1.0)  # Uniform Bz

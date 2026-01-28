@@ -31,10 +31,17 @@ FRC merging cases validated qualitatively (stability, conservation):
 - **belova_case1.py** - Large FRC merging without compression
 
 ### Hall Reconnection (`cases/hall_reconnection/`)
-Hall MHD reconnection tests (to be converted)
+Hall MHD reconnection tests:
+- **reconnection_gem.py** - GEM reconnection regression vs AGATE reference data
 
 ### MHD Regression (`cases/mhd_regression/`)
-Regression tests against baseline runs (to be converted)
+Regression tests against reference runs:
+- **orszag_tang.py** - Orszag–Tang regression vs AGATE reference data
+
+## AGATE Reference Data
+
+Some cases auto-download reference data from Zenodo (record 15084058) and cache
+it under `validation/references/agate/` the first time they run.
 
 ## Adding a New Case
 

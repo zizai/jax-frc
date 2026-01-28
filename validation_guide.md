@@ -106,6 +106,9 @@ Zenodo provides **HDF5 grid + state files** for:
 * **Hall Orszag–Tang** (256/512/1024 resolutions)
   with provenance tied to the AGATE paper. ([zenodo.org][4])
 
+In this repository, the AGATE-backed validation cases auto-download these
+files on first run and cache them under `validation/references/agate/`.
+
 This is extremely convenient for:
 
 * solver-to-solver comparison (field snapshots),
