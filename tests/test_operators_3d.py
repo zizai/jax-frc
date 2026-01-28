@@ -70,6 +70,23 @@ class TestGradient3D:
         grad_f = gradient_3d(f, geom)
         assert grad_f.shape == (4, 6, 8, 3)
 
+    def test_gradient_dirichlet_bc(self):
+        """Gradient with Dirichlet BC uses one-sided differences at boundaries."""
+        geom = Geometry(
+            nx=16, ny=8, nz=8,
+            x_min=0.0, x_max=1.0,
+            y_min=0.0, y_max=1.0,
+            z_min=0.0, z_max=1.0,
+            bc_x="dirichlet", bc_y="periodic", bc_z="periodic"
+        )
+        f = geom.x_grid  # f = x
+        grad_f = gradient_3d(f, geom)
+        # With Dirichlet BC, boundary gradient should use one-sided difference
+        # df/dx at x=0 should be (f[1] - f[0]) / dx (forward difference)
+        # df/dx at x=max should be (f[-1] - f[-2]) / dx (backward difference)
+        assert jnp.allclose(grad_f[0, :, :, 0], 1.0, atol=0.1)  # Forward diff at left
+        assert jnp.allclose(grad_f[-1, :, :, 0], 1.0, atol=0.1)  # Backward diff at right
+
 
 class TestDivergence3D:
     """Test 3D divergence operator."""

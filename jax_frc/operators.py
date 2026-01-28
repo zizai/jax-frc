@@ -253,26 +253,66 @@ def _gradient_3d_tuple(
     return df_dx, df_dy, df_dz
 
 
+def _derivative_with_bc(f: Array, dx: float, axis: int, bc: str) -> Array:
+    """Compute derivative along axis respecting boundary condition.
+
+    Args:
+        f: Field array
+        dx: Grid spacing
+        axis: Axis to differentiate along (0=x, 1=y, 2=z)
+        bc: Boundary condition type ("periodic", "dirichlet", "neumann")
+
+    Returns:
+        Derivative array with same shape as f
+    """
+    if bc == "periodic":
+        # Central differences with periodic wrap
+        return (jnp.roll(f, -1, axis=axis) - jnp.roll(f, 1, axis=axis)) / (2 * dx)
+
+    # Non-periodic: central interior, one-sided at boundaries
+    # Interior: central difference
+    f_plus = jnp.roll(f, -1, axis=axis)
+    f_minus = jnp.roll(f, 1, axis=axis)
+    df = (f_plus - f_minus) / (2 * dx)
+
+    # Boundary corrections using slicing
+    ndim = f.ndim
+
+    # Left boundary: forward difference (f[1] - f[0]) / dx
+    left_slice = [slice(None)] * ndim
+    left_slice[axis] = 0
+    next_slice = [slice(None)] * ndim
+    next_slice[axis] = 1
+    df_left = (f[tuple(next_slice)] - f[tuple(left_slice)]) / dx
+    df = df.at[tuple(left_slice)].set(df_left)
+
+    # Right boundary: backward difference (f[-1] - f[-2]) / dx
+    right_slice = [slice(None)] * ndim
+    right_slice[axis] = -1
+    prev_slice = [slice(None)] * ndim
+    prev_slice[axis] = -2
+    df_right = (f[tuple(right_slice)] - f[tuple(prev_slice)]) / dx
+    df = df.at[tuple(right_slice)].set(df_right)
+
+    return df
+
+
 @jit(static_argnums=(1,))
 def gradient_3d(f: Array, geometry: "Geometry") -> Array:
     """Compute gradient of scalar field in 3D Cartesian coordinates.
 
-    Uses central differences with periodic wrapping via jnp.roll.
-    Note: Always uses periodic boundaries regardless of geometry.bc_* settings.
+    Uses central differences in interior, one-sided at non-periodic boundaries.
 
     Args:
         f: Scalar field, shape (nx, ny, nz)
-        geometry: 3D Cartesian geometry
+        geometry: 3D Cartesian geometry with bc_x, bc_y, bc_z settings
 
     Returns:
         Gradient vector field, shape (nx, ny, nz, 3) with [df/dx, df/dy, df/dz]
     """
-    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
-
-    # Central differences with periodic wrapping
-    df_dx = (jnp.roll(f, -1, axis=0) - jnp.roll(f, 1, axis=0)) / (2 * dx)
-    df_dy = (jnp.roll(f, -1, axis=1) - jnp.roll(f, 1, axis=1)) / (2 * dy)
-    df_dz = (jnp.roll(f, -1, axis=2) - jnp.roll(f, 1, axis=2)) / (2 * dz)
+    df_dx = _derivative_with_bc(f, geometry.dx, axis=0, bc=geometry.bc_x)
+    df_dy = _derivative_with_bc(f, geometry.dy, axis=1, bc=geometry.bc_y)
+    df_dz = _derivative_with_bc(f, geometry.dz, axis=2, bc=geometry.bc_z)
 
     return jnp.stack([df_dx, df_dy, df_dz], axis=-1)
 
