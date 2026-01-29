@@ -543,6 +543,134 @@ def compute_field_l2_errors(jax_state, agate_fields: dict) -> dict:
     return errors
 
 
+def compute_field_metrics(jax_field: np.ndarray, agate_field: np.ndarray) -> dict:
+    """Compute per-field metrics: L2 error, max abs error, relative error.
+
+    Args:
+        jax_field: JAX field array
+        agate_field: AGATE reference field array
+
+    Returns:
+        Dict with l2_error, max_abs_error, relative_error
+    """
+    from jax_frc.validation.metrics import l2_error
+
+    # Normalize fields for comparison
+    def normalize(field):
+        max_val = np.max(np.abs(field))
+        return field / max_val if max_val > 1e-10 else field
+
+    jax_norm = normalize(jax_field)
+    agate_norm = normalize(agate_field)
+
+    diff = jax_norm - agate_norm
+    l2 = float(l2_error(jax_norm, agate_norm))
+    max_abs = float(np.max(np.abs(diff)))
+
+    agate_mag = np.max(np.abs(agate_norm))
+    rel = float(np.sqrt(np.mean(diff**2)) / agate_mag) if agate_mag > 1e-10 else 0.0
+
+    return {
+        "l2_error": l2,
+        "max_abs_error": max_abs,
+        "relative_error": rel,
+    }
+
+
+def validate_all_snapshots(
+    jax_states: list,
+    case: str,
+    resolution: list[int],
+    snapshot_times: list[float]
+) -> list[dict]:
+    """Compare JAX-FRC vs AGATE at each snapshot.
+
+    Args:
+        jax_states: List of JAX states at each snapshot
+        case: Case name (e.g., "ot" for Orszag-Tang)
+        resolution: Grid resolution as [nx, ny, nz]
+        snapshot_times: List of snapshot times
+
+    Returns:
+        List of dicts with time and per-field errors
+    """
+    all_errors = []
+    for i, (jax_state, t) in enumerate(zip(jax_states, snapshot_times)):
+        agate_fields = load_agate_snapshot(case, resolution, snapshot_idx=i)
+
+        field_errors = {}
+
+        # Density
+        jax_rho = np.asarray(jax_state.n)
+        field_errors["density"] = compute_field_metrics(jax_rho, agate_fields["density"])
+
+        # Momentum
+        jax_mom = np.asarray(jax_state.n)[..., None] * np.asarray(jax_state.v)
+        field_errors["momentum"] = compute_field_metrics(jax_mom, agate_fields["momentum"])
+
+        # Magnetic field
+        jax_B = np.asarray(jax_state.B)
+        field_errors["magnetic_field"] = compute_field_metrics(jax_B, agate_fields["magnetic_field"])
+
+        # Pressure
+        jax_p = np.asarray(jax_state.p)
+        field_errors["pressure"] = compute_field_metrics(jax_p, agate_fields["pressure"])
+
+        all_errors.append({"time": t, "errors": field_errors})
+
+    return all_errors
+
+
+def compute_aggregate_metrics(
+    jax_history: dict,
+    agate_times: np.ndarray,
+    agate_metrics: dict
+) -> dict:
+    """Compute time-series comparison metrics for aggregate quantities.
+
+    Args:
+        jax_history: Dict with 'times' and 'metrics' lists from JAX
+        agate_times: Array of AGATE snapshot times
+        agate_metrics: Dict of metric_name -> array of values
+
+    Returns:
+        Dict of metric_name -> {mean_residual, std_residual, relative_error}
+    """
+    results = {}
+
+    # Extract JAX time-series
+    jax_times = np.array(jax_history["times"])
+    jax_metrics_by_key = {}
+    for key in ["kinetic_fraction", "magnetic_fraction", "mean_energy_density",
+                "enstrophy_density", "normalized_max_current"]:
+        jax_metrics_by_key[key] = np.array([m[key] for m in jax_history["metrics"]])
+
+    for key in jax_metrics_by_key:
+        jax_vals = jax_metrics_by_key[key]
+        agate_vals = agate_metrics[key]
+
+        # Interpolate to common times if needed
+        if len(jax_vals) != len(agate_vals):
+            # Use AGATE times as reference
+            jax_interp = np.interp(agate_times, jax_times, jax_vals)
+            residuals = jax_interp - agate_vals
+        else:
+            residuals = jax_vals - agate_vals
+
+        mean_resid = float(np.mean(residuals))
+        std_resid = float(np.std(residuals))
+        agate_norm = float(np.linalg.norm(agate_vals))
+        rel_error = float(np.linalg.norm(residuals) / agate_norm) if agate_norm > 1e-10 else 0.0
+
+        results[key] = {
+            "mean_residual": mean_resid,
+            "std_residual": std_resid,
+            "relative_error": rel_error,
+        }
+
+    return results
+
+
 def compare_final_values(jax_value: float, agate_value: float, metric_name: str) -> tuple[bool, dict]:
     """Compare final state values using relative error.
 
