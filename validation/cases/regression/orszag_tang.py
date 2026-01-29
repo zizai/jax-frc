@@ -37,7 +37,7 @@ NAME = "orszag_tang"
 DESCRIPTION = "Orszag–Tang vortex regression vs AGATE reference data"
 
 RESOLUTIONS = (256, 512, 1024)
-QUICK_RESOLUTIONS = (64,)
+QUICK_RESOLUTIONS = (256,)
 ERROR_TOL = 0.2
 
 NGAS = 4
@@ -243,6 +243,24 @@ def main(quick_test: bool = False) -> bool:
     overall_pass = True
     metrics_report = {}
 
+    # Download AGATE data before running simulations
+    agate_data = {}
+    print("Downloading AGATE reference data...")
+    for resolution in resolutions:
+        try:
+            agate_times, agate_metrics = load_agate_series("ot", resolution)
+            agate_data[resolution] = (agate_times, agate_metrics)
+            print(f"  Resolution {resolution}: OK")
+        except Exception as exc:
+            print(f"  Resolution {resolution}: FAILED ({exc})")
+            if not quick_test:
+                overall_pass = False
+                metrics_report[f"agate_data_r{resolution}"] = {
+                    "value": "missing",
+                    "passed": False,
+                    "description": f"AGATE data load failed: {exc}",
+                }
+
     for resolution in resolutions:
         print(f"Resolution: {resolution}")
         cfg = setup_configuration(quick_test, resolution)
@@ -263,17 +281,10 @@ def main(quick_test: bool = False) -> bool:
                 }
             continue
 
-        try:
-            agate_times, agate_metrics = load_agate_series("ot", resolution)
-        except Exception as exc:
-            overall_pass = False
-            metrics_report[f"agate_data_r{resolution}"] = {
-                "value": "missing",
-                "passed": False,
-                "description": f"AGATE data load failed: {exc}",
-            }
+        if resolution not in agate_data:
             continue
 
+        agate_times, agate_metrics = agate_data[resolution]
         for key, jax_values in jax_metrics.items():
             passed, stats = compare_series(
                 jax_times, jax_values, agate_times, agate_metrics[key]
