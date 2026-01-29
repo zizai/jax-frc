@@ -177,7 +177,7 @@ def run_agate_simulation(
         Path to the output directory
 
     Raises:
-        RuntimeError: If AGATE is not installed
+        RuntimeError: If AGATE is not installed or simulation fails
         ValueError: If case is unknown
     """
     try:
@@ -195,13 +195,26 @@ def run_agate_simulation(
         print(f"Using cached AGATE data for {case} at resolution {resolution}")
         return output_dir
 
-    # Run simulation
-    if case == "orszag_tang":
-        _run_orszag_tang(resolution, output_dir)
-    elif case == "gem_reconnection":
-        _run_gem_reconnection(resolution, output_dir)
+    # Clean up any partial files before regenerating
+    if output_dir.exists():
+        for f in output_dir.glob(f"{case}_{resolution}.*"):
+            f.unlink()
 
-    # Save config
-    _save_config(case, resolution, output_dir)
+    try:
+        # Run simulation
+        if case == "orszag_tang":
+            _run_orszag_tang(resolution, output_dir)
+        elif case == "gem_reconnection":
+            _run_gem_reconnection(resolution, output_dir)
+
+        # Save config
+        _save_config(case, resolution, output_dir)
+
+    except Exception as e:
+        # Clean up partial files on failure
+        if output_dir.exists():
+            for f in output_dir.glob(f"{case}_{resolution}.*"):
+                f.unlink()
+        raise RuntimeError(f"AGATE simulation failed for {case} at {resolution}: {e}") from e
 
     return output_dir
