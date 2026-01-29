@@ -154,3 +154,84 @@ def create_field_comparison_plot(
 
     fig.tight_layout()
     return fig
+
+
+def create_timeseries_comparison_plot(
+    jax_times: np.ndarray,
+    jax_values: np.ndarray,
+    agate_times: np.ndarray,
+    agate_values: np.ndarray,
+    metric_name: str,
+    resolution: list[int]
+) -> Figure:
+    """Create time-series comparison plot for an aggregate metric.
+
+    Args:
+        jax_times: JAX simulation times
+        jax_values: JAX metric values
+        agate_times: AGATE reference times
+        agate_values: AGATE metric values
+        metric_name: Name of the metric
+        resolution: Grid resolution as [nx, ny, nz]
+
+    Returns:
+        matplotlib Figure
+    """
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+    # Top: JAX vs AGATE
+    ax1.plot(jax_times, jax_values, 'b-', label='JAX-FRC', linewidth=2)
+    ax1.plot(agate_times, agate_values, 'r--', label='AGATE', linewidth=2)
+    ax1.set_ylabel(metric_name)
+    ax1.legend()
+    ax1.set_title(f"{metric_name} Evolution (Resolution {resolution[0]})")
+    ax1.grid(True, alpha=0.3)
+
+    # Bottom: Residual
+    jax_interp = np.interp(agate_times, jax_times, jax_values)
+    residuals = jax_interp - agate_values
+    ax2.plot(agate_times, residuals, 'g-', linewidth=2)
+    ax2.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+    ax2.set_xlabel('Time')
+    ax2.set_ylabel('Residual (JAX - AGATE)')
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    return fig
+
+
+def create_field_error_evolution_plot(
+    snapshot_errors: list[dict],
+    threshold: float,
+    resolution: list[int]
+) -> Figure:
+    """Create plot of per-field L2 error vs snapshot time.
+
+    Args:
+        snapshot_errors: List of {time, errors} dicts from validate_all_snapshots
+        threshold: Error threshold
+        resolution: Grid resolution as [nx, ny, nz]
+
+    Returns:
+        matplotlib Figure
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    times = [s["time"] for s in snapshot_errors]
+    fields = list(snapshot_errors[0]["errors"].keys())
+
+    colors = ['b', 'g', 'r', 'purple']
+    for field, color in zip(fields, colors):
+        errors = [s["errors"][field]["l2_error"] for s in snapshot_errors]
+        ax.plot(times, errors, '-o', label=field, markersize=3, color=color)
+
+    ax.axhline(y=threshold, color='k', linestyle='--', linewidth=2,
+               label=f'Threshold ({threshold})')
+    ax.set_xlabel('Time')
+    ax.set_ylabel('L2 Error')
+    ax.set_title(f'Per-Field L2 Error Evolution (Resolution {resolution[0]})')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    return fig
