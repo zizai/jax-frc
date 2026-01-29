@@ -320,6 +320,56 @@ def run_simulation(cfg: dict) -> tuple:
     return state, geometry, history
 
 
+def run_simulation_with_snapshots(
+    cfg: dict,
+    snapshot_times: list[float]
+) -> tuple[list, any, dict]:
+    """Run JAX-FRC, capturing state at each snapshot time.
+
+    Args:
+        cfg: Configuration dict with nx, nz, dt, etc.
+        snapshot_times: List of times to capture state
+
+    Returns:
+        Tuple of (states_list, geometry, history)
+    """
+    import math
+    from jax_frc.models.resistive_mhd import ResistiveMHD
+
+    B0_agate = 1.0 / math.sqrt(4.0 * math.pi)
+    config = OrszagTangConfiguration(
+        nx=cfg["nx"],
+        nz=cfg["nz"],
+        B0=B0_agate,
+        eta=0.0,
+    )
+    geometry = config.build_geometry()
+    state = config.build_initial_state(geometry)
+    model = ResistiveMHD(eta=0.0, advection_scheme="ct")
+    solver = Solver.create({"type": "rk4"})
+
+    dt = cfg["dt"]
+    states = []
+    history = {"times": [], "metrics": []}
+
+    for target_time in snapshot_times:
+        # Step until we reach target_time
+        while state.time < target_time - 1e-12:
+            step_dt = min(dt, target_time - state.time)
+            state = solver.step_checked(state, step_dt, model, geometry)
+
+        # Capture state at this snapshot
+        states.append(state)
+        metrics = compute_metrics(
+            state.n, state.p, state.v, state.B,
+            geometry.dx, geometry.dy, geometry.dz
+        )
+        history["times"].append(float(state.time))
+        history["metrics"].append(metrics)
+
+    return states, geometry, history
+
+
 def _parse_state_vector(vec: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     rho = vec[IRHO]
     # AGATE stores momentum components in gas slots; convert to velocity for metrics.
