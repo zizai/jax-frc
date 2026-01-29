@@ -101,13 +101,17 @@ class AgateDataLoader:
 
     def _ensure_files_zenodo(self, case: str, resolution: int) -> list[Path]:
         """Original Zenodo download logic (fallback)."""
-        files = self._select_files(case, resolution)
+        # Map to full case name for consistent directory structure
+        case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
+        full_case = case_map.get(case.lower(), case.lower())
+
+        files = self._select_files(case, resolution)  # Keep original for API
         local_paths: list[Path] = []
         for file_meta in files:
             key = file_meta["key"]
             url = file_meta["links"]["self"]
             filename = Path(key).name
-            target = self._target_path(case, resolution, filename)
+            target = self._target_path(full_case, resolution, filename)  # Use mapped name
             if self._is_archive(target):
                 if not target.exists():
                     self._download_file(url, target)
