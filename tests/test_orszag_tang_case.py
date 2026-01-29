@@ -1,4 +1,4 @@
-from validation.cases.mhd_regression.orszag_tang import main
+from validation.cases.regression.orszag_tang import main
 
 
 def test_orszag_tang_quick_smoke():
