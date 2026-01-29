@@ -3,8 +3,8 @@
 Physics:
     Standard 2D Orszag–Tang vortex in a thin-y slab, used to validate nonlinear
     MHD turbulence, current sheet formation, and energy evolution. This case
-    compares scalar time-series metrics against AGATE reference data (Hall OT)
-    via block-bootstrap mean relative error with 95% confidence intervals.
+    compares scalar time-series metrics against AGATE reference data using
+    point-to-point relative error comparison.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ sys.path.insert(0, str(project_root))
 from jax_frc.configurations.orszag_tang import OrszagTangConfiguration
 from jax_frc.solvers import Solver
 from validation.utils.agate_data import AgateDataLoader
-from validation.utils.regression import block_bootstrap_ci
 from validation.utils.reporting import ValidationReport
 
 
@@ -38,7 +37,11 @@ DESCRIPTION = "Orszag–Tang vortex regression vs AGATE reference data"
 
 RESOLUTIONS = (256, 512, 1024)
 QUICK_RESOLUTIONS = (256,)
-ERROR_TOL = 0.2
+L2_ERROR_TOL = 0.01  # 1% L2 error threshold
+RELATIVE_ERROR_TOL = 0.05  # 5% relative error threshold (95% accuracy for energy metrics)
+
+# Energy metrics use relative error threshold, others use L2 error threshold
+ENERGY_METRICS = {"total_energy", "magnetic_energy", "kinetic_energy"}
 
 NGAS = 4
 NMAG = 3
@@ -49,18 +52,21 @@ IMZ = 3
 
 
 def setup_configuration(quick_test: bool, resolution: int) -> dict:
+    # Timestep must satisfy Alfvén CFL: dt < dx / v_A
+    # For B0=1.0, rho0~0.221: v_A ~ 1896, dx ~ 0.0246 -> dt_max ~ 1.3e-5
+    # Use dt = 1e-5 for stability (10x smaller than original)
     if quick_test:
         return {
             "nx": resolution,
             "nz": resolution,
-            "t_end": 0.05,
-            "dt": 1e-4,
+            "t_end": 0.01,
+            "dt": 1e-5,
         }
     return {
         "nx": resolution,
         "nz": resolution,
         "t_end": 0.5,
-        "dt": 1e-4,
+        "dt": 1e-5,
     }
 
 
@@ -136,7 +142,9 @@ def run_simulation(cfg: dict) -> tuple:
     )
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
-    model = config.build_model()
+    # Use CT scheme to avoid divergence cleaning issues
+    from jax_frc.models.resistive_mhd import ResistiveMHD
+    model = ResistiveMHD(eta=config.eta, advection_scheme="ct")
     solver = Solver.create({"type": "euler"})
 
     t_end = cfg["t_end"]
@@ -153,7 +161,7 @@ def run_simulation(cfg: dict) -> tuple:
     history["metrics"].append(metrics)
 
     for step_idx in range(n_steps):
-        state = solver.step(state, dt, model, geometry)
+        state = solver.step_checked(state, dt, model, geometry)
         if (step_idx + 1) % output_interval == 0:
             current_time = (step_idx + 1) * dt
             metrics = compute_metrics(
@@ -173,7 +181,9 @@ def run_simulation(cfg: dict) -> tuple:
 
 def _parse_state_vector(vec: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     rho = vec[IRHO]
-    v = np.stack([vec[IMX], vec[IMY], vec[IMZ]], axis=-1)
+    # AGATE stores momentum components in gas slots; convert to velocity for metrics.
+    mom = np.stack([vec[IMX], vec[IMY], vec[IMZ]], axis=-1)
+    v = np.divide(mom, rho[..., None], out=np.zeros_like(mom), where=rho[..., None] != 0)
     B = vec[NGAS : NGAS + NMAG]
     B = np.moveaxis(B, 0, -1)
     p_idx = NGAS + NMAG
@@ -227,16 +237,114 @@ def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
     return np.array(times), {k: np.array(v) for k, v in metrics.items()}
 
 
-def compare_series(jax_times, jax_values, agate_times, agate_values) -> tuple[bool, dict]:
-    if len(agate_times) < 2:
-        agate_interp = np.full_like(jax_values, agate_values[0], dtype=float)
+def load_agate_final_fields(case: str, resolution: int) -> dict:
+    """Load final state spatial fields from AGATE reference data.
+
+    Args:
+        case: Case identifier ("ot" for Orszag-Tang)
+        resolution: Grid resolution
+
+    Returns:
+        Dict with keys: density, momentum, magnetic_field, pressure
+        Each value is a numpy array of the spatial field.
+    """
+    loader = AgateDataLoader()
+    loader.ensure_files(case, resolution)
+    case_dir = Path(loader.cache_dir) / case / str(resolution)
+
+    def _state_key(path: Path) -> int:
+        match = re.search(r"state_(\d+)", path.name)
+        return int(match.group(1)) if match else 0
+
+    state_files = sorted(case_dir.rglob("*.state_*.h5"), key=_state_key)
+    if not state_files:
+        raise FileNotFoundError(f"No AGATE state files found in {case_dir}")
+
+    # Load the final state file
+    final_state_path = state_files[-1]
+
+    with h5py.File(final_state_path, "r") as f:
+        sub = f["subID0"]
+        vec = sub["vector"][:]
+
+    # Parse the state vector into fields
+    rho, p, v, B = _parse_state_vector(vec)
+
+    # Compute momentum from density and velocity
+    mom = rho[..., None] * v
+
+    return {
+        "density": rho,
+        "momentum": mom,
+        "magnetic_field": B,
+        "pressure": p,
+    }
+
+
+def compare_final_values(jax_value: float, agate_value: float, metric_name: str) -> tuple[bool, dict]:
+    """Compare final state values using L2 error and relative error.
+
+    Args:
+        jax_value: Final metric value from JAX simulation
+        agate_value: Final metric value from AGATE reference
+        metric_name: Name of the metric being compared
+
+    Returns:
+        Tuple of (passed, stats_dict)
+    """
+    # Check for NaN/Inf in input values
+    if np.isnan(jax_value) or np.isinf(jax_value):
+        return False, {
+            "jax_value": float("nan"),
+            "agate_value": agate_value,
+            "l2_error": float("nan"),
+            "relative_error": float("nan"),
+            "error_msg": "NaN or Inf detected in JAX simulation value",
+        }
+    if np.isnan(agate_value) or np.isinf(agate_value):
+        return False, {
+            "jax_value": jax_value,
+            "agate_value": float("nan"),
+            "l2_error": float("nan"),
+            "relative_error": float("nan"),
+            "error_msg": "NaN or Inf detected in AGATE reference value",
+        }
+
+    # Compute L2 error: |jax - agate| / max(|agate|, 1e-8)
+    denom = max(abs(agate_value), 1e-8)
+    l2_error = abs(jax_value - agate_value) / denom
+
+    # Compute relative error: |jax - agate| / |agate| (same formula, but different threshold)
+    relative_error = l2_error
+
+    # Check for NaN/Inf in computed error
+    if np.isnan(l2_error) or np.isinf(l2_error):
+        return False, {
+            "jax_value": jax_value,
+            "agate_value": agate_value,
+            "l2_error": float("nan"),
+            "relative_error": float("nan"),
+            "error_msg": "NaN or Inf in computed error",
+        }
+
+    # Use different thresholds based on metric type
+    if metric_name in ENERGY_METRICS:
+        threshold = RELATIVE_ERROR_TOL
+        passed = relative_error <= threshold
+        threshold_type = "relative"
     else:
-        agate_interp = np.interp(jax_times, agate_times, agate_values)
-    denom = np.maximum(np.abs(agate_interp), 1e-8)
-    errors = np.abs(jax_values - agate_interp) / denom
-    mean_err, lo, hi = block_bootstrap_ci(errors, block_size=10, n_boot=300)
-    passed = hi <= ERROR_TOL
-    return passed, {"mean_error": mean_err, "ci_low": lo, "ci_high": hi}
+        threshold = L2_ERROR_TOL
+        passed = l2_error <= threshold
+        threshold_type = "l2"
+
+    return passed, {
+        "jax_value": jax_value,
+        "agate_value": agate_value,
+        "l2_error": l2_error,
+        "relative_error": relative_error,
+        "threshold": threshold,
+        "threshold_type": threshold_type,
+    }
 
 
 def main(quick_test: bool = False) -> bool:
@@ -280,10 +388,14 @@ def main(quick_test: bool = False) -> bool:
 
         if quick_test:
             for key in jax_metrics:
+                val = float(jax_metrics[key][-1])
+                is_valid = not (np.isnan(val) or np.isinf(val))
+                if not is_valid:
+                    overall_pass = False
                 metrics_report[f"{key}_r{resolution}"] = {
-                    "value": float(jax_metrics[key][-1]),
-                    "passed": True,
-                    "description": "Quick test mode (no regression)",
+                    "value": val,
+                    "passed": is_valid,
+                    "description": "Quick test mode (NaN/Inf check only)",
                 }
             continue
 
@@ -292,16 +404,19 @@ def main(quick_test: bool = False) -> bool:
 
         agate_times, agate_metrics = agate_data[resolution]
         for key, jax_values in jax_metrics.items():
-            passed, stats = compare_series(
-                jax_times, jax_values, agate_times, agate_metrics[key]
-            )
+            # Compare final values (last time point)
+            jax_final = float(jax_values[-1])
+            agate_final = float(agate_metrics[key][-1])
+            passed, stats = compare_final_values(jax_final, agate_final, key)
             metrics_report[f"{key}_r{resolution}"] = {
-                "value": stats["mean_error"],
-                "ci_low": stats["ci_low"],
-                "ci_high": stats["ci_high"],
-                "threshold": ERROR_TOL,
+                "jax_value": stats.get("jax_value", float("nan")),
+                "agate_value": stats.get("agate_value", float("nan")),
+                "l2_error": stats.get("l2_error", float("nan")),
+                "relative_error": stats.get("relative_error", float("nan")),
+                "threshold": stats.get("threshold", L2_ERROR_TOL),
+                "threshold_type": stats.get("threshold_type", "l2"),
                 "passed": passed,
-                "description": f"Mean relative error (95% CI) vs AGATE {key}",
+                "description": stats.get("error_msg", f"{stats.get('threshold_type', 'L2')} error vs AGATE {key}"),
             }
             overall_pass = overall_pass and passed
 
@@ -311,7 +426,7 @@ def main(quick_test: bool = False) -> bool:
         docstring=__doc__,
         configuration={"resolutions": resolutions},
         metrics=metrics_report,
-        overall_pass=overall_pass or quick_test,
+        overall_pass=overall_pass,
     )
 
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -324,7 +439,7 @@ def main(quick_test: bool = False) -> bool:
     report_dir = report.save()
     print(f"Report saved to: {report_dir}")
 
-    return bool(overall_pass or quick_test)
+    return bool(overall_pass)
 
 
 if __name__ == "__main__":
