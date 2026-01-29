@@ -171,10 +171,31 @@ class ValidationReport:
         for name, data in self.metrics.items():
             status = "PASS" if data.get('passed', True) else "FAIL"
             status_color = "#28a745" if data.get('passed', True) else "#dc3545"
-            value = data.get('value', 'N/A')
-            if isinstance(value, float):
-                value = f"{value:.4g}"
+            # Support both old format (value) and new format (jax_value, agate_value, l2_error, relative_error)
+            if 'jax_value' in data:
+                jax_val = data.get('jax_value', 'N/A')
+                agate_val = data.get('agate_value', 'N/A')
+                l2_err = data.get('l2_error', 'N/A')
+                rel_err = data.get('relative_error', l2_err)  # fallback to l2_error if not present
+                if isinstance(jax_val, float):
+                    jax_val = f"{jax_val:.4g}"
+                if isinstance(agate_val, float):
+                    agate_val = f"{agate_val:.4g}"
+                if isinstance(l2_err, float):
+                    l2_err = f"{l2_err:.4g}"
+                if isinstance(rel_err, float):
+                    rel_err = f"{rel_err:.4g}"
+                value = f"JAX: {jax_val}, AGATE: {agate_val}, L2: {l2_err}, Rel: {rel_err}"
+            else:
+                value = data.get('value', 'N/A')
+                if isinstance(value, float):
+                    value = f"{value:.4g}"
             threshold = data.get('threshold', 'N/A')
+            threshold_type = data.get('threshold_type', '')
+            if isinstance(threshold, float):
+                threshold = f"{threshold:.4g}"
+            if threshold_type:
+                threshold = f"{threshold} ({threshold_type})"
             desc = data.get('description', '')
             metrics_rows += f"""<tr>
                 <td>{name}</td>
@@ -287,3 +308,29 @@ class ValidationReport:
     </footer>
 </body>
 </html>"""
+
+
+def print_field_l2_table(field_errors: dict, threshold: float) -> None:
+    """Print formatted table of field L2 errors to console."""
+    print("  Field L2 Errors:")
+    print(f"    {'Field':<18} {'L2 Error':<12} {'Threshold':<12} {'Status'}")
+    print("    " + "-" * 54)
+    for field, error in field_errors.items():
+        status = "PASS" if error <= threshold else "FAIL"
+        print(f"    {field:<18} {error:<12.4g} {threshold:<12.4g} {status}")
+
+
+def print_scalar_metrics_table(metrics: dict) -> None:
+    """Print formatted table of scalar metric comparisons to console."""
+    print("  Scalar Metrics:")
+    print(f"    {'Metric':<18} {'JAX Value':<12} {'AGATE Value':<12} "
+          f"{'Rel Error':<10} {'Threshold':<10} {'Status'}")
+    print("    " + "-" * 74)
+    for name, data in metrics.items():
+        jax_val = data['jax_value']
+        agate_val = data['agate_value']
+        rel_err = data['relative_error']
+        threshold = data['threshold']
+        status = "PASS" if data['passed'] else "FAIL"
+        print(f"    {name:<18} {jax_val:<12.4g} {agate_val:<12.4g} "
+              f"{rel_err:<10.2%} {threshold:<10.2%} {status}")
