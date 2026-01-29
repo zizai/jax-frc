@@ -45,11 +45,14 @@ from validation.utils.reporting import (
     ValidationReport,
     print_field_l2_table,
     print_scalar_metrics_table,
+    print_aggregate_metrics_table,
 )
 from validation.utils.plots import (
     create_scalar_comparison_plot,
     create_error_threshold_plot,
     create_field_comparison_plot,
+    create_timeseries_comparison_plot,
+    create_field_error_evolution_plot,
 )
 import yaml
 
@@ -142,8 +145,16 @@ def load_agate_snapshot(case: str, resolution: list[int], snapshot_idx: int) -> 
 NAME = "reconnection_gem"
 DESCRIPTION = "GEM Hall reconnection regression vs AGATE reference data"
 
-RESOLUTIONS = (512,)  # Only 512 available in AGATE reference data
-QUICK_RESOLUTIONS = (512,)
+RESOLUTIONS = ([512, 512, 1],)  # Only 512 available in AGATE reference data
+QUICK_RESOLUTIONS = ([512, 512, 1],)
+QUICK_NUM_SNAPSHOTS = 5  # t=0, 0.25*end, 0.5*end, 0.75*end, end
+
+
+def get_quick_snapshot_times(end_time: float) -> list[float]:
+    """Get 5 evenly-spaced snapshot times for quick test mode."""
+    return [i * end_time / 4 for i in range(5)]
+
+
 # Relaxed thresholds due to different numerical schemes
 L2_ERROR_TOL = 0.20  # 20% for field L2 errors
 RELATIVE_ERROR_TOL = 0.20  # 20% for scalar metrics
@@ -156,26 +167,24 @@ IMY = 2
 IMZ = 3
 
 
-def setup_configuration(quick_test: bool, resolution: int) -> dict:
+def setup_configuration(quick_test: bool, resolution: list[int]) -> dict:
+    """Setup simulation configuration.
+
+    Args:
+        quick_test: If True, still run full time but compare fewer snapshots
+        resolution: Grid resolution as [nx, ny, nz]
+
+    Returns:
+        Configuration dictionary with nx, nz, t_end, dt, etc.
+    """
     # AGATE reference data is at t=12.0
     # AGATE grid is 512 x 256 (nx x ny in AGATE's xy-plane)
     # JAX uses xz-plane, so we need nx=512, nz=256
-    if quick_test:
-        return {
-            "nx": resolution,
-            "nz": resolution // 2,  # Match AGATE aspect ratio
-            "t_end": 0.1,  # Short run to verify stability
-            "dt": 1e-4,
-            "lambda_": 0.5,
-            "psi1": 0.1,
-            "B0": 1.0,
-            "n0": 1.0,
-            "n_b": 0.2,
-        }
+    # Quick test mode: still run full time (t=12.0) but compare at fewer snapshots
     return {
-        "nx": resolution,
-        "nz": resolution // 2,  # Match AGATE aspect ratio
-        "t_end": 12.0,  # Match AGATE reference data time
+        "nx": resolution[0],
+        "nz": resolution[0] // 2,  # Match AGATE aspect ratio
+        "t_end": 12.0,  # Full time for snapshot comparison
         "dt": 1e-3,
         "lambda_": 0.5,
         "psi1": 0.1,
@@ -732,7 +741,7 @@ def main(quick_test: bool = False) -> bool:
     print(f"Running validation: {NAME}")
     print(f"  {DESCRIPTION}")
     if quick_test:
-        print("  (QUICK TEST MODE)")
+        print("  (QUICK TEST MODE - 5 snapshots)")
     print()
 
     print("Configuration:")
@@ -751,71 +760,89 @@ def main(quick_test: bool = False) -> bool:
     for resolution in resolutions:
         try:
             loader = AgateDataLoader()
-            loader.ensure_files("gem", resolution)
-            print(f"  Resolution {resolution}: OK")
+            loader.ensure_files("gem", resolution[0])
+            print(f"  Resolution {resolution[0]}: OK")
         except Exception as exc:
-            print(f"  Resolution {resolution}: FAILED ({exc})")
+            print(f"  Resolution {resolution[0]}: FAILED ({exc})")
     print()
 
     for resolution in resolutions:
-        print(f"Resolution {resolution}: ", end="", flush=True)
-        cfg = setup_configuration(quick_test, resolution)
-        t_start = time.time()
-        final_state, geometry, history = run_simulation(cfg)
-        t_sim = time.time() - t_start
-        print(f"[{t_sim:.2f}s]")
+        res_str = f"{resolution[0]}x{resolution[1]}x{resolution[2]}"
+        print(f"Resolution {res_str}:")
 
-        # Load AGATE reference data
-        # Note: AGATE only has t=12.0 data, so we always compare against final state
+        # Load AGATE config to get snapshot times
         try:
-            agate_fields = load_agate_fields("gem", resolution, use_initial=False)
-            agate_times, agate_scalar_metrics = load_agate_series("gem", resolution)
+            agate_config = load_agate_config("gem", resolution)
         except Exception as exc:
-            print(f"  ERROR: Failed to load AGATE data: {exc}")
+            print(f"  ERROR: Failed to load AGATE config: {exc}")
             overall_pass = False
             continue
 
-        # In quick test mode, note the time mismatch
+        # Determine snapshot times
         if quick_test:
-            print("  Quick test: simulation ran to t=0.1, comparing against AGATE t=12.0")
-            print("  (Results will differ due to different simulation times)")
+            snapshot_times = get_quick_snapshot_times(12.0)
+            print(f"  Using {len(snapshot_times)} snapshots (quick mode)")
+        else:
+            snapshot_times = agate_config.get("snapshot_times")
+            if snapshot_times is None:
+                # Fallback for legacy data without config
+                snapshot_times = [0.0, 12.0]
+            print(f"  Using {len(snapshot_times)} snapshots")
+
+        # Run simulation with snapshots
+        cfg = setup_configuration(quick_test, resolution)
+        print(f"  Running simulation to t={cfg['t_end']}...", end="", flush=True)
+        t_start = time.time()
+        jax_states, geometry, history = run_simulation_with_snapshots(cfg, snapshot_times)
+        t_sim = time.time() - t_start
+        print(f" [{t_sim:.2f}s]")
+
+        # Validate all snapshots
+        print(f"  Validating {len(snapshot_times)} snapshots...")
+        try:
+            snapshot_errors = validate_all_snapshots(
+                jax_states, "gem", resolution, snapshot_times
+            )
+        except Exception as exc:
+            print(f"  ERROR: Failed to validate snapshots: {exc}")
+            overall_pass = False
+            continue
+
+        # Compute aggregate metrics
+        try:
+            agate_times, agate_scalar_metrics = load_agate_series("gem", resolution[0])
+            aggregate_metrics = compute_aggregate_metrics(
+                history, agate_times, agate_scalar_metrics
+            )
+        except Exception as exc:
+            print(f"  WARNING: Failed to compute aggregate metrics: {exc}")
+            aggregate_metrics = {}
+
+        # Print per-field table (use last snapshot's errors for summary)
+        final_field_errors = snapshot_errors[-1]["errors"]
+        print()
+        print_field_l2_table(final_field_errors, L2_ERROR_TOL)
+        print()
+
+        # Print aggregate metrics table
+        if aggregate_metrics:
+            print_aggregate_metrics_table(aggregate_metrics, RELATIVE_ERROR_TOL)
             print()
 
-        # Compute field L2 errors
-        field_errors = compute_field_l2_errors(final_state, agate_fields)
-        print()  # Add blank line for readability
-        print_field_l2_table(field_errors, L2_ERROR_TOL)
-        print()
-
-        # Compute scalar metrics comparison
-        jax_final_metrics = compute_metrics(
-            final_state.n, final_state.p, final_state.v, final_state.B,
-            geometry.dx, geometry.dy, geometry.dz
-        )
-
-        # Use final AGATE scalar metrics (only t=12.0 data available)
-        agate_idx = -1
-        scalar_results = {}
-        for key in jax_final_metrics:
-            jax_val = jax_final_metrics[key]
-            agate_val = float(agate_scalar_metrics[key][agate_idx])
-            passed, stats = compare_final_values(jax_val, agate_val, key)
-            scalar_results[key] = {
-                'jax_value': jax_val,
-                'agate_value': agate_val,
-                'relative_error': stats.get('relative_error', 0),
-                'threshold': stats.get('threshold', RELATIVE_ERROR_TOL),
-                'passed': passed,
-            }
-
-        print_scalar_metrics_table(scalar_results)
-        print()
-
         # Summary for this resolution
-        field_passed = sum(1 for e in field_errors.values() if e <= L2_ERROR_TOL)
-        scalar_passed = sum(1 for m in scalar_results.values() if m['passed'])
-        total_checks = len(field_errors) + len(scalar_results)
-        total_passed = field_passed + scalar_passed
+        # Count field passes (based on final snapshot L2 errors)
+        field_passed = sum(
+            1 for stats in final_field_errors.values()
+            if stats["l2_error"] <= L2_ERROR_TOL
+        )
+        # Count aggregate passes
+        agg_passed = sum(
+            1 for stats in aggregate_metrics.values()
+            if stats["relative_error"] <= RELATIVE_ERROR_TOL
+        ) if aggregate_metrics else 0
+
+        total_checks = len(final_field_errors) + len(aggregate_metrics)
+        total_passed = field_passed + agg_passed
         res_pass = total_passed == total_checks
         overall_pass = overall_pass and res_pass
 
@@ -823,29 +850,31 @@ def main(quick_test: bool = False) -> bool:
         print()
 
         # Store results for report generation
-        all_results[resolution] = {
-            'field_errors': field_errors,
-            'scalar_metrics': scalar_results,
-            'jax_state': final_state,
-            'agate_fields': agate_fields,
+        all_results[resolution[0]] = {
+            'field_errors': final_field_errors,
+            'snapshot_errors': snapshot_errors,
+            'aggregate_metrics': aggregate_metrics,
+            'jax_states': jax_states,
+            'history': history,
+            'agate_times': agate_times,
+            'agate_scalar_metrics': agate_scalar_metrics,
+            'resolution': resolution,
         }
 
         # Store metrics for report
-        for field, error in field_errors.items():
-            all_metrics[f"{field}_l2_r{resolution}"] = {
-                'value': error,
+        for field, stats in final_field_errors.items():
+            all_metrics[f"{field}_l2_r{resolution[0]}"] = {
+                'value': stats["l2_error"],
                 'threshold': L2_ERROR_TOL,
-                'passed': error <= L2_ERROR_TOL,
-                'description': f'{field} L2 error vs AGATE',
+                'passed': stats["l2_error"] <= L2_ERROR_TOL,
+                'description': f'{field} L2 error vs AGATE (final snapshot)',
             }
-        for key, data in scalar_results.items():
-            all_metrics[f"{key}_r{resolution}"] = {
-                'jax_value': data['jax_value'],
-                'agate_value': data['agate_value'],
-                'relative_error': data['relative_error'],
-                'threshold': data['threshold'],
-                'passed': data['passed'],
-                'description': f'{key} relative error vs AGATE',
+        for key, stats in aggregate_metrics.items():
+            all_metrics[f"{key}_r{resolution[0]}"] = {
+                'value': stats["relative_error"],
+                'threshold': RELATIVE_ERROR_TOL,
+                'passed': stats["relative_error"] <= RELATIVE_ERROR_TOL,
+                'description': f'{key} time-series relative error vs AGATE',
             }
 
     # Generate report
@@ -854,53 +883,81 @@ def main(quick_test: bool = False) -> bool:
         description=DESCRIPTION,
         docstring=__doc__,
         configuration={
-            "resolutions": resolutions,
+            "resolutions": [list(r) for r in resolutions],
             "L2_threshold": L2_ERROR_TOL,
             "relative_threshold": RELATIVE_ERROR_TOL,
+            "quick_test": quick_test,
         },
         metrics=all_metrics,
         overall_pass=overall_pass,
     )
 
     # Generate plots for each resolution
-    for resolution, data in all_results.items():
-        # Plot 1: Scalar metrics comparison (bar chart)
-        fig_scalar = create_scalar_comparison_plot(
-            data['scalar_metrics'], resolution
-        )
-        report.add_plot(fig_scalar, name=f"scalar_comparison_r{resolution}",
-                       caption=f"JAX vs AGATE scalar metrics at resolution {resolution}")
-        plt.close(fig_scalar)
+    for res_key, data in all_results.items():
+        resolution = data['resolution']
 
-        # Plot 2: Error vs threshold summary
-        fig_error = create_error_threshold_plot(
-            data['field_errors'], data['scalar_metrics'],
-            L2_ERROR_TOL, RELATIVE_ERROR_TOL
+        # Plot 1: Field error evolution over time
+        fig_error_evol = create_field_error_evolution_plot(
+            data['snapshot_errors'], L2_ERROR_TOL, resolution
         )
-        report.add_plot(fig_error, name=f"error_summary_r{resolution}",
-                       caption=f"All errors as percentage of threshold at resolution {resolution}")
-        plt.close(fig_error)
+        report.add_plot(
+            fig_error_evol,
+            name=f"field_error_evolution_r{res_key}",
+            caption=f"Per-field L2 error evolution at resolution {res_key}"
+        )
+        plt.close(fig_error_evol)
 
-        # Plot 3: Field comparison contours (density)
-        jax_density = np.asarray(data['jax_state'].n)[:, 0, :]
-        agate_density = data['agate_fields']['density'][:, 0, :]
+        # Plot 2: Time-series comparison for each aggregate metric
+        jax_times = np.array(data['history']['times'])
+        agate_times = data['agate_times']
+        for metric_name in ['kinetic_fraction', 'magnetic_fraction']:
+            jax_vals = np.array([m[metric_name] for m in data['history']['metrics']])
+            agate_vals = data['agate_scalar_metrics'][metric_name]
+            fig_ts = create_timeseries_comparison_plot(
+                jax_times, jax_vals, agate_times, agate_vals,
+                metric_name, resolution
+            )
+            report.add_plot(
+                fig_ts,
+                name=f"{metric_name}_timeseries_r{res_key}",
+                caption=f"{metric_name} time evolution at resolution {res_key}"
+            )
+            plt.close(fig_ts)
+
+        # Plot 3: Field comparison at final time
+        final_state = data['jax_states'][-1]
+        try:
+            agate_fields = load_agate_snapshot("gem", resolution, len(data['snapshot_errors']) - 1)
+        except Exception:
+            # Fallback to load_agate_fields for legacy data
+            agate_fields = load_agate_fields("gem", resolution[0], use_initial=False)
+
+        # Density comparison
+        jax_density = np.asarray(final_state.n)[:, 0, :]
+        agate_density = agate_fields['density'][:, 0, :]
         fig_density = create_field_comparison_plot(
             jax_density, agate_density,
-            'density', resolution, data['field_errors']['density']
+            'density', res_key, data['field_errors']['density']['l2_error']
         )
-        report.add_plot(fig_density, name=f"density_comparison_r{resolution}",
-                       caption=f"Density field comparison at resolution {resolution}")
+        report.add_plot(
+            fig_density,
+            name=f"density_comparison_r{res_key}",
+            caption=f"Density field comparison at resolution {res_key}"
+        )
         plt.close(fig_density)
 
-        # Plot 4: Field comparison contours (magnetic field Bz)
-        jax_bz = np.asarray(data['jax_state'].B)[:, 0, :, 2]
-        agate_bz = data['agate_fields']['magnetic_field'][:, 0, :, 2]
+        # Magnetic field Bz comparison
+        jax_bz = np.asarray(final_state.B)[:, 0, :, 2]
+        agate_bz = agate_fields['magnetic_field'][:, 0, :, 2]
         fig_bz = create_field_comparison_plot(
             jax_bz, agate_bz,
-            'magnetic_field_Bz', resolution, data['field_errors']['magnetic_field']
+            'magnetic_field_Bz', res_key, data['field_errors']['magnetic_field']['l2_error']
         )
-        report.add_plot(fig_bz, name=f"magnetic_field_comparison_r{resolution}",
-                       caption=f"Magnetic field Bz comparison at resolution {resolution}")
+        report.add_plot(
+            fig_bz,
+            name=f"magnetic_field_comparison_r{res_key}",
+            caption=f"Magnetic field Bz comparison at resolution {res_key}"
+        )
         plt.close(fig_bz)
 
     report_dir = report.save()
