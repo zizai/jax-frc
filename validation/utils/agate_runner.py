@@ -129,8 +129,34 @@ def _run_orszag_tang(resolution: int, output_dir: Path) -> None:
 
 
 def _run_gem_reconnection(resolution: int, output_dir: Path) -> None:
-    """Run GEM reconnection simulation (placeholder for Task 4)."""
-    raise NotImplementedError("GEM reconnection runner will be added in Task 4")
+    """Run GEM reconnection simulation."""
+    from agate.framework.scenario import ReconnectionGEM
+    from agate.framework.roller import Roller
+    from agate.framework.fileHandler import fileHandler
+
+    # Create scenario (Hall MHD)
+    scenario = ReconnectionGEM(divClean=True, hall=True, guide_field=0.0)
+
+    # Create roller
+    roller = Roller.autodefault(
+        scenario,
+        ncells=resolution,
+        options={"cfl": 0.4}
+    )
+    roller.orient("numpy")
+
+    # Run simulation
+    print(f"Running GEM reconnection at resolution {resolution}...")
+    try:
+        roller.roll(start_time=0.0, end_time=12.0, add_stopWatch=True)
+    except Exception as e:
+        raise RuntimeError(f"GEM reconnection simulation failed: {e}") from e
+
+    # Save output
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handler = fileHandler(directory=str(output_dir), prefix=f"gem_reconnection_{resolution}")
+    handler.outputGrid(roller.grid)
+    handler.outputState(roller.grid, roller.state, roller.time)
 
 
 def run_agate_simulation(

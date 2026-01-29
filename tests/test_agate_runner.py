@@ -91,3 +91,18 @@ def test_run_orszag_tang_generates_files():
         # Check at least one state file exists
         state_files = list(output_dir.glob("orszag_tang_64.state_*.h5"))
         assert len(state_files) >= 1
+
+
+@pytest.mark.slow
+def test_run_gem_generates_files():
+    """GEM simulation should produce expected output files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        run_agate_simulation("gem_reconnection", 64, output_dir)  # Small resolution
+
+        assert (output_dir / "gem_reconnection_64.grid.h5").exists()
+        assert (output_dir / "gem_reconnection_64.config.yaml").exists()
+
+        state_files = list(output_dir.glob("gem_reconnection_64.state_*.h5"))
+        assert len(state_files) >= 1
