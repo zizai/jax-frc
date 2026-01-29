@@ -112,7 +112,11 @@ class ExtendedMHD(PhysicsModel):
             # Advection via CT for ideal-MHD limit
             dB_dt_advection = induction_rhs_ct(state.v, B, geometry)
             dB_dt_resistive = (
-                self.eta / MU0 * laplacian_3d(B, geometry)
+                self.eta / MU0 * jnp.stack([
+                    laplacian_3d(B[..., 0], geometry),
+                    laplacian_3d(B[..., 1], geometry),
+                    laplacian_3d(B[..., 2], geometry),
+                ], axis=-1)
                 if self.eta > 0
                 else jnp.zeros_like(B)
             )

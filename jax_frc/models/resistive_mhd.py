@@ -53,7 +53,12 @@ class ResistiveMHD(PhysicsModel):
 
         # Resistive term: eta * laplacian(B) / mu0
         # (equivalent to -curl(eta*J) for uniform eta)
-        dB_dt_resistive = self.eta / MU0 * laplacian_3d(B, geometry)
+        # Apply Laplacian component-by-component (vector Laplacian)
+        dB_dt_resistive = self.eta / MU0 * jnp.stack([
+            laplacian_3d(B[..., 0], geometry),
+            laplacian_3d(B[..., 1], geometry),
+            laplacian_3d(B[..., 2], geometry),
+        ], axis=-1)
 
         # Advection term: curl(v × B)
         if state.v is not None:

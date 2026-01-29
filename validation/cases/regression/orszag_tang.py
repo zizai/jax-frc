@@ -5,11 +5,21 @@ Physics:
     MHD turbulence, current sheet formation, and energy evolution.
 
 Note:
-    The JAX and AGATE implementations use different normalizations and domain sizes:
-    - JAX: domain [0, 2π], B0=1.0, xz-plane
-    - AGATE: domain [0, 1], B0≈0.6, xy-plane
-    This validation uses normalized comparisons to check pattern similarity
-    rather than exact value matching.
+    The JAX and AGATE implementations use different physics models:
+    - JAX: Ideal MHD (eta=0, no Hall term)
+    - AGATE: Hall MHD (hallOT* reference data)
+
+    Additionally, different normalizations and domain sizes are used:
+    - JAX: domain [0, 2π], B0=1/sqrt(4π)
+    - AGATE: domain [0, 1], B0=1/sqrt(4π)
+
+    Due to these differences, the validation focuses on:
+    1. Verifying simulation stability (no NaN/Inf)
+    2. Checking energy conservation (mean_energy_density)
+    3. Comparing normalized field patterns (with relaxed thresholds)
+
+    The enstrophy and current metrics are NOT comparable due to different
+    domain sizes (curl scales with 1/dx).
 """
 
 from __future__ import annotations
@@ -47,22 +57,14 @@ from validation.utils.plots import (
 
 
 NAME = "orszag_tang"
-DESCRIPTION = "Orszag–Tang vortex regression vs AGATE reference data (normalized comparison)"
+DESCRIPTION = "Orszag–Tang vortex regression vs AGATE reference data"
 
 RESOLUTIONS = (256, 512, 1024)
 QUICK_RESOLUTIONS = (256,)
-# Thresholds account for different normalizations between JAX and AGATE
-# Field L2 errors are high due to different domain/amplitude normalizations
-L2_ERROR_TOL = 2.0  # 200% - sanity check for normalized fields
-# Kinetic fraction is dimensionless and matches well
-KINETIC_FRACTION_TOL = 0.05  # 5% for kinetic fraction (matches well)
-# Magnetic fraction differs due to different B0 normalizations
-MAGNETIC_FRACTION_TOL = 3.0  # 300% - sanity check only
-# Other metrics have different normalizations
-OTHER_ERROR_TOL = 3.0  # 300% - sanity check only
-
-# Metrics with strict thresholds (dimensionless, should match well)
-STRICT_METRICS = {"kinetic_fraction"}
+# Thresholds for comparison with AGATE
+# Note: AGATE uses Hall MHD, JAX uses ideal MHD, so larger errors expected
+L2_ERROR_TOL = 0.20  # 20% for field L2 errors (relaxed due to physics mismatch)
+RELATIVE_ERROR_TOL = 0.20  # 20% for scalar metrics
 
 NGAS = 4
 NMAG = 3
@@ -73,21 +75,27 @@ IMZ = 3
 
 
 def setup_configuration(quick_test: bool, resolution: int) -> dict:
-    # Timestep must satisfy Alfvén CFL: dt < dx / v_A
-    # For B0=1.0, rho0~0.221: v_A ~ 1896, dx ~ 0.0246 -> dt_max ~ 1.3e-5
-    # Use dt = 1e-5 for stability (10x smaller than original)
+    # Timestep for original domain [0, 2π]:
+    # B0 = 1.0, rho0 ≈ 0.221
+    # v_A = B0/sqrt(rho0) ≈ 2.13, v_max ≈ 1.0
+    # dx = 2π/resolution
+    # CFL: dt < dx / (v_max + v_A) ≈ 2π/(resolution * 3.13)
+    # For resolution=256: dt_max ≈ 7.8e-3
+    # AGATE reference data is at t=0.48 (only one state file available)
     if quick_test:
+        # Quick test: run short simulation to verify stability
+        # Note: AGATE only has t=0.48 data, so we can't compare initial states
         return {
             "nx": resolution,
             "nz": resolution,
-            "t_end": 0.01,
-            "dt": 1e-5,
+            "t_end": 0.01,  # Short run to verify stability
+            "dt": 1e-4,
         }
     return {
         "nx": resolution,
         "nz": resolution,
-        "t_end": 0.5,
-        "dt": 1e-5,
+        "t_end": 0.48,
+        "dt": 1e-4,  # Conservative timestep
     }
 
 
@@ -171,16 +179,25 @@ def compute_metrics(rho, p, v, B, dx: float, dy: float, dz: float) -> dict:
 
 
 def run_simulation(cfg: dict) -> tuple:
+    # Use AGATE-compatible parameters for direct comparison
+    # AGATE uses B0 = 1/sqrt(4*pi) ≈ 0.282 (Gaussian units convention)
+    # Note: AGATE reference data is from Hall MHD (hallOT*), but JAX uses
+    # resistive MHD. This will cause some discrepancy in the results.
+    import math
+    B0_agate = 1.0 / math.sqrt(4.0 * math.pi)
     config = OrszagTangConfiguration(
         nx=cfg["nx"],
         nz=cfg["nz"],
+        B0=B0_agate,
+        eta=0.0,  # Ideal MHD (no resistivity) for stability
     )
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
-    # Use CT scheme to avoid divergence cleaning issues
+    # Use ResistiveMHD with CT advection (ideal MHD limit with eta=0)
     from jax_frc.models.resistive_mhd import ResistiveMHD
-    model = ResistiveMHD(eta=config.eta, advection_scheme="ct")
-    solver = Solver.create({"type": "euler"})
+    model = ResistiveMHD(eta=0.0, advection_scheme="ct")
+    # Use RK4 for explicit time integration
+    solver = Solver.create({"type": "rk4"})
 
     t_end = cfg["t_end"]
     dt = cfg["dt"]
@@ -436,13 +453,8 @@ def compare_final_values(jax_value: float, agate_value: float, metric_name: str)
             "error_msg": "NaN or Inf in computed error",
         }
 
-    # Use different thresholds based on metric type
-    if metric_name in STRICT_METRICS:
-        threshold = KINETIC_FRACTION_TOL  # Strict for kinetic fraction
-    elif metric_name == "magnetic_fraction":
-        threshold = MAGNETIC_FRACTION_TOL  # Loose for magnetic fraction
-    else:
-        threshold = OTHER_ERROR_TOL  # Loose for other metrics
+    # Use unified relative error threshold
+    threshold = RELATIVE_ERROR_TOL
     passed = relative_error <= threshold
 
     return passed, {
@@ -466,8 +478,7 @@ def main(quick_test: bool = False) -> bool:
     resolutions = QUICK_RESOLUTIONS if quick_test else RESOLUTIONS
     print(f"  resolutions: {resolutions}")
     print(f"  Field L2 threshold: {L2_ERROR_TOL} ({L2_ERROR_TOL*100:.0f}%)")
-    print(f"  Kinetic fraction threshold: {KINETIC_FRACTION_TOL} ({KINETIC_FRACTION_TOL*100:.0f}%)")
-    print(f"  Other threshold: {OTHER_ERROR_TOL} ({OTHER_ERROR_TOL*100:.0f}% for other metrics)")
+    print(f"  Relative error threshold: {RELATIVE_ERROR_TOL} ({RELATIVE_ERROR_TOL*100:.0f}%)")
     print()
 
     overall_pass = True
@@ -494,13 +505,21 @@ def main(quick_test: bool = False) -> bool:
         print(f"[{t_sim:.2f}s]")
 
         # Load AGATE reference data
-        # For quick test, compare against initial state; for full test, compare against final state
+        # Note: AGATE only has t=0.48 data, so we always compare against final state
+        # In quick test mode, we just verify simulation stability (not accuracy)
         try:
-            agate_fields = load_agate_fields("ot", resolution, use_initial=quick_test)
+            agate_fields = load_agate_fields("ot", resolution, use_initial=False)
             agate_times, agate_scalar_metrics = load_agate_series("ot", resolution)
         except Exception as exc:
             print(f"  ERROR: Failed to load AGATE data: {exc}")
             overall_pass = False
+            continue
+
+        # In quick test mode, skip accuracy comparison (just verify stability)
+        if quick_test:
+            print("  Quick test: simulation stable, skipping accuracy comparison")
+            print("  (AGATE only has t=0.48 data, no initial state available)")
+            print()
             continue
 
         # Compute field L2 errors
@@ -515,8 +534,8 @@ def main(quick_test: bool = False) -> bool:
             geometry.dx, geometry.dy, geometry.dz
         )
 
-        # Use initial or final AGATE scalar metrics based on test mode
-        agate_idx = 0 if quick_test else -1
+        # Use final AGATE scalar metrics (only t=0.48 data available)
+        agate_idx = -1
         scalar_results = {}
         for key in jax_final_metrics:
             jax_val = jax_final_metrics[key]
@@ -526,7 +545,7 @@ def main(quick_test: bool = False) -> bool:
                 'jax_value': jax_val,
                 'agate_value': agate_val,
                 'relative_error': stats.get('relative_error', 0),
-                'threshold': stats.get('threshold', OTHER_ERROR_TOL),
+                'threshold': stats.get('threshold', RELATIVE_ERROR_TOL),
                 'passed': passed,
             }
 
@@ -578,8 +597,7 @@ def main(quick_test: bool = False) -> bool:
         configuration={
             "resolutions": resolutions,
             "L2_threshold": L2_ERROR_TOL,
-            "kinetic_fraction_threshold": KINETIC_FRACTION_TOL,
-            "other_threshold": OTHER_ERROR_TOL,
+            "relative_threshold": RELATIVE_ERROR_TOL,
         },
         metrics=all_metrics,
         overall_pass=overall_pass,
@@ -598,7 +616,7 @@ def main(quick_test: bool = False) -> bool:
         # Plot 2: Error vs threshold summary
         fig_error = create_error_threshold_plot(
             data['field_errors'], data['scalar_metrics'],
-            L2_ERROR_TOL, OTHER_ERROR_TOL
+            L2_ERROR_TOL, RELATIVE_ERROR_TOL
         )
         report.add_plot(fig_error, name=f"error_summary_r{resolution}",
                        caption=f"All errors as percentage of threshold at resolution {resolution}")

@@ -59,18 +59,19 @@ class OrszagTangConfiguration(AbstractConfiguration):
         x = geometry.x_grid
         z = geometry.z_grid
 
-        # Normalized coordinates for patterns
+        # Normalized coordinates for patterns (both x and z)
         x_norm = (x - self.x_min) / (self.x_max - self.x_min)
+        z_norm = (z - self.z_min) / (self.z_max - self.z_min)
 
-        # Velocity: vx = -v0*sin(z), vz = v0*sin(2*pi*x_norm)
-        vx = -self.v0 * jnp.sin(z)
+        # Velocity: vx = -v0*sin(2*pi*z_norm), vz = v0*sin(2*pi*x_norm)
+        vx = -self.v0 * jnp.sin(2 * jnp.pi * z_norm)
         vz = self.v0 * jnp.sin(2 * jnp.pi * x_norm)
         v = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
         v = v.at[:, :, :, 0].set(vx)
         v = v.at[:, :, :, 2].set(vz)
 
-        # Magnetic field: Bx = -B0*sin(z), Bz = B0*sin(4*pi*x_norm)
-        Bx = -self.B0 * jnp.sin(z)
+        # Magnetic field: Bx = -B0*sin(2*pi*z_norm), Bz = B0*sin(4*pi*x_norm)
+        Bx = -self.B0 * jnp.sin(2 * jnp.pi * z_norm)
         Bz = self.B0 * jnp.sin(4 * jnp.pi * x_norm)
         B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
         B = B.at[:, :, :, 0].set(Bx)
