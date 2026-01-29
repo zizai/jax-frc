@@ -281,6 +281,45 @@ def load_agate_final_fields(case: str, resolution: int) -> dict:
     }
 
 
+def compute_field_l2_errors(jax_state, agate_fields: dict) -> dict:
+    """Compute L2 errors between JAX and AGATE spatial fields.
+
+    Args:
+        jax_state: JAX simulation final state with n, v, B, p attributes
+        agate_fields: Dict from load_agate_final_fields
+
+    Returns:
+        Dict of field name -> L2 error value
+    """
+    from jax_frc.validation.metrics import l2_error
+
+    errors = {}
+
+    # Density
+    errors['density'] = float(l2_error(
+        np.asarray(jax_state.n),
+        agate_fields['density']
+    ))
+
+    # Momentum (rho * v)
+    jax_mom = np.asarray(jax_state.n)[..., None] * np.asarray(jax_state.v)
+    errors['momentum'] = float(l2_error(jax_mom, agate_fields['momentum']))
+
+    # Magnetic field
+    errors['magnetic_field'] = float(l2_error(
+        np.asarray(jax_state.B),
+        agate_fields['magnetic_field']
+    ))
+
+    # Pressure
+    errors['pressure'] = float(l2_error(
+        np.asarray(jax_state.p),
+        agate_fields['pressure']
+    ))
+
+    return errors
+
+
 def compare_final_values(jax_value: float, agate_value: float, metric_name: str) -> tuple[bool, dict]:
     """Compare final state values using L2 error and relative error.
 
