@@ -118,7 +118,18 @@ def poisson_solve_jacobi(rhs: Array, geometry: Geometry,
     else:
         raise ValueError(f"Unsupported order {order}")
 
-    center_coeff = coeff_1d * (1.0 / dx**2 + 1.0 / dy**2 + 1.0 / dz**2)
+    # For pseudo-2D cases, exclude dimensions with size 1 from center_coeff
+    center_coeff = 0.0
+    if geometry.nx > 1:
+        center_coeff += coeff_1d / dx**2
+    if geometry.ny > 1:
+        center_coeff += coeff_1d / dy**2
+    if geometry.nz > 1:
+        center_coeff += coeff_1d / dz**2
+
+    # Avoid division by zero if all dimensions are 1
+    if center_coeff == 0.0:
+        return jnp.zeros_like(rhs)
 
     def jacobi_step(phi: Array, _) -> tuple[Array, None]:
         """Single Jacobi iteration step."""

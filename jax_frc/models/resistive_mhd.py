@@ -143,13 +143,6 @@ class ResistiveMHD(PhysicsModel):
         if self.advection_scheme in ("ct", "skew_symmetric"):
             return state
 
-        if not (
-            geometry.bc_x == "periodic"
-            and geometry.bc_y == "periodic"
-            and geometry.bc_z == "periodic"
-        ):
-            return state
-
         from jax_frc.solvers.divergence_cleaning import clean_divergence
 
         B_clean = clean_divergence(state.B, geometry, max_iter=200, tol=1e-6)

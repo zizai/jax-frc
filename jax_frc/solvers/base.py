@@ -1,8 +1,15 @@
 """Abstract base class for time integrators."""
 
 from abc import ABC, abstractmethod
+import jax.numpy as jnp
 from jax_frc.core.state import State
 from jax_frc.models.base import PhysicsModel
+
+
+class NumericalInstabilityError(Exception):
+    """Raised when NaN or Inf values are detected in simulation state."""
+    pass
+
 
 class Solver(ABC):
     """Base class for time integration solvers."""
@@ -11,6 +18,36 @@ class Solver(ABC):
     def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state by one timestep."""
         pass
+
+    def step_checked(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        """Advance state by one timestep with NaN/Inf checking.
+
+        Raises:
+            NumericalInstabilityError: If NaN or Inf values are detected in the result.
+        """
+        new_state = self.step(state, dt, model, geometry)
+        self._check_state(new_state)
+        return new_state
+
+    def _check_state(self, state: State) -> None:
+        """Check state for NaN/Inf values and raise error if found."""
+        fields_to_check = [
+            ("B", state.B),
+            ("E", state.E),
+            ("n", state.n),
+            ("p", state.p),
+            ("v", state.v),
+        ]
+        for name, field in fields_to_check:
+            if field is not None:
+                if jnp.any(jnp.isnan(field)):
+                    raise NumericalInstabilityError(
+                        f"NaN detected in {name} field at step {state.step}, t={state.time:.6e}"
+                    )
+                if jnp.any(jnp.isinf(field)):
+                    raise NumericalInstabilityError(
+                        f"Inf detected in {name} field at step {state.step}, t={state.time:.6e}"
+                    )
 
     @classmethod
     def create(cls, config: dict) -> "Solver":
