@@ -1,4 +1,15 @@
-"""3D Extended MHD model with Hall physics."""
+"""3D Extended MHD model with Hall physics and full field evolution.
+
+Solves the full extended MHD equations:
+    - Continuity: dn/dt = -div(n*v)
+    - Momentum:   dv/dt = -grad(p)/rho + J×B/rho - (v·grad)v
+    - Pressure:   dp/dt = -gamma*p*div(v)
+    - Induction:  dB/dt = -curl(E) with generalized Ohm's law
+    - Temperature: dTe/dt = thermal conduction
+
+Generalized Ohm's law:
+    E = -v×B + eta*J + (J×B)/(ne) - grad(p_e)/(ne)
+"""
 
 from dataclasses import dataclass
 from functools import partial
@@ -9,9 +20,12 @@ import jax.numpy as jnp
 from jax_frc.models.base import PhysicsModel
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
-from jax_frc.operators import curl_3d, gradient_3d, laplacian_3d
-from jax_frc.constants import MU0, QE
+from jax_frc.operators import curl_3d, gradient_3d, laplacian_3d, divergence_3d
+from jax_frc.constants import MU0, QE, MI
 from jax_frc.fields import CoilField
+
+# Adiabatic index for ideal gas
+GAMMA = 5.0 / 3.0
 
 
 @dataclass(frozen=True)
@@ -76,8 +90,15 @@ class TemperatureBoundaryCondition:
 class ExtendedMHD(PhysicsModel):
     """Extended MHD model with Hall and electron pressure terms.
 
+    Solves the complete extended MHD system:
+        - Continuity: dn/dt = -div(n*v)
+        - Momentum:   dv/dt = -grad(p)/rho + J×B/rho - (v·grad)v
+        - Pressure:   dp/dt = -gamma*p*div(v)
+        - Induction:  dB/dt = -curl(E) with generalized Ohm's law
+        - Temperature: dTe/dt = thermal conduction
+
     Generalized Ohm's law:
-    E = -v x B + eta*J + (J x B)/(ne) - grad(p_e)/(ne)
+        E = -v×B + eta*J + (J×B)/(ne) - grad(p_e)/(ne)
 
     Attributes:
         eta: Resistivity [Ohm*m]
@@ -85,6 +106,9 @@ class ExtendedMHD(PhysicsModel):
         include_electron_pressure: Include grad(p_e)/(ne) term
         kappa_parallel: Parallel thermal conductivity
         kappa_perp: Perpendicular thermal conductivity
+        evolve_density: Whether to evolve density (default True)
+        evolve_velocity: Whether to evolve velocity (default True)
+        evolve_pressure: Whether to evolve pressure (default True)
     """
     eta: float = 1e-4
     include_hall: bool = True
@@ -94,13 +118,79 @@ class ExtendedMHD(PhysicsModel):
     apply_divergence_cleaning: bool = True
     external_field: Optional[CoilField] = None
     temperature_bc: Optional[TemperatureBoundaryCondition] = None
+    evolve_density: bool = True
+    evolve_velocity: bool = True
+    evolve_pressure: bool = True
 
     @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
-        """Compute time derivatives for extended MHD."""
+        """Compute time derivatives for all extended MHD fields."""
         B = state.B
-        n = jnp.maximum(state.n, 1e16)  # Avoid division by zero
+        n = state.n
+        p = state.p
+        v = state.v if state.v is not None else jnp.zeros((*n.shape, 3))
 
+        # Avoid division by zero
+        n_safe = jnp.maximum(n, 1e16)
+        rho = MI * n
+        rho_safe = jnp.maximum(rho, 1e-20)
+
+        # =====================================================================
+        # Continuity equation: dn/dt = -div(n*v)
+        # =====================================================================
+        if self.evolve_density:
+            nv = n[..., None] * v
+            dn_dt = -divergence_3d(nv, geometry)
+        else:
+            dn_dt = jnp.zeros_like(n)
+
+        # =====================================================================
+        # Momentum equation: dv/dt = -grad(p)/rho + J×B/rho - (v·grad)v
+        # =====================================================================
+        # Current density: J = curl(B) / mu_0
+        J = curl_3d(B, geometry) / MU0
+
+        if self.evolve_velocity:
+            # Pressure gradient force: -grad(p)/rho
+            grad_p = gradient_3d(p, geometry)
+            pressure_force = -grad_p / rho_safe[..., None]
+
+            # Lorentz force: J×B/rho
+            JxB = jnp.stack([
+                J[..., 1] * B[..., 2] - J[..., 2] * B[..., 1],
+                J[..., 2] * B[..., 0] - J[..., 0] * B[..., 2],
+                J[..., 0] * B[..., 1] - J[..., 1] * B[..., 0],
+            ], axis=-1)
+            lorentz_force = JxB / rho_safe[..., None]
+
+            # Advection term: -(v·grad)v
+            grad_vx = gradient_3d(v[..., 0], geometry)
+            grad_vy = gradient_3d(v[..., 1], geometry)
+            grad_vz = gradient_3d(v[..., 2], geometry)
+            v_dot_grad_v = jnp.stack([
+                v[..., 0] * grad_vx[..., 0] + v[..., 1] * grad_vx[..., 1] + v[..., 2] * grad_vx[..., 2],
+                v[..., 0] * grad_vy[..., 0] + v[..., 1] * grad_vy[..., 1] + v[..., 2] * grad_vy[..., 2],
+                v[..., 0] * grad_vz[..., 0] + v[..., 1] * grad_vz[..., 1] + v[..., 2] * grad_vz[..., 2],
+            ], axis=-1)
+
+            dv_dt = pressure_force + lorentz_force - v_dot_grad_v
+        else:
+            dv_dt = jnp.zeros_like(v)
+
+        # =====================================================================
+        # Pressure equation: dp/dt = -gamma*p*div(v)
+        # =====================================================================
+        if self.evolve_pressure:
+            div_v = divergence_3d(v, geometry)
+            dp_dt = -GAMMA * p * div_v
+        else:
+            dp_dt = jnp.zeros_like(p)
+
+        # =====================================================================
+        # Induction equation with generalized Ohm's law
+        # E = -v×B + eta*J + (J×B)/(ne) - grad(p_e)/(ne)
+        # dB/dt = -curl(E)
+        # =====================================================================
         use_ct_advection = (
             not self.include_hall
             and not self.include_electron_pressure
@@ -110,7 +200,7 @@ class ExtendedMHD(PhysicsModel):
             from jax_frc.solvers.constrained_transport import induction_rhs_ct
 
             # Advection via CT for ideal-MHD limit
-            dB_dt_advection = induction_rhs_ct(state.v, B, geometry)
+            dB_dt_advection = induction_rhs_ct(v, B, geometry)
             dB_dt_resistive = (
                 self.eta / MU0 * jnp.stack([
                     laplacian_3d(B[..., 0], geometry),
@@ -122,9 +212,6 @@ class ExtendedMHD(PhysicsModel):
             )
             dB_dt = dB_dt_advection + dB_dt_resistive
         else:
-            # Current density: J = curl(B) / mu_0
-            J = curl_3d(B, geometry) / MU0
-
             # Start with resistive term: E = eta*J
             E = self.eta * J
 
@@ -135,53 +222,78 @@ class ExtendedMHD(PhysicsModel):
                     J[..., 2] * B[..., 0] - J[..., 0] * B[..., 2],
                     J[..., 0] * B[..., 1] - J[..., 1] * B[..., 0],
                 ], axis=-1)
-                E = E + J_cross_B / (n[..., None] * QE)
+                E = E + J_cross_B / (n_safe[..., None] * QE)
 
             # Electron pressure term: -grad(p_e) / (ne)
             if self.include_electron_pressure and state.Te is not None:
-                p_e = n * state.Te  # Electron pressure
+                p_e = n_safe * state.Te  # Electron pressure
                 grad_pe = gradient_3d(p_e, geometry)
-                E = E - grad_pe / (n[..., None] * QE)
+                E = E - grad_pe / (n_safe[..., None] * QE)
 
             # Convective term: -v x B
-            if state.v is not None:
-                v = state.v
-                v_cross_B = jnp.stack([
-                    v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
-                    v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
-                    v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
-                ], axis=-1)
-                E = E - v_cross_B
+            v_cross_B = jnp.stack([
+                v[..., 1] * B[..., 2] - v[..., 2] * B[..., 1],
+                v[..., 2] * B[..., 0] - v[..., 0] * B[..., 2],
+                v[..., 0] * B[..., 1] - v[..., 1] * B[..., 0],
+            ], axis=-1)
+            E = E - v_cross_B
 
             # Faraday's law: dB/dt = -curl(E)
             dB_dt = -curl_3d(E, geometry)
 
+        # =====================================================================
         # Temperature evolution with thermal conduction
+        # =====================================================================
         dTe_dt = None
         if state.Te is not None:
             # Simplified isotropic conduction for now
             lap_Te = laplacian_3d(state.Te, geometry)
-            dTe_dt = self.kappa_perp * lap_Te / (n * 1.5)  # 3/2 * n * dT/dt
+            dTe_dt = self.kappa_perp * lap_Te / (n_safe * 1.5)  # 3/2 * n * dT/dt
 
-        return state.replace(B=dB_dt, Te=dTe_dt)
+        return state.replace(n=dn_dt, v=dv_dt, p=dp_dt, B=dB_dt, Te=dTe_dt)
 
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
-        """CFL constraint including Hall term."""
+        """Compute stable timestep based on CFL conditions.
+
+        Considers:
+        - Alfven wave CFL
+        - Sound wave CFL
+        - Hall wave (whistler) CFL
+        - Resistive diffusion CFL
+        """
         dx_min = min(geometry.dx, geometry.dy, geometry.dz)
 
         # Resistive diffusion
-        dt_resistive = 0.25 * dx_min**2 * MU0 / self.eta if self.eta > 0 else jnp.inf
+        dt_resistive = 0.25 * dx_min**2 * MU0 / self.eta if self.eta > 0 else float('inf')
+
+        # Alfven wave CFL
+        B_mag = jnp.sqrt(jnp.sum(state.B**2, axis=-1))
+        rho = MI * state.n
+        rho_safe = jnp.maximum(rho, 1e-20)
+        v_alfven = jnp.max(B_mag / jnp.sqrt(MU0 * rho_safe))
+        dt_alfven = dx_min / max(float(v_alfven), 1e-10)
+
+        # Sound wave CFL
+        c_sound = jnp.max(jnp.sqrt(GAMMA * state.p / rho_safe))
+        dt_sound = dx_min / max(float(c_sound), 1e-10)
+
+        # Flow CFL
+        if state.v is not None:
+            v_mag = jnp.max(jnp.sqrt(jnp.sum(state.v**2, axis=-1)))
+            dt_flow = dx_min / max(float(v_mag), 1e-10)
+        else:
+            dt_flow = float('inf')
 
         # Hall wave (whistler): omega ~ k^2 * B / (mu0 * n * e)
         if self.include_hall:
-            B_max = jnp.max(jnp.sqrt(jnp.sum(state.B**2, axis=-1)))
+            B_max = jnp.max(B_mag)
             n_min = jnp.maximum(jnp.min(state.n), 1e16)
             whistler_speed = B_max / (MU0 * n_min * QE) * (2 * jnp.pi / dx_min)
             dt_hall = 0.1 * dx_min / jnp.maximum(whistler_speed, 1e-10)
         else:
-            dt_hall = jnp.inf
+            dt_hall = float('inf')
 
-        return float(jnp.minimum(dt_resistive, dt_hall))
+        return 0.5 * float(min(dt_resistive, dt_alfven, dt_sound, dt_flow, float(dt_hall)))
 
     def get_total_B(
         self, state: State, geometry: Geometry, t: float
