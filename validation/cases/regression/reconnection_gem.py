@@ -74,15 +74,26 @@ def setup_configuration(quick_test: bool, resolution: int) -> dict:
 
 
 def compute_curl(vec: np.ndarray, dx: float, dy: float, dz: float) -> np.ndarray:
+    """Compute curl of a vector field, handling pseudo-2D cases."""
     vx = vec[..., 0]
     vy = vec[..., 1]
     vz = vec[..., 2]
-    dvz_dy = np.gradient(vz, dy, axis=1)
+
+    # Handle pseudo-2D: skip gradients in dimensions with size 1
+    ny = vec.shape[1]
+
+    if ny > 1:
+        dvz_dy = np.gradient(vz, dy, axis=1)
+        dvx_dy = np.gradient(vx, dy, axis=1)
+    else:
+        dvz_dy = np.zeros_like(vz)
+        dvx_dy = np.zeros_like(vx)
+
     dvy_dz = np.gradient(vy, dz, axis=2)
     dvx_dz = np.gradient(vx, dz, axis=2)
     dvz_dx = np.gradient(vz, dx, axis=0)
     dvy_dx = np.gradient(vy, dx, axis=0)
-    dvx_dy = np.gradient(vx, dy, axis=1)
+
     curl_x = dvz_dy - dvy_dz
     curl_y = dvx_dz - dvz_dx
     curl_z = dvy_dx - dvx_dy
