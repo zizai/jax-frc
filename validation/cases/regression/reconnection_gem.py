@@ -50,7 +50,7 @@ IMZ = 3
 def setup_configuration(quick_test: bool, resolution: int) -> dict:
     if quick_test:
         return {
-            "nr": resolution,
+            "nx": resolution,
             "nz": resolution * 2,
             "t_end": 0.1,
             "dt": 1e-3,
@@ -61,7 +61,7 @@ def setup_configuration(quick_test: bool, resolution: int) -> dict:
             "n_b": 0.2,
         }
     return {
-        "nr": resolution,
+        "nx": resolution,
         "nz": resolution * 2,
         "t_end": 25.0,
         "dt": 0.01,
@@ -124,7 +124,7 @@ def compute_metrics(rho, p, v, B, dx: float, dy: float, dz: float) -> dict:
 
 def run_simulation(cfg: dict) -> tuple:
     config = GEMReconnectionConfiguration(
-        nx=cfg["nr"],
+        nx=cfg["nx"],
         nz=cfg["nz"],
         lambda_=cfg["lambda_"],
         psi1=cfg["psi1"],

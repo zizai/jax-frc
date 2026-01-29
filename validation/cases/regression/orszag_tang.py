@@ -51,13 +51,13 @@ IMZ = 3
 def setup_configuration(quick_test: bool, resolution: int) -> dict:
     if quick_test:
         return {
-            "nr": resolution,
+            "nx": resolution,
             "nz": resolution,
             "t_end": 0.05,
             "dt": 1e-4,
         }
     return {
-        "nr": resolution,
+        "nx": resolution,
         "nz": resolution,
         "t_end": 0.5,
         "dt": 1e-4,
@@ -115,7 +115,7 @@ def compute_metrics(rho, p, v, B, dx: float, dy: float, dz: float) -> dict:
 
 def run_simulation(cfg: dict) -> tuple:
     config = OrszagTangConfiguration(
-        nx=cfg["nr"],
+        nx=cfg["nx"],
         nz=cfg["nz"],
     )
     geometry = config.build_geometry()
