@@ -1,29 +1,29 @@
-"""Tests for CylindricalGEMConfiguration."""
+"""Tests for GEMReconnectionConfiguration."""
 import pytest
 import jax.numpy as jnp
 
 
-def test_cylindrical_gem_builds_geometry():
+def test_gem_reconnection_builds_geometry():
     """Configuration creates correct domain."""
-    from jax_frc.configurations import CylindricalGEMConfiguration
+    from jax_frc.configurations import GEMReconnectionConfiguration
 
-    config = CylindricalGEMConfiguration()
+    config = GEMReconnectionConfiguration()
     geometry = config.build_geometry()
 
     assert geometry.nx == 256
-    assert geometry.ny == 4
+    assert geometry.ny == 1
     assert geometry.nz == 512
 
 
-def test_cylindrical_gem_harris_sheet():
-    """Initial Br follows tanh profile."""
-    from jax_frc.configurations import CylindricalGEMConfiguration
+def test_gem_reconnection_harris_sheet():
+    """Initial Bx follows tanh profile."""
+    from jax_frc.configurations import GEMReconnectionConfiguration
 
-    config = CylindricalGEMConfiguration()
+    config = GEMReconnectionConfiguration()
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
 
-    # Br should be ~+B0 for z >> lambda, ~-B0 for z << -lambda
+    # Bx should be ~+B0 for z >> lambda, ~-B0 for z << -lambda
     center_x = geometry.nx // 2
     center_y = geometry.ny // 2
     z_idx_pos = 3 * geometry.nz // 4  # z > 0
@@ -33,11 +33,11 @@ def test_cylindrical_gem_harris_sheet():
     assert state.B[center_x, center_y, z_idx_neg, 0] < -0.5 * config.B0
 
 
-def test_cylindrical_gem_density_profile():
+def test_gem_reconnection_density_profile():
     """Density has sech^2 + background profile."""
-    from jax_frc.configurations import CylindricalGEMConfiguration
+    from jax_frc.configurations import GEMReconnectionConfiguration
 
-    config = CylindricalGEMConfiguration()
+    config = GEMReconnectionConfiguration()
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
 
@@ -50,19 +50,19 @@ def test_cylindrical_gem_density_profile():
     assert state.n[center_x, center_y, center_z] > state.n[center_x, center_y, edge_z]
 
 
-def test_cylindrical_gem_uses_extended_mhd():
+def test_gem_reconnection_uses_extended_mhd():
     """Configuration uses ExtendedMHD with Hall."""
-    from jax_frc.configurations import CylindricalGEMConfiguration
+    from jax_frc.configurations import GEMReconnectionConfiguration
     from jax_frc.models.extended_mhd import ExtendedMHD
 
-    config = CylindricalGEMConfiguration()
+    config = GEMReconnectionConfiguration()
     model = config.build_model()
 
     assert isinstance(model, ExtendedMHD)
 
 
-def test_cylindrical_gem_in_registry():
+def test_gem_reconnection_in_registry():
     """Configuration is in the registry."""
     from jax_frc.configurations import CONFIGURATION_REGISTRY
 
-    assert 'CylindricalGEMConfiguration' in CONFIGURATION_REGISTRY
+    assert 'GEMReconnectionConfiguration' in CONFIGURATION_REGISTRY

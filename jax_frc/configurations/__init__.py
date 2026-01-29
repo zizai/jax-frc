@@ -38,11 +38,9 @@ from jax_frc.configurations.frc_merging import (
 )
 from jax_frc.configurations.magnetic_diffusion import MagneticDiffusionConfiguration
 from jax_frc.configurations.frozen_flux import FrozenFluxConfiguration
-from jax_frc.configurations.validation_benchmarks import (
-    CylindricalShockConfiguration,
-    CylindricalVortexConfiguration,
-    CylindricalGEMConfiguration,
-)
+from jax_frc.configurations.orszag_tang import OrszagTangConfiguration
+from jax_frc.configurations.gem_reconnection import GEMReconnectionConfiguration
+from jax_frc.configurations.brio_wu_shock import BrioWuShockConfiguration
 
 # Import phases submodule to trigger registration
 from jax_frc.configurations import phases
@@ -50,9 +48,9 @@ from jax_frc.configurations import phases
 CONFIGURATION_REGISTRY = {
     'MagneticDiffusionConfiguration': MagneticDiffusionConfiguration,
     'FrozenFluxConfiguration': FrozenFluxConfiguration,
-    'CylindricalShockConfiguration': CylindricalShockConfiguration,
-    'CylindricalVortexConfiguration': CylindricalVortexConfiguration,
-    'CylindricalGEMConfiguration': CylindricalGEMConfiguration,
+    'OrszagTangConfiguration': OrszagTangConfiguration,
+    'GEMReconnectionConfiguration': GEMReconnectionConfiguration,
+    'BrioWuShockConfiguration': BrioWuShockConfiguration,
     'LinearConfiguration': LinearConfiguration,
     'BelovaMergingConfiguration': BelovaMergingConfiguration,
     'BelovaCase1Configuration': BelovaCase1Configuration,
@@ -81,9 +79,9 @@ __all__ = [
     # Configuration implementations
     'MagneticDiffusionConfiguration',
     'FrozenFluxConfiguration',
-    'CylindricalShockConfiguration',
-    'CylindricalVortexConfiguration',
-    'CylindricalGEMConfiguration',
+    'OrszagTangConfiguration',
+    'GEMReconnectionConfiguration',
+    'BrioWuShockConfiguration',
     'LinearConfiguration',
     'ConfigurationResult',
     'TransitionSpec',

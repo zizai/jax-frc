@@ -25,7 +25,7 @@ import numpy as np
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from jax_frc.configurations.validation_benchmarks import CylindricalGEMConfiguration
+from jax_frc.configurations.gem_reconnection import GEMReconnectionConfiguration
 from jax_frc.solvers import Solver
 from validation.utils.agate_data import AgateDataLoader
 from validation.utils.regression import block_bootstrap_ci
@@ -123,8 +123,8 @@ def compute_metrics(rho, p, v, B, dx: float, dy: float, dz: float) -> dict:
 
 
 def run_simulation(cfg: dict) -> tuple:
-    config = CylindricalGEMConfiguration(
-        nr=cfg["nr"],
+    config = GEMReconnectionConfiguration(
+        nx=cfg["nr"],
         nz=cfg["nz"],
         lambda_=cfg["lambda_"],
         psi1=cfg["psi1"],

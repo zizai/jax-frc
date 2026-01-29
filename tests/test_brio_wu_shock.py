@@ -1,27 +1,27 @@
-"""Tests for CylindricalShockConfiguration."""
+"""Tests for BrioWuShockConfiguration."""
 import pytest
 import jax.numpy as jnp
 
 
-def test_cylindrical_shock_builds_geometry():
+def test_brio_wu_shock_builds_geometry():
     """Configuration creates Cartesian geometry."""
-    from jax_frc.configurations import CylindricalShockConfiguration
+    from jax_frc.configurations import BrioWuShockConfiguration
 
-    config = CylindricalShockConfiguration()
+    config = BrioWuShockConfiguration()
     geometry = config.build_geometry()
 
-    assert geometry.nx == 16  # Minimal x resolution
-    assert geometry.ny == 4
+    assert geometry.nx == 1  # Pseudo-1D
+    assert geometry.ny == 1  # Pseudo-1D
     assert geometry.nz == 512
     assert geometry.z_min == -1.0
     assert geometry.z_max == 1.0
 
 
-def test_cylindrical_shock_initial_conditions():
+def test_brio_wu_shock_initial_conditions():
     """Initial state has Brio-Wu left/right states."""
-    from jax_frc.configurations import CylindricalShockConfiguration
+    from jax_frc.configurations import BrioWuShockConfiguration
 
-    config = CylindricalShockConfiguration()
+    config = BrioWuShockConfiguration()
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
 
@@ -38,18 +38,18 @@ def test_cylindrical_shock_initial_conditions():
     assert jnp.allclose(state.p[x_idx, y_idx, right_idx], 0.1, rtol=0.01)
 
 
-def test_cylindrical_shock_magnetic_field():
-    """B field has Bz=0.75 constant, Br reverses."""
-    from jax_frc.configurations import CylindricalShockConfiguration
+def test_brio_wu_shock_magnetic_field():
+    """B field has Bz=0.75 constant, Bx reverses."""
+    from jax_frc.configurations import BrioWuShockConfiguration
 
-    config = CylindricalShockConfiguration()
+    config = BrioWuShockConfiguration()
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
 
     # Bz should be constant 0.75
     assert jnp.allclose(state.B[:, :, :, 2], 0.75, rtol=0.01)
 
-    # Br should be +1 on left, -1 on right
+    # Bx should be +1 on left, -1 on right
     left_idx = geometry.nz // 4
     right_idx = 3 * geometry.nz // 4
     x_idx = geometry.nx // 2
@@ -58,20 +58,20 @@ def test_cylindrical_shock_magnetic_field():
     assert state.B[x_idx, y_idx, right_idx, 0] < -0.5  # Bx < 0 on right
 
 
-def test_cylindrical_shock_builds_model():
+def test_brio_wu_shock_builds_model():
     """Configuration creates ResistiveMHD model."""
-    from jax_frc.configurations import CylindricalShockConfiguration
+    from jax_frc.configurations import BrioWuShockConfiguration
     from jax_frc.models.resistive_mhd import ResistiveMHD
 
-    config = CylindricalShockConfiguration()
+    config = BrioWuShockConfiguration()
     model = config.build_model()
 
     # Should use resistive MHD (not extended)
     assert isinstance(model, ResistiveMHD)
 
 
-def test_cylindrical_shock_in_registry():
+def test_brio_wu_shock_in_registry():
     """Configuration is in the registry."""
     from jax_frc.configurations import CONFIGURATION_REGISTRY
 
-    assert 'CylindricalShockConfiguration' in CONFIGURATION_REGISTRY
+    assert 'BrioWuShockConfiguration' in CONFIGURATION_REGISTRY

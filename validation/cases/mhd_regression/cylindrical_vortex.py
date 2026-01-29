@@ -48,7 +48,7 @@ import matplotlib.pyplot as plt
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from jax_frc.configurations.validation_benchmarks import CylindricalVortexConfiguration
+from jax_frc.configurations.orszag_tang import OrszagTangConfiguration
 from jax_frc.solvers import Solver
 from validation.utils.reporting import ValidationReport
 
@@ -98,8 +98,8 @@ def run_simulation(cfg: dict) -> tuple:
         containing time traces and snapshots.
     """
     # Build configuration with specified parameters
-    config = CylindricalVortexConfiguration(
-        nr=cfg["nr"],
+    config = OrszagTangConfiguration(
+        nx=cfg["nr"],
         nz=cfg["nz"],
     )
 

@@ -26,7 +26,7 @@ import numpy as np
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from jax_frc.configurations.validation_benchmarks import CylindricalVortexConfiguration
+from jax_frc.configurations.orszag_tang import OrszagTangConfiguration
 from jax_frc.solvers import Solver
 from validation.utils.agate_data import AgateDataLoader
 from validation.utils.regression import block_bootstrap_ci
@@ -114,8 +114,8 @@ def compute_metrics(rho, p, v, B, dx: float, dy: float, dz: float) -> dict:
 
 
 def run_simulation(cfg: dict) -> tuple:
-    config = CylindricalVortexConfiguration(
-        nr=cfg["nr"],
+    config = OrszagTangConfiguration(
+        nx=cfg["nr"],
         nz=cfg["nz"],
     )
     geometry = config.build_geometry()

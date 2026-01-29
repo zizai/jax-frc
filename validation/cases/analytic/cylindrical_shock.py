@@ -54,7 +54,7 @@ import matplotlib.pyplot as plt
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from jax_frc.configurations.validation_benchmarks import CylindricalShockConfiguration
+from jax_frc.configurations.brio_wu_shock import BrioWuShockConfiguration
 from jax_frc.solvers import RK4Solver
 from jax_frc.validation.metrics import shock_position, conservation_drift
 from validation.utils.reporting import ValidationReport
@@ -164,7 +164,7 @@ def run_simulation(cfg: dict) -> tuple:
         Tuple of (initial_state, final_state, geometry) after time integration.
     """
     # Build configuration with specified parameters
-    config = CylindricalShockConfiguration(
+    config = BrioWuShockConfiguration(
         nz=cfg["nz"],
         gamma=cfg["gamma"],
     )
