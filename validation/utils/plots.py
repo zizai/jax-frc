@@ -86,3 +86,71 @@ def create_error_threshold_plot(
     ax.legend()
     fig.tight_layout()
     return fig
+
+
+def create_field_comparison_plot(
+    jax_field: np.ndarray,
+    agate_field: np.ndarray,
+    field_name: str,
+    resolution: int,
+    l2_error_value: float
+) -> Figure:
+    """Create side-by-side contour plots: JAX, AGATE, and Difference.
+
+    Args:
+        jax_field: 2D array of JAX field values
+        agate_field: 2D array of AGATE field values
+        field_name: Name of the field for title
+        resolution: Grid resolution for title
+        l2_error_value: Pre-computed L2 error for annotation
+
+    Returns:
+        matplotlib Figure object
+    """
+    # Ensure numpy arrays
+    jax_field = np.asarray(jax_field)
+    agate_field = np.asarray(agate_field)
+
+    # Compute difference
+    diff_field = jax_field - agate_field
+
+    # Create figure with 3 subplots
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    # Common colorbar range for JAX and AGATE
+    vmin = min(float(jax_field.min()), float(agate_field.min()))
+    vmax = max(float(jax_field.max()), float(agate_field.max()))
+
+    # JAX field
+    im1 = axes[0].imshow(jax_field.T, origin='lower', cmap='viridis',
+                          vmin=vmin, vmax=vmax)
+    axes[0].set_title(f'JAX {field_name}')
+    axes[0].set_xlabel('x')
+    axes[0].set_ylabel('z')
+    plt.colorbar(im1, ax=axes[0])
+
+    # AGATE field
+    im2 = axes[1].imshow(agate_field.T, origin='lower', cmap='viridis',
+                          vmin=vmin, vmax=vmax)
+    axes[1].set_title(f'AGATE {field_name}')
+    axes[1].set_xlabel('x')
+    axes[1].set_ylabel('z')
+    plt.colorbar(im2, ax=axes[1])
+
+    # Difference (symmetric colormap)
+    diff_abs_max = max(abs(float(diff_field.min())), abs(float(diff_field.max())))
+    if diff_abs_max == 0:
+        diff_abs_max = 1e-10  # Avoid zero range
+    im3 = axes[2].imshow(diff_field.T, origin='lower', cmap='RdBu_r',
+                          vmin=-diff_abs_max, vmax=diff_abs_max)
+    axes[2].set_title('Difference (JAX - AGATE)')
+    axes[2].set_xlabel('x')
+    axes[2].set_ylabel('z')
+    plt.colorbar(im3, ax=axes[2])
+
+    # Add L2 error annotation
+    fig.suptitle(f'{field_name.replace("_", " ").title()} Comparison '
+                 f'(Resolution {resolution}) - L2 Error: {l2_error_value:.4g}')
+
+    fig.tight_layout()
+    return fig
