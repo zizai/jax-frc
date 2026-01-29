@@ -51,6 +51,92 @@ from validation.utils.plots import (
     create_error_threshold_plot,
     create_field_comparison_plot,
 )
+import yaml
+
+
+def load_agate_config(case: str, resolution: list[int]) -> dict:
+    """Load AGATE config including snapshot_times.
+
+    Args:
+        case: Case identifier ("ot" for Orszag-Tang, "gem" for GEM)
+        resolution: Grid resolution as [nx, ny, nz]
+
+    Returns:
+        Configuration dictionary with snapshot_times
+    """
+    loader = AgateDataLoader()
+    loader.ensure_files(case, resolution[0])
+    case_dir = Path(loader.cache_dir) / case / str(resolution[0])
+    config_path = case_dir / f"{case}_{resolution[0]}.config.yaml"
+
+    # If config doesn't exist (old data format), return default
+    if not config_path.exists():
+        # Fallback for legacy data without config
+        return {"snapshot_times": None}
+
+    with open(config_path) as f:
+        return yaml.safe_load(f)
+
+
+def load_agate_snapshot(case: str, resolution: list[int], snapshot_idx: int) -> dict:
+    """Load spatial fields from a specific AGATE snapshot.
+
+    Args:
+        case: Case identifier ("ot" for Orszag-Tang, "gem" for GEM)
+        resolution: Grid resolution as [nx, ny, nz]
+        snapshot_idx: Index of snapshot (0 to num_snapshots-1)
+
+    Returns:
+        Dict with keys: density, momentum, magnetic_field, pressure
+    """
+    loader = AgateDataLoader()
+    loader.ensure_files(case, resolution[0])
+    case_dir = Path(loader.cache_dir) / case / str(resolution[0])
+
+    # Try new naming convention first (state_000, state_001, etc.)
+    state_path = case_dir / f"{case}_{resolution[0]}.state_{snapshot_idx:03d}.h5"
+
+    if not state_path.exists():
+        # Fall back to old naming convention (state_0, state_1, etc.)
+        def _state_key(path: Path) -> int:
+            match = re.search(r"state_(\d+)", path.name)
+            return int(match.group(1)) if match else 0
+
+        state_files = sorted(case_dir.rglob("*.state_*.h5"), key=_state_key)
+        if snapshot_idx >= len(state_files):
+            raise FileNotFoundError(f"Snapshot {snapshot_idx} not found in {case_dir}")
+        state_path = state_files[snapshot_idx]
+
+    with h5py.File(state_path, "r") as f:
+        sub = f["subID0"]
+        vec = sub["vector"][:]
+
+    rho, p, v, B = _parse_state_vector(vec)
+
+    # Strip ghost cells (AGATE uses 2 ghost cells on each side)
+    rho = rho[2:-2, 2:-2, :]
+    p = p[2:-2, 2:-2, :]
+    v = v[2:-2, 2:-2, :, :]
+    B = B[2:-2, 2:-2, :, :]
+
+    # Transpose from AGATE's xy-plane to JAX's xz-plane
+    rho = np.transpose(rho, (0, 2, 1))
+    p = np.transpose(p, (0, 2, 1))
+    v = np.transpose(v, (0, 2, 1, 3))
+    B = np.transpose(B, (0, 2, 1, 3))
+
+    # Swap velocity/B components: AGATE's vy -> JAX's vz
+    v = v[..., [0, 2, 1]]
+    B = B[..., [0, 2, 1]]
+
+    mom = rho[..., None] * v
+
+    return {
+        "density": rho,
+        "momentum": mom,
+        "magnetic_field": B,
+        "pressure": p,
+    }
 
 
 NAME = "reconnection_gem"
