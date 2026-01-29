@@ -33,13 +33,13 @@ class AgateDataLoader:
             return [
                 f
                 for f in files
-                if "gem_data/" in f["key"].lower() and res_token in f["key"]
+                if "gem" in f["key"].lower() and res_token in f["key"]
             ]
         if case == "ot":
             return [
                 f
                 for f in files
-                if "ot_data/" in f["key"].lower() and res_token in f["key"]
+                if "ot" in f["key"].lower() and res_token in f["key"]
             ]
         raise ValueError(f"Unknown case: {case}")
 

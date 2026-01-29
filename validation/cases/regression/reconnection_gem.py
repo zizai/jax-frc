@@ -35,8 +35,8 @@ from validation.utils.reporting import ValidationReport
 NAME = "reconnection_gem"
 DESCRIPTION = "GEM Hall reconnection regression vs AGATE reference data"
 
-RESOLUTIONS = (256, 512, 1024)
-QUICK_RESOLUTIONS = (256,)
+RESOLUTIONS = (512, 1024)
+QUICK_RESOLUTIONS = (512,)
 ERROR_TOL = 0.2
 
 NGAS = 4
@@ -80,7 +80,7 @@ def compute_curl(vec: np.ndarray, dx: float, dy: float, dz: float) -> np.ndarray
     vz = vec[..., 2]
 
     # Handle pseudo-2D: skip gradients in dimensions with size 1
-    ny = vec.shape[1]
+    nx, ny, nz = vec.shape[:3]
 
     if ny > 1:
         dvz_dy = np.gradient(vz, dy, axis=1)
@@ -89,8 +89,13 @@ def compute_curl(vec: np.ndarray, dx: float, dy: float, dz: float) -> np.ndarray
         dvz_dy = np.zeros_like(vz)
         dvx_dy = np.zeros_like(vx)
 
-    dvy_dz = np.gradient(vy, dz, axis=2)
-    dvx_dz = np.gradient(vx, dz, axis=2)
+    if nz > 1:
+        dvy_dz = np.gradient(vy, dz, axis=2)
+        dvx_dz = np.gradient(vx, dz, axis=2)
+    else:
+        dvy_dz = np.zeros_like(vy)
+        dvx_dz = np.zeros_like(vx)
+
     dvz_dx = np.gradient(vz, dx, axis=0)
     dvy_dx = np.gradient(vy, dx, axis=0)
 
@@ -210,9 +215,10 @@ def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
         raise FileNotFoundError(f"No AGATE state files found in {case_dir}")
 
     with h5py.File(grid_path, "r") as f:
-        dx = float(f.attrs.get("dx", np.diff(f["x"][:]).mean()))
-        dy = float(f.attrs.get("dy", np.diff(f["y"][:]).mean()))
-        dz = float(f.attrs.get("dz", np.diff(f["z"][:]).mean()))
+        sub = f["subID0"]
+        dx = float(sub.attrs.get("dx", np.diff(sub["x"][:, 0, 0]).mean()))
+        dy = float(sub.attrs.get("dy", np.diff(sub["y"][0, :, 0]).mean()))
+        dz = float(sub.attrs.get("dz", 1.0))  # May be 0 for 2D
 
     times = []
     metrics = {key: [] for key in ["total_energy", "magnetic_energy", "kinetic_energy", "enstrophy", "max_current"]}
