@@ -292,6 +292,26 @@ def load_agate_final_fields(case: str, resolution: int) -> dict:
     # Parse the state vector into fields
     rho, p, v, B = _parse_state_vector(vec)
 
+    # Strip ghost cells (AGATE uses 2 ghost cells on each side)
+    # AGATE data shape: (nx+4, ny+4, 1) -> strip to (nx, ny, 1)
+    rho = rho[2:-2, 2:-2, :]
+    p = p[2:-2, 2:-2, :]
+    v = v[2:-2, 2:-2, :, :]
+    B = B[2:-2, 2:-2, :, :]
+
+    # Transpose from AGATE's xy-plane (nx, ny, 1) to JAX's xz-plane (nx, 1, nz)
+    # AGATE: x varies along axis 0, y varies along axis 1, z is singleton axis 2
+    # JAX:   x varies along axis 0, y is singleton axis 1, z varies along axis 2
+    # So we swap axes 1 and 2
+    rho = np.transpose(rho, (0, 2, 1))
+    p = np.transpose(p, (0, 2, 1))
+    v = np.transpose(v, (0, 2, 1, 3))
+    B = np.transpose(B, (0, 2, 1, 3))
+
+    # Also need to swap velocity/B components: AGATE's vy -> JAX's vz, AGATE's vz -> JAX's vy
+    v = v[..., [0, 2, 1]]  # Swap y and z components
+    B = B[..., [0, 2, 1]]  # Swap y and z components
+
     # Compute momentum from density and velocity
     mom = rho[..., None] * v
 
@@ -473,6 +493,7 @@ def main(quick_test: bool = False) -> bool:
 
         # Compute field L2 errors
         field_errors = compute_field_l2_errors(final_state, agate_fields)
+        print()  # Add blank line for readability
         print_field_l2_table(field_errors, L2_ERROR_TOL)
         print()
 
