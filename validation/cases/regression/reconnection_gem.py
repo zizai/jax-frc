@@ -3,7 +3,7 @@
 Physics:
     Hall MHD GEM reconnection in a thin-y slab (cylindrical-style geometry).
     This case compares scalar time-series metrics against AGATE reference data
-    via block-bootstrap mean relative error with 95% confidence intervals.
+    using point-to-point relative error comparison.
 """
 
 from __future__ import annotations
@@ -28,8 +28,16 @@ sys.path.insert(0, str(project_root))
 from jax_frc.configurations.gem_reconnection import GEMReconnectionConfiguration
 from jax_frc.solvers import Solver
 from validation.utils.agate_data import AgateDataLoader
-from validation.utils.regression import block_bootstrap_ci
-from validation.utils.reporting import ValidationReport
+from validation.utils.reporting import (
+    ValidationReport,
+    print_field_l2_table,
+    print_scalar_metrics_table,
+)
+from validation.utils.plots import (
+    create_scalar_comparison_plot,
+    create_error_threshold_plot,
+    create_field_comparison_plot,
+)
 
 
 NAME = "reconnection_gem"
@@ -37,7 +45,11 @@ DESCRIPTION = "GEM Hall reconnection regression vs AGATE reference data"
 
 RESOLUTIONS = (512, 1024)
 QUICK_RESOLUTIONS = (512,)
-ERROR_TOL = 0.2
+L2_ERROR_TOL = 0.01  # 1% L2 error threshold
+RELATIVE_ERROR_TOL = 0.05  # 5% relative error threshold (95% accuracy for energy metrics)
+
+# Energy metrics use relative error threshold, others use L2 error threshold
+ENERGY_METRICS = {"total_energy", "magnetic_energy", "kinetic_energy"}
 
 NGAS = 4
 NMAG = 3
@@ -48,12 +60,14 @@ IMZ = 3
 
 
 def setup_configuration(quick_test: bool, resolution: int) -> dict:
+    # Timestep must satisfy Alfvén CFL for Hall MHD stability
+    # Use smaller dt for numerical stability (10x smaller than original)
     if quick_test:
         return {
             "nx": resolution,
             "nz": resolution * 2,
             "t_end": 0.1,
-            "dt": 1e-3,
+            "dt": 1e-4,
             "lambda_": 0.5,
             "psi1": 0.01,
             "B0": 1.0,
@@ -64,7 +78,7 @@ def setup_configuration(quick_test: bool, resolution: int) -> dict:
         "nx": resolution,
         "nz": resolution * 2,
         "t_end": 25.0,
-        "dt": 0.01,
+        "dt": 1e-3,
         "lambda_": 0.5,
         "psi1": 0.1,
         "B0": 1.0,
@@ -150,8 +164,11 @@ def run_simulation(cfg: dict) -> tuple:
     )
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
-    model = config.build_model()
-    solver = Solver.create({"type": "semi_implicit"})
+    # Disable divergence cleaning to avoid numerical instability
+    from jax_frc.models.extended_mhd import ExtendedMHD
+    model = ExtendedMHD(eta=config.eta, apply_divergence_cleaning=False)
+    # Use higher damping factor for Hall term stability
+    solver = Solver.create({"type": "semi_implicit", "damping_factor": 1e12})
 
     t_end = cfg["t_end"]
     dt = cfg["dt"]
@@ -166,7 +183,7 @@ def run_simulation(cfg: dict) -> tuple:
     history["metrics"].append(metrics)
 
     for step_idx in range(n_steps):
-        state = solver.step(state, dt, model, geometry)
+        state = solver.step_checked(state, dt, model, geometry)
         if (step_idx + 1) % output_interval == 0:
             current_time = (step_idx + 1) * dt
             metrics = compute_metrics(
@@ -186,7 +203,9 @@ def run_simulation(cfg: dict) -> tuple:
 
 def _parse_state_vector(vec: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     rho = vec[IRHO]
-    v = np.stack([vec[IMX], vec[IMY], vec[IMZ]], axis=-1)
+    # AGATE stores momentum components in gas slots; convert to velocity for metrics.
+    mom = np.stack([vec[IMX], vec[IMY], vec[IMZ]], axis=-1)
+    v = np.divide(mom, rho[..., None], out=np.zeros_like(mom), where=rho[..., None] != 0)
     B = vec[NGAS : NGAS + NMAG]
     B = np.moveaxis(B, 0, -1)
     p_idx = NGAS + NMAG
@@ -240,16 +259,153 @@ def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
     return np.array(times), {k: np.array(v) for k, v in metrics.items()}
 
 
-def compare_series(jax_times, jax_values, agate_times, agate_values) -> tuple[bool, dict]:
-    if len(agate_times) < 2:
-        agate_interp = np.full_like(jax_values, agate_values[0], dtype=float)
+def load_agate_final_fields(case: str, resolution: int) -> dict:
+    """Load final state spatial fields from AGATE reference data.
+
+    Args:
+        case: Case identifier ("gem" for GEM reconnection)
+        resolution: Grid resolution
+
+    Returns:
+        Dict with keys: density, momentum, magnetic_field, pressure
+        Each value is a numpy array of the spatial field.
+    """
+    loader = AgateDataLoader()
+    loader.ensure_files(case, resolution)
+    case_dir = Path(loader.cache_dir) / case / str(resolution)
+
+    def _state_key(path: Path) -> int:
+        match = re.search(r"state_(\d+)", path.name)
+        return int(match.group(1)) if match else 0
+
+    state_files = sorted(case_dir.rglob("*.state_*.h5"), key=_state_key)
+    if not state_files:
+        raise FileNotFoundError(f"No AGATE state files found in {case_dir}")
+
+    # Load the final state file
+    final_state_path = state_files[-1]
+
+    with h5py.File(final_state_path, "r") as f:
+        sub = f["subID0"]
+        vec = sub["vector"][:]
+
+    # Parse the state vector into fields
+    rho, p, v, B = _parse_state_vector(vec)
+
+    # Compute momentum from density and velocity
+    mom = rho[..., None] * v
+
+    return {
+        "density": rho,
+        "momentum": mom,
+        "magnetic_field": B,
+        "pressure": p,
+    }
+
+
+def compute_field_l2_errors(jax_state, agate_fields: dict) -> dict:
+    """Compute L2 errors between JAX and AGATE spatial fields.
+
+    Args:
+        jax_state: JAX simulation final state with n, v, B, p attributes
+        agate_fields: Dict from load_agate_final_fields
+
+    Returns:
+        Dict of field name -> L2 error value
+    """
+    from jax_frc.validation.metrics import l2_error
+
+    errors = {}
+
+    # Density
+    errors['density'] = float(l2_error(
+        np.asarray(jax_state.n),
+        agate_fields['density']
+    ))
+
+    # Momentum (rho * v)
+    jax_mom = np.asarray(jax_state.n)[..., None] * np.asarray(jax_state.v)
+    errors['momentum'] = float(l2_error(jax_mom, agate_fields['momentum']))
+
+    # Magnetic field
+    errors['magnetic_field'] = float(l2_error(
+        np.asarray(jax_state.B),
+        agate_fields['magnetic_field']
+    ))
+
+    # Pressure
+    errors['pressure'] = float(l2_error(
+        np.asarray(jax_state.p),
+        agate_fields['pressure']
+    ))
+
+    return errors
+
+
+def compare_final_values(jax_value: float, agate_value: float, metric_name: str) -> tuple[bool, dict]:
+    """Compare final state values using L2 error and relative error.
+
+    Args:
+        jax_value: Final metric value from JAX simulation
+        agate_value: Final metric value from AGATE reference
+        metric_name: Name of the metric being compared
+
+    Returns:
+        Tuple of (passed, stats_dict)
+    """
+    # Check for NaN/Inf in input values
+    if np.isnan(jax_value) or np.isinf(jax_value):
+        return False, {
+            "jax_value": float("nan"),
+            "agate_value": agate_value,
+            "l2_error": float("nan"),
+            "relative_error": float("nan"),
+            "error_msg": "NaN or Inf detected in JAX simulation value",
+        }
+    if np.isnan(agate_value) or np.isinf(agate_value):
+        return False, {
+            "jax_value": jax_value,
+            "agate_value": float("nan"),
+            "l2_error": float("nan"),
+            "relative_error": float("nan"),
+            "error_msg": "NaN or Inf detected in AGATE reference value",
+        }
+
+    # Compute L2 error: |jax - agate| / max(|agate|, 1e-8)
+    denom = max(abs(agate_value), 1e-8)
+    l2_error = abs(jax_value - agate_value) / denom
+
+    # Compute relative error: |jax - agate| / |agate| (same formula, but different threshold)
+    relative_error = l2_error
+
+    # Check for NaN/Inf in computed error
+    if np.isnan(l2_error) or np.isinf(l2_error):
+        return False, {
+            "jax_value": jax_value,
+            "agate_value": agate_value,
+            "l2_error": float("nan"),
+            "relative_error": float("nan"),
+            "error_msg": "NaN or Inf in computed error",
+        }
+
+    # Use different thresholds based on metric type
+    if metric_name in ENERGY_METRICS:
+        threshold = RELATIVE_ERROR_TOL
+        passed = relative_error <= threshold
+        threshold_type = "relative"
     else:
-        agate_interp = np.interp(jax_times, agate_times, agate_values)
-    denom = np.maximum(np.abs(agate_interp), 1e-8)
-    errors = np.abs(jax_values - agate_interp) / denom
-    mean_err, lo, hi = block_bootstrap_ci(errors, block_size=10, n_boot=300)
-    passed = hi <= ERROR_TOL
-    return passed, {"mean_error": mean_err, "ci_low": lo, "ci_high": hi}
+        threshold = L2_ERROR_TOL
+        passed = l2_error <= threshold
+        threshold_type = "l2"
+
+    return passed, {
+        "jax_value": jax_value,
+        "agate_value": agate_value,
+        "l2_error": l2_error,
+        "relative_error": relative_error,
+        "threshold": threshold,
+        "threshold_type": threshold_type,
+    }
 
 
 def main(quick_test: bool = False) -> bool:
@@ -257,87 +413,195 @@ def main(quick_test: bool = False) -> bool:
     print(f"  {DESCRIPTION}")
     if quick_test:
         print("  (QUICK TEST MODE)")
+    print()
 
+    print("Configuration:")
     resolutions = QUICK_RESOLUTIONS if quick_test else RESOLUTIONS
+    print(f"  resolutions: {resolutions}")
+    print(f"  L2 threshold: {L2_ERROR_TOL} ({L2_ERROR_TOL*100:.0f}%)")
+    print(f"  Relative threshold: {RELATIVE_ERROR_TOL} ({RELATIVE_ERROR_TOL*100:.0f}% for energy metrics)")
+    print()
+
     overall_pass = True
-    metrics_report = {}
+    all_results = {}
+    all_metrics = {}
 
     # Download AGATE data before running simulations
-    agate_data = {}
     print("Downloading AGATE reference data...")
     for resolution in resolutions:
         try:
-            agate_times, agate_metrics = load_agate_series("gem", resolution)
-            agate_data[resolution] = (agate_times, agate_metrics)
+            loader = AgateDataLoader()
+            loader.ensure_files("gem", resolution)
             print(f"  Resolution {resolution}: OK")
         except Exception as exc:
             print(f"  Resolution {resolution}: FAILED ({exc})")
-            if not quick_test:
-                overall_pass = False
-                metrics_report[f"agate_data_r{resolution}"] = {
-                    "value": "missing",
-                    "passed": False,
-                    "description": f"AGATE data load failed: {exc}",
-                }
+    print()
 
     for resolution in resolutions:
-        print(f"Resolution: {resolution}")
+        print(f"Resolution {resolution}: ", end="", flush=True)
         cfg = setup_configuration(quick_test, resolution)
         t_start = time.time()
-        _, geometry, history = run_simulation(cfg)
+        final_state, geometry, history = run_simulation(cfg)
         t_sim = time.time() - t_start
-        print(f"  Simulation completed in {t_sim:.2f}s")
-
-        jax_times = np.array(history["times"])
-        jax_metrics = {key: np.array([m[key] for m in history["metrics"]]) for key in history["metrics"][0]}
+        print(f"[{t_sim:.2f}s]")
 
         if quick_test:
+            # Quick test: just check for NaN/Inf
+            jax_metrics = {key: np.array([m[key] for m in history["metrics"]])
+                          for key in history["metrics"][0]}
             for key in jax_metrics:
-                metrics_report[f"{key}_r{resolution}"] = {
-                    "value": float(jax_metrics[key][-1]),
-                    "passed": True,
-                    "description": "Quick test mode (no regression)",
+                val = float(jax_metrics[key][-1])
+                is_valid = not (np.isnan(val) or np.isinf(val))
+                if not is_valid:
+                    overall_pass = False
+                all_metrics[f"{key}_r{resolution}"] = {
+                    "value": val,
+                    "passed": is_valid,
+                    "description": "Quick test mode (NaN/Inf check only)",
                 }
+            print(f"  Quick test: {'PASS' if is_valid else 'FAIL'} (NaN/Inf check)")
             continue
 
-        if resolution not in agate_data:
+        # Load AGATE reference data
+        try:
+            agate_fields = load_agate_final_fields("gem", resolution)
+            agate_times, agate_scalar_metrics = load_agate_series("gem", resolution)
+        except Exception as exc:
+            print(f"  ERROR: Failed to load AGATE data: {exc}")
+            overall_pass = False
             continue
 
-        agate_times, agate_metrics = agate_data[resolution]
-        for key, jax_values in jax_metrics.items():
-            passed, stats = compare_series(
-                jax_times, jax_values, agate_times, agate_metrics[key]
-            )
-            metrics_report[f"{key}_r{resolution}"] = {
-                "value": stats["mean_error"],
-                "ci_low": stats["ci_low"],
-                "ci_high": stats["ci_high"],
-                "threshold": ERROR_TOL,
-                "passed": passed,
-                "description": f"Mean relative error (95% CI) vs AGATE {key}",
+        # Compute field L2 errors
+        field_errors = compute_field_l2_errors(final_state, agate_fields)
+        print_field_l2_table(field_errors, L2_ERROR_TOL)
+        print()
+
+        # Compute scalar metrics comparison
+        jax_final_metrics = compute_metrics(
+            final_state.n, final_state.p, final_state.v, final_state.B,
+            geometry.dx, geometry.dy, geometry.dz
+        )
+
+        scalar_results = {}
+        for key in jax_final_metrics:
+            jax_val = jax_final_metrics[key]
+            agate_val = float(agate_scalar_metrics[key][-1])
+            passed, stats = compare_final_values(jax_val, agate_val, key)
+            scalar_results[key] = {
+                'jax_value': jax_val,
+                'agate_value': agate_val,
+                'relative_error': stats.get('relative_error', 0),
+                'threshold': stats.get('threshold', RELATIVE_ERROR_TOL),
+                'passed': passed,
             }
-            overall_pass = overall_pass and passed
 
+        print_scalar_metrics_table(scalar_results)
+        print()
+
+        # Summary for this resolution
+        field_passed = sum(1 for e in field_errors.values() if e <= L2_ERROR_TOL)
+        scalar_passed = sum(1 for m in scalar_results.values() if m['passed'])
+        total_checks = len(field_errors) + len(scalar_results)
+        total_passed = field_passed + scalar_passed
+        res_pass = total_passed == total_checks
+        overall_pass = overall_pass and res_pass
+
+        print(f"  Summary: {total_passed}/{total_checks} PASS")
+        print()
+
+        # Store results for report generation
+        all_results[resolution] = {
+            'field_errors': field_errors,
+            'scalar_metrics': scalar_results,
+            'jax_state': final_state,
+            'agate_fields': agate_fields,
+        }
+
+        # Store metrics for report
+        for field, error in field_errors.items():
+            all_metrics[f"{field}_l2_r{resolution}"] = {
+                'value': error,
+                'threshold': L2_ERROR_TOL,
+                'passed': error <= L2_ERROR_TOL,
+                'description': f'{field} L2 error vs AGATE',
+            }
+        for key, data in scalar_results.items():
+            all_metrics[f"{key}_r{resolution}"] = {
+                'jax_value': data['jax_value'],
+                'agate_value': data['agate_value'],
+                'relative_error': data['relative_error'],
+                'threshold': data['threshold'],
+                'passed': data['passed'],
+                'description': f'{key} relative error vs AGATE',
+            }
+
+    # Generate report
     report = ValidationReport(
         name=NAME,
         description=DESCRIPTION,
         docstring=__doc__,
-        configuration={"resolutions": resolutions},
-        metrics=metrics_report,
-        overall_pass=overall_pass or quick_test,
+        configuration={
+            "resolutions": resolutions,
+            "L2_threshold": L2_ERROR_TOL,
+            "relative_threshold": RELATIVE_ERROR_TOL,
+        },
+        metrics=all_metrics,
+        overall_pass=overall_pass,
     )
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.set_title("GEM Metrics (JAX-FRC)")
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Value")
-    report.add_plot(fig, name="metrics_placeholder")
-    plt.close(fig)
+    # Generate plots for each resolution (skip in quick test mode)
+    if not quick_test:
+        for resolution, data in all_results.items():
+            # Plot 1: Scalar metrics comparison (bar chart)
+            fig_scalar = create_scalar_comparison_plot(
+                data['scalar_metrics'], resolution
+            )
+            report.add_plot(fig_scalar, name=f"scalar_comparison_r{resolution}",
+                           caption=f"JAX vs AGATE scalar metrics at resolution {resolution}")
+            plt.close(fig_scalar)
+
+            # Plot 2: Error vs threshold summary
+            fig_error = create_error_threshold_plot(
+                data['field_errors'], data['scalar_metrics'],
+                L2_ERROR_TOL, RELATIVE_ERROR_TOL
+            )
+            report.add_plot(fig_error, name=f"error_summary_r{resolution}",
+                           caption=f"All errors as percentage of threshold at resolution {resolution}")
+            plt.close(fig_error)
+
+            # Plot 3: Field comparison contours (density)
+            jax_density = np.asarray(data['jax_state'].n)[:, 0, :]
+            agate_density = data['agate_fields']['density'][:, 0, :]
+            fig_density = create_field_comparison_plot(
+                jax_density, agate_density,
+                'density', resolution, data['field_errors']['density']
+            )
+            report.add_plot(fig_density, name=f"density_comparison_r{resolution}",
+                           caption=f"Density field comparison at resolution {resolution}")
+            plt.close(fig_density)
+
+            # Plot 4: Field comparison contours (magnetic field Bz)
+            jax_bz = np.asarray(data['jax_state'].B)[:, 0, :, 2]
+            agate_bz = data['agate_fields']['magnetic_field'][:, 0, :, 2]
+            fig_bz = create_field_comparison_plot(
+                jax_bz, agate_bz,
+                'magnetic_field_Bz', resolution, data['field_errors']['magnetic_field']
+            )
+            report.add_plot(fig_bz, name=f"magnetic_field_comparison_r{resolution}",
+                           caption=f"Magnetic field Bz comparison at resolution {resolution}")
+            plt.close(fig_bz)
 
     report_dir = report.save()
     print(f"Report saved to: {report_dir}")
+    print()
 
-    return bool(overall_pass or quick_test)
+    # Final result
+    if overall_pass:
+        print("OVERALL: PASS (all resolutions passed)")
+    else:
+        print("OVERALL: FAIL (some checks failed)")
+
+    return bool(overall_pass)
 
 
 if __name__ == "__main__":
