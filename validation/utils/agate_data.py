@@ -70,7 +70,37 @@ class AgateDataLoader:
         return extracted
 
     def ensure_files(self, case: str, resolution: int) -> list[Path]:
-        """Ensure required files are present locally; download if missing."""
+        """Ensure required files are present locally; generate if missing.
+
+        Priority:
+        1. Check if local data exists with valid config
+        2. If missing/invalid -> run AGATE to generate
+        3. Return paths to data files
+        """
+        # Map short names to full names
+        case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
+        full_case = case_map.get(case.lower(), case.lower())
+
+        output_dir = Path(self.cache_dir) / full_case / str(resolution)
+
+        # Try local generation first
+        try:
+            from validation.utils.agate_runner import is_cache_valid, run_agate_simulation
+
+            if not is_cache_valid(full_case, resolution, output_dir):
+                print(f"Generating AGATE reference data for {full_case} at {resolution}...")
+                run_agate_simulation(full_case, resolution, output_dir, overwrite=True)
+
+            # Return all HDF5 files in the directory
+            return list(output_dir.glob("*.h5"))
+
+        except (ImportError, RuntimeError):
+            # Fall back to Zenodo download if AGATE not available
+            print("AGATE not installed, falling back to Zenodo download...")
+            return self._ensure_files_zenodo(case, resolution)
+
+    def _ensure_files_zenodo(self, case: str, resolution: int) -> list[Path]:
+        """Original Zenodo download logic (fallback)."""
         files = self._select_files(case, resolution)
         local_paths: list[Path] = []
         for file_meta in files:
