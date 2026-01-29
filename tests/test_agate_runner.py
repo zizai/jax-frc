@@ -1,8 +1,12 @@
 # tests/test_agate_runner.py
 """Tests for AGATE runner module."""
 
+import tempfile
+import yaml
+from pathlib import Path
+
 import pytest
-from validation.utils.agate_runner import get_expected_config
+from validation.utils.agate_runner import get_expected_config, is_cache_valid
 
 
 def test_get_expected_config_orszag_tang():
@@ -32,3 +36,41 @@ def test_get_expected_config_unknown_case():
     """Unknown case should raise ValueError."""
     with pytest.raises(ValueError, match="Unknown case"):
         get_expected_config("unknown_case", 256)
+
+
+def test_is_cache_valid_missing_config():
+    """Missing config.yaml should return False."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        assert is_cache_valid("orszag_tang", 256, output_dir) is False
+
+
+def test_is_cache_valid_matching_config():
+    """Matching config should return True."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        config_file = output_dir / "orszag_tang_256.config.yaml"
+
+        # Write matching config
+        config = get_expected_config("orszag_tang", 256)
+        config["agate_version"] = "1.0.0"
+        config["generated_at"] = "2026-01-30T00:00:00Z"
+
+        with open(config_file, "w") as f:
+            yaml.safe_dump(config, f)
+
+        assert is_cache_valid("orszag_tang", 256, output_dir) is True
+
+
+def test_is_cache_valid_mismatched_resolution():
+    """Mismatched resolution should return False."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        config_file = output_dir / "orszag_tang_256.config.yaml"
+
+        # Write config with wrong resolution
+        config = get_expected_config("orszag_tang", 512)  # Wrong resolution
+        with open(config_file, "w") as f:
+            yaml.safe_dump(config, f)
+
+        assert is_cache_valid("orszag_tang", 256, output_dir) is False

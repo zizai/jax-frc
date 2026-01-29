@@ -4,6 +4,8 @@
 from pathlib import Path
 from typing import Literal
 
+import yaml
+
 # Case configurations
 CASE_CONFIGS = {
     "orszag_tang": {
@@ -46,3 +48,34 @@ def get_expected_config(case: str, resolution: int) -> dict:
         "resolution": resolution,
         **base_config,
     }
+
+
+def is_cache_valid(case: str, resolution: int, output_dir: Path) -> bool:
+    """Check if cached data matches current configuration.
+
+    Args:
+        case: Case name
+        resolution: Grid resolution
+        output_dir: Directory containing cached data
+
+    Returns:
+        True if cache is valid, False otherwise
+    """
+    config_file = output_dir / f"{case}_{resolution}.config.yaml"
+    if not config_file.exists():
+        return False
+
+    try:
+        with open(config_file) as f:
+            cached_config = yaml.safe_load(f)
+    except Exception:
+        return False
+
+    expected_config = get_expected_config(case, resolution)
+
+    # Compare key parameters (ignore metadata like generated_at, agate_version)
+    keys_to_check = ["case", "resolution", "physics", "hall", "end_time"]
+    return all(
+        cached_config.get(k) == expected_config.get(k)
+        for k in keys_to_check
+    )
