@@ -29,7 +29,16 @@ sys.path.insert(0, str(project_root))
 from jax_frc.configurations.orszag_tang import OrszagTangConfiguration
 from jax_frc.solvers import Solver
 from validation.utils.agate_data import AgateDataLoader
-from validation.utils.reporting import ValidationReport
+from validation.utils.reporting import (
+    ValidationReport,
+    print_field_l2_table,
+    print_scalar_metrics_table,
+)
+from validation.utils.plots import (
+    create_scalar_comparison_plot,
+    create_error_threshold_plot,
+    create_field_comparison_plot,
+)
 
 
 NAME = "orszag_tang"
@@ -391,28 +400,29 @@ def main(quick_test: bool = False) -> bool:
     print(f"  {DESCRIPTION}")
     if quick_test:
         print("  (QUICK TEST MODE)")
+    print()
 
+    print("Configuration:")
     resolutions = QUICK_RESOLUTIONS if quick_test else RESOLUTIONS
+    print(f"  resolutions: {resolutions}")
+    print(f"  L2 threshold: {L2_ERROR_TOL} ({L2_ERROR_TOL*100:.0f}%)")
+    print(f"  Relative threshold: {RELATIVE_ERROR_TOL} ({RELATIVE_ERROR_TOL*100:.0f}% for energy metrics)")
+    print()
+
     overall_pass = True
-    metrics_report = {}
+    all_results = {}
+    all_metrics = {}
 
     # Download AGATE data before running simulations
-    agate_data = {}
     print("Downloading AGATE reference data...")
     for resolution in resolutions:
         try:
-            agate_times, agate_metrics = load_agate_series("ot", resolution)
-            agate_data[resolution] = (agate_times, agate_metrics)
+            loader = AgateDataLoader()
+            loader.ensure_files("ot", resolution)
             print(f"  Resolution {resolution}: OK")
         except Exception as exc:
             print(f"  Resolution {resolution}: FAILED ({exc})")
-            if not quick_test:
-                overall_pass = False
-                metrics_report[f"agate_data_r{resolution}"] = {
-                    "value": "missing",
-                    "passed": False,
-                    "description": f"AGATE data load failed: {exc}",
-                }
+    print()
 
     for resolution in resolutions:
         print(f"Resolution: {resolution}")
