@@ -3,12 +3,20 @@
 Physics:
     Hall MHD GEM reconnection in a thin-y slab (cylindrical-style geometry).
 
+IMPORTANT LIMITATION:
+    The current JAX-FRC physics models (ResistiveMHD, ExtendedMHD) only evolve
+    the magnetic field B via the induction equation. They do NOT evolve:
+    - Density (n) - remains constant
+    - Velocity (v) - remains constant
+    - Pressure (p) - remains constant
+
+    This is fundamentally different from AGATE's full MHD solver which evolves
+    all fields. Therefore, the validation comparison is only meaningful for
+    the magnetic field evolution.
+
 Note:
-    The JAX and AGATE implementations both use Hall MHD.
     AGATE reference data is at t=12.0 (only one state file available).
     Only resolution 512 is available in AGATE reference data.
-
-    The validation compares normalized field patterns and energy metrics.
 """
 
 from __future__ import annotations

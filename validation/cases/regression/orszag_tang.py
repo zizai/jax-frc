@@ -4,22 +4,25 @@ Physics:
     Standard 2D Orszag–Tang vortex in a thin-y slab, used to validate nonlinear
     MHD turbulence, current sheet formation, and energy evolution.
 
+IMPORTANT LIMITATION:
+    The current JAX-FRC physics models (ResistiveMHD, ExtendedMHD) only evolve
+    the magnetic field B via the induction equation. They do NOT evolve:
+    - Density (n) - remains constant
+    - Velocity (v) - remains constant
+    - Pressure (p) - remains constant
+
+    This is fundamentally different from AGATE's full MHD solver which evolves
+    all fields. Therefore, the validation comparison is only meaningful for
+    the magnetic field evolution.
+
 Note:
     The JAX and AGATE implementations use different physics models:
-    - JAX: Ideal MHD (eta=0, no Hall term)
-    - AGATE: Hall MHD (hallOT* reference data)
+    - JAX: Induction equation only (B evolution)
+    - AGATE: Full Hall MHD (all fields evolve)
 
     Additionally, different normalizations and domain sizes are used:
     - JAX: domain [0, 2π], B0=1/sqrt(4π)
     - AGATE: domain [0, 1], B0=1/sqrt(4π)
-
-    Due to these differences, the validation focuses on:
-    1. Verifying simulation stability (no NaN/Inf)
-    2. Checking energy conservation (mean_energy_density)
-    3. Comparing normalized field patterns (with relaxed thresholds)
-
-    The enstrophy and current metrics are NOT comparable due to different
-    domain sizes (curl scales with 1/dx).
 """
 
 from __future__ import annotations
