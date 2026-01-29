@@ -515,12 +515,11 @@ def main(quick_test: bool = False) -> bool:
             overall_pass = False
             continue
 
-        # In quick test mode, skip accuracy comparison (just verify stability)
+        # In quick test mode, still compute metrics but note the time mismatch
         if quick_test:
-            print("  Quick test: simulation stable, skipping accuracy comparison")
-            print("  (AGATE only has t=0.48 data, no initial state available)")
+            print("  Quick test: simulation ran to t=0.01, comparing against AGATE t=0.48")
+            print("  (Results will differ due to different simulation times)")
             print()
-            continue
 
         # Compute field L2 errors
         field_errors = compute_field_l2_errors(final_state, agate_fields)
