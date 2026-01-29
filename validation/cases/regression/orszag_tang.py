@@ -522,24 +522,71 @@ def main(quick_test: bool = False) -> bool:
                 'description': f'{key} relative error vs AGATE',
             }
 
+    # Generate report
     report = ValidationReport(
         name=NAME,
         description=DESCRIPTION,
         docstring=__doc__,
-        configuration={"resolutions": resolutions},
-        metrics=metrics_report,
+        configuration={
+            "resolutions": resolutions,
+            "L2_threshold": L2_ERROR_TOL,
+            "relative_threshold": RELATIVE_ERROR_TOL,
+        },
+        metrics=all_metrics,
         overall_pass=overall_pass,
     )
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.set_title("Orszag–Tang Metrics (JAX-FRC)")
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Value")
-    report.add_plot(fig, name="metrics_placeholder")
-    plt.close(fig)
+    # Generate plots for each resolution (skip in quick test mode)
+    if not quick_test:
+        for resolution, data in all_results.items():
+            # Plot 1: Scalar metrics comparison (bar chart)
+            fig_scalar = create_scalar_comparison_plot(
+                data['scalar_metrics'], resolution
+            )
+            report.add_plot(fig_scalar, name=f"scalar_comparison_r{resolution}",
+                           caption=f"JAX vs AGATE scalar metrics at resolution {resolution}")
+            plt.close(fig_scalar)
+
+            # Plot 2: Error vs threshold summary
+            fig_error = create_error_threshold_plot(
+                data['field_errors'], data['scalar_metrics'],
+                L2_ERROR_TOL, RELATIVE_ERROR_TOL
+            )
+            report.add_plot(fig_error, name=f"error_summary_r{resolution}",
+                           caption=f"All errors as percentage of threshold at resolution {resolution}")
+            plt.close(fig_error)
+
+            # Plot 3: Field comparison contours (density)
+            jax_density = np.asarray(data['jax_state'].n)[:, 0, :]
+            agate_density = data['agate_fields']['density'][:, 0, :]
+            fig_density = create_field_comparison_plot(
+                jax_density, agate_density,
+                'density', resolution, data['field_errors']['density']
+            )
+            report.add_plot(fig_density, name=f"density_comparison_r{resolution}",
+                           caption=f"Density field comparison at resolution {resolution}")
+            plt.close(fig_density)
+
+            # Plot 4: Field comparison contours (magnetic field Bz)
+            jax_bz = np.asarray(data['jax_state'].B)[:, 0, :, 2]
+            agate_bz = data['agate_fields']['magnetic_field'][:, 0, :, 2]
+            fig_bz = create_field_comparison_plot(
+                jax_bz, agate_bz,
+                'magnetic_field_Bz', resolution, data['field_errors']['magnetic_field']
+            )
+            report.add_plot(fig_bz, name=f"magnetic_field_comparison_r{resolution}",
+                           caption=f"Magnetic field Bz comparison at resolution {resolution}")
+            plt.close(fig_bz)
 
     report_dir = report.save()
     print(f"Report saved to: {report_dir}")
+    print()
+
+    # Final result
+    if overall_pass:
+        print("OVERALL: PASS (all resolutions passed)")
+    else:
+        print("OVERALL: FAIL (some checks failed)")
 
     return bool(overall_pass)
 
