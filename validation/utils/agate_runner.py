@@ -1,6 +1,7 @@
 # validation/utils/agate_runner.py
 """Run AGATE simulations to generate reference data."""
 
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -79,3 +80,104 @@ def is_cache_valid(case: str, resolution: int, output_dir: Path) -> bool:
         cached_config.get(k) == expected_config.get(k)
         for k in keys_to_check
     )
+
+
+def _get_agate_version() -> str:
+    """Get AGATE version string."""
+    try:
+        import agate
+        return getattr(agate, "__version__", "unknown")
+    except ImportError:
+        return "not_installed"
+
+
+def _save_config(case: str, resolution: int, output_dir: Path) -> None:
+    """Save configuration to YAML file."""
+    config = get_expected_config(case, resolution)
+    config["agate_version"] = _get_agate_version()
+    config["generated_at"] = datetime.utcnow().isoformat() + "Z"
+
+    config_file = output_dir / f"{case}_{resolution}.config.yaml"
+    with open(config_file, "w") as f:
+        yaml.safe_dump(config, f, default_flow_style=False)
+
+
+def _run_orszag_tang(resolution: int, output_dir: Path) -> None:
+    """Run Orszag-Tang vortex simulation."""
+    from agate.framework.scenario import OTVortex
+    from agate.framework.roller import Roller
+    from agate.framework.fileHandler import fileHandler
+
+    # Create scenario (ideal MHD, no Hall term)
+    scenario = OTVortex(divClean=True, hall=False)
+
+    # Create roller with standard options
+    roller = Roller.autodefault(
+        scenario,
+        ncells=resolution,
+        options={"cfl": 0.4, "slopeName": "mcbeta", "mcbeta": 1.3}
+    )
+    roller.orient("numpy")
+
+    # Run simulation
+    print(f"Running Orszag-Tang at resolution {resolution}...")
+    roller.roll(start_time=0.0, end_time=0.48, add_stopWatch=True)
+
+    # Save output
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handler = fileHandler(directory=str(output_dir), prefix=f"orszag_tang_{resolution}")
+    handler.outputGrid(roller.grid)
+    handler.outputState(roller.grid, roller.state, roller.time)
+
+
+def _run_gem_reconnection(resolution: int, output_dir: Path) -> None:
+    """Run GEM reconnection simulation (placeholder for Task 4)."""
+    raise NotImplementedError("GEM reconnection runner will be added in Task 4")
+
+
+def run_agate_simulation(
+    case: Literal["orszag_tang", "gem_reconnection"],
+    resolution: int,
+    output_dir: Path,
+    overwrite: bool = False
+) -> Path:
+    """Run AGATE simulation and save results.
+
+    Args:
+        case: Which test case to run
+        resolution: Grid resolution (e.g., 256, 512)
+        output_dir: Where to save HDF5 output files
+        overwrite: If True, regenerate even if files exist
+
+    Returns:
+        Path to the output directory
+
+    Raises:
+        RuntimeError: If AGATE is not installed
+        ValueError: If case is unknown
+    """
+    try:
+        import agate
+    except ImportError:
+        raise RuntimeError(
+            "AGATE not installed. Install with: pip install -e ../agate-open-source"
+        )
+
+    if case not in CASE_CONFIGS:
+        raise ValueError(f"Unknown case: {case}")
+
+    # Check cache
+    if not overwrite and is_cache_valid(case, resolution, output_dir):
+        print(f"Using cached AGATE data for {case} at resolution {resolution}")
+        return output_dir
+
+    # Run simulation
+    if case == "orszag_tang":
+        _run_orszag_tang(resolution, output_dir)
+    elif case == "gem_reconnection":
+        _run_gem_reconnection(resolution, output_dir)
+
+    # Save config
+    _save_config(case, resolution, output_dir)
+
+    return output_dir

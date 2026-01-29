@@ -6,7 +6,7 @@ import yaml
 from pathlib import Path
 
 import pytest
-from validation.utils.agate_runner import get_expected_config, is_cache_valid
+from validation.utils.agate_runner import get_expected_config, is_cache_valid, run_agate_simulation
 
 
 def test_get_expected_config_orszag_tang():
@@ -74,3 +74,20 @@ def test_is_cache_valid_mismatched_resolution():
             yaml.safe_dump(config, f)
 
         assert is_cache_valid("orszag_tang", 256, output_dir) is False
+
+
+@pytest.mark.slow
+def test_run_orszag_tang_generates_files():
+    """OT simulation should produce expected output files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        run_agate_simulation("orszag_tang", 64, output_dir)  # Small resolution for speed
+
+        # Check expected files exist
+        assert (output_dir / "orszag_tang_64.grid.h5").exists()
+        assert (output_dir / "orszag_tang_64.config.yaml").exists()
+
+        # Check at least one state file exists
+        state_files = list(output_dir.glob("orszag_tang_64.state_*.h5"))
+        assert len(state_files) >= 1
