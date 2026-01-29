@@ -311,13 +311,58 @@ class ValidationReport:
 
 
 def print_field_l2_table(field_errors: dict, threshold: float) -> None:
-    """Print formatted table of field L2 errors to console."""
-    print("  Field L2 Errors:")
-    print(f"    {'Field':<18} {'L2 Error':<12} {'Threshold':<12} {'Status'}")
-    print("    " + "-" * 54)
-    for field, error in field_errors.items():
-        status = "PASS" if error <= threshold else "FAIL"
-        print(f"    {field:<18} {error:<12.4g} {threshold:<12.4g} {status}")
+    """Print per-field metrics table.
+
+    Args:
+        field_errors: Dict of field_name -> error value or dict with metrics
+        threshold: Error threshold
+    """
+    # Check if new format (dict with metrics) or old format (just float)
+    first_value = next(iter(field_errors.values()))
+    is_new_format = isinstance(first_value, dict)
+
+    if is_new_format:
+        print("  Per-Field Statistics:")
+        print("    Field            L2 Error   Max Abs Error   Rel Error   Status")
+        print("    " + "-" * 60)
+
+        for name, stats in field_errors.items():
+            l2 = stats["l2_error"]
+            max_abs = stats["max_abs_error"]
+            rel = stats["relative_error"]
+            passed = l2 <= threshold
+            status = "PASS" if passed else "FAIL"
+            print(f"    {name:<16} {l2:>8.3f}   {max_abs:>13.3f}   {rel:>9.3f}   {status}")
+    else:
+        # Old format - just L2 errors
+        print("  Field L2 Errors:")
+        print("    Field            L2 Error   Threshold  Status")
+        print("    " + "-" * 54)
+
+        for name, error in field_errors.items():
+            passed = error <= threshold
+            status = "PASS" if passed else "FAIL"
+            print(f"    {name:<16} {error:>8.4f}   {threshold:>9.2f}  {status}")
+
+
+def print_aggregate_metrics_table(aggregate_metrics: dict, threshold: float) -> None:
+    """Print aggregate time-series metrics table.
+
+    Args:
+        aggregate_metrics: Dict of metric_name -> {mean_residual, std_residual, relative_error}
+        threshold: Relative error threshold
+    """
+    print("  Aggregate Time-Series Statistics:")
+    print("    Metric                Mean Resid   Std Resid   Rel Error   Status")
+    print("    " + "-" * 68)
+
+    for name, stats in aggregate_metrics.items():
+        mean_r = stats["mean_residual"]
+        std_r = stats["std_residual"]
+        rel_e = stats["relative_error"]
+        passed = rel_e <= threshold
+        status = "PASS" if passed else "FAIL"
+        print(f"    {name:<20} {mean_r:>10.4f}   {std_r:>9.4f}   {rel_e:>9.3f}   {status}")
 
 
 def print_scalar_metrics_table(metrics: dict) -> None:
