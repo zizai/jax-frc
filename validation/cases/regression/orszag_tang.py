@@ -425,49 +425,102 @@ def main(quick_test: bool = False) -> bool:
     print()
 
     for resolution in resolutions:
-        print(f"Resolution: {resolution}")
+        print(f"Resolution {resolution}: ", end="", flush=True)
         cfg = setup_configuration(quick_test, resolution)
         t_start = time.time()
-        _, geometry, history = run_simulation(cfg)
+        final_state, geometry, history = run_simulation(cfg)
         t_sim = time.time() - t_start
-        print(f"  Simulation completed in {t_sim:.2f}s")
-
-        jax_times = np.array(history["times"])
-        jax_metrics = {key: np.array([m[key] for m in history["metrics"]]) for key in history["metrics"][0]}
+        print(f"[{t_sim:.2f}s]")
 
         if quick_test:
+            # Quick test: just check for NaN/Inf
+            jax_metrics = {key: np.array([m[key] for m in history["metrics"]])
+                          for key in history["metrics"][0]}
             for key in jax_metrics:
                 val = float(jax_metrics[key][-1])
                 is_valid = not (np.isnan(val) or np.isinf(val))
                 if not is_valid:
                     overall_pass = False
-                metrics_report[f"{key}_r{resolution}"] = {
+                all_metrics[f"{key}_r{resolution}"] = {
                     "value": val,
                     "passed": is_valid,
                     "description": "Quick test mode (NaN/Inf check only)",
                 }
+            print(f"  Quick test: {'PASS' if is_valid else 'FAIL'} (NaN/Inf check)")
             continue
 
-        if resolution not in agate_data:
+        # Load AGATE reference data
+        try:
+            agate_fields = load_agate_final_fields("ot", resolution)
+            agate_times, agate_scalar_metrics = load_agate_series("ot", resolution)
+        except Exception as exc:
+            print(f"  ERROR: Failed to load AGATE data: {exc}")
+            overall_pass = False
             continue
 
-        agate_times, agate_metrics = agate_data[resolution]
-        for key, jax_values in jax_metrics.items():
-            # Compare final values (last time point)
-            jax_final = float(jax_values[-1])
-            agate_final = float(agate_metrics[key][-1])
-            passed, stats = compare_final_values(jax_final, agate_final, key)
-            metrics_report[f"{key}_r{resolution}"] = {
-                "jax_value": stats.get("jax_value", float("nan")),
-                "agate_value": stats.get("agate_value", float("nan")),
-                "l2_error": stats.get("l2_error", float("nan")),
-                "relative_error": stats.get("relative_error", float("nan")),
-                "threshold": stats.get("threshold", L2_ERROR_TOL),
-                "threshold_type": stats.get("threshold_type", "l2"),
-                "passed": passed,
-                "description": stats.get("error_msg", f"{stats.get('threshold_type', 'L2')} error vs AGATE {key}"),
+        # Compute field L2 errors
+        field_errors = compute_field_l2_errors(final_state, agate_fields)
+        print_field_l2_table(field_errors, L2_ERROR_TOL)
+        print()
+
+        # Compute scalar metrics comparison
+        jax_final_metrics = compute_metrics(
+            final_state.n, final_state.p, final_state.v, final_state.B,
+            geometry.dx, geometry.dy, geometry.dz
+        )
+
+        scalar_results = {}
+        for key in jax_final_metrics:
+            jax_val = jax_final_metrics[key]
+            agate_val = float(agate_scalar_metrics[key][-1])
+            passed, stats = compare_final_values(jax_val, agate_val, key)
+            scalar_results[key] = {
+                'jax_value': jax_val,
+                'agate_value': agate_val,
+                'relative_error': stats.get('relative_error', 0),
+                'threshold': stats.get('threshold', RELATIVE_ERROR_TOL),
+                'passed': passed,
             }
-            overall_pass = overall_pass and passed
+
+        print_scalar_metrics_table(scalar_results)
+        print()
+
+        # Summary for this resolution
+        field_passed = sum(1 for e in field_errors.values() if e <= L2_ERROR_TOL)
+        scalar_passed = sum(1 for m in scalar_results.values() if m['passed'])
+        total_checks = len(field_errors) + len(scalar_results)
+        total_passed = field_passed + scalar_passed
+        res_pass = total_passed == total_checks
+        overall_pass = overall_pass and res_pass
+
+        print(f"  Summary: {total_passed}/{total_checks} PASS")
+        print()
+
+        # Store results for report generation
+        all_results[resolution] = {
+            'field_errors': field_errors,
+            'scalar_metrics': scalar_results,
+            'jax_state': final_state,
+            'agate_fields': agate_fields,
+        }
+
+        # Store metrics for report
+        for field, error in field_errors.items():
+            all_metrics[f"{field}_l2_r{resolution}"] = {
+                'value': error,
+                'threshold': L2_ERROR_TOL,
+                'passed': error <= L2_ERROR_TOL,
+                'description': f'{field} L2 error vs AGATE',
+            }
+        for key, data in scalar_results.items():
+            all_metrics[f"{key}_r{resolution}"] = {
+                'jax_value': data['jax_value'],
+                'agate_value': data['agate_value'],
+                'relative_error': data['relative_error'],
+                'threshold': data['threshold'],
+                'passed': data['passed'],
+                'description': f'{key} relative error vs AGATE',
+            }
 
     report = ValidationReport(
         name=NAME,
