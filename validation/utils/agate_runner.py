@@ -1,7 +1,7 @@
 # validation/utils/agate_runner.py
 """Run AGATE simulations to generate reference data."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -95,7 +95,7 @@ def _save_config(case: str, resolution: int, output_dir: Path) -> None:
     """Save configuration to YAML file."""
     config = get_expected_config(case, resolution)
     config["agate_version"] = _get_agate_version()
-    config["generated_at"] = datetime.utcnow().isoformat() + "Z"
+    config["generated_at"] = datetime.now(timezone.utc).isoformat()
 
     config_file = output_dir / f"{case}_{resolution}.config.yaml"
     with open(config_file, "w") as f:
@@ -108,10 +108,7 @@ def _run_orszag_tang(resolution: int, output_dir: Path) -> None:
     from agate.framework.roller import Roller
     from agate.framework.fileHandler import fileHandler
 
-    # Create scenario (ideal MHD, no Hall term)
     scenario = OTVortex(divClean=True, hall=False)
-
-    # Create roller with standard options
     roller = Roller.autodefault(
         scenario,
         ncells=resolution,
@@ -119,11 +116,12 @@ def _run_orszag_tang(resolution: int, output_dir: Path) -> None:
     )
     roller.orient("numpy")
 
-    # Run simulation
     print(f"Running Orszag-Tang at resolution {resolution}...")
-    roller.roll(start_time=0.0, end_time=0.48, add_stopWatch=True)
+    try:
+        roller.roll(start_time=0.0, end_time=0.48, add_stopWatch=True)
+    except Exception as e:
+        raise RuntimeError(f"Orszag-Tang simulation failed: {e}") from e
 
-    # Save output
     output_dir.mkdir(parents=True, exist_ok=True)
     handler = fileHandler(directory=str(output_dir), prefix=f"orszag_tang_{resolution}")
     handler.outputGrid(roller.grid)
