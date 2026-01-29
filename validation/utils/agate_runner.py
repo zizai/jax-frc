@@ -116,61 +116,73 @@ def _save_config(case: str, resolution: list[int], output_dir: Path) -> None:
         yaml.safe_dump(config, f, default_flow_style=False)
 
 
-def _run_orszag_tang(resolution: int, output_dir: Path) -> None:
-    """Run Orszag-Tang vortex simulation."""
+def _run_orszag_tang(resolution: list[int], output_dir: Path) -> None:
+    """Run Orszag-Tang vortex simulation with multiple snapshots."""
     from agate.framework.scenario import OTVortex
     from agate.framework.roller import Roller
     from agate.framework.fileHandler import fileHandler
 
+    config = get_expected_config("orszag_tang", resolution)
+    snapshot_times = config["snapshot_times"]
+
     scenario = OTVortex(divClean=True, hall=False)
     roller = Roller.autodefault(
         scenario,
-        ncells=resolution,
+        ncells=resolution[0],  # AGATE uses single int for square grids
         options={"cfl": 0.4, "slopeName": "mcbeta", "mcbeta": 1.3}
     )
     roller.orient("numpy")
 
-    print(f"Running Orszag-Tang at resolution {resolution}...")
-    try:
-        roller.roll(start_time=0.0, end_time=0.48, add_stopWatch=True)
-    except Exception as e:
-        raise RuntimeError(f"Orszag-Tang simulation failed: {e}") from e
-
     output_dir.mkdir(parents=True, exist_ok=True)
-    handler = fileHandler(directory=str(output_dir), prefix=f"orszag_tang_{resolution}")
+    res_str = f"{resolution[0]}"
+    handler = fileHandler(directory=str(output_dir), prefix=f"orszag_tang_{res_str}")
     handler.outputGrid(roller.grid)
-    handler.outputState(roller.grid, roller.state, roller.time)
+
+    print(f"Running Orszag-Tang at resolution {resolution}...")
+    for i, target_time in enumerate(snapshot_times):
+        if i == 0:
+            # Output initial state
+            handler.outputState(roller.grid, roller.state, roller.time, suffix=f"state_{i:03d}")
+            continue
+        try:
+            roller.roll(start_time=roller.time, end_time=target_time, add_stopWatch=False)
+        except Exception as e:
+            raise RuntimeError(f"Orszag-Tang simulation failed at t={target_time}: {e}") from e
+        handler.outputState(roller.grid, roller.state, roller.time, suffix=f"state_{i:03d}")
 
 
-def _run_gem_reconnection(resolution: int, output_dir: Path) -> None:
-    """Run GEM reconnection simulation."""
+def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
+    """Run GEM reconnection simulation with multiple snapshots."""
     from agate.framework.scenario import ReconnectionGEM
     from agate.framework.roller import Roller
     from agate.framework.fileHandler import fileHandler
 
-    # Create scenario (Hall MHD)
-    scenario = ReconnectionGEM(divClean=True, hall=True, guide_field=0.0)
+    config = get_expected_config("gem_reconnection", resolution)
+    snapshot_times = config["snapshot_times"]
 
-    # Create roller
+    scenario = ReconnectionGEM(divClean=True, hall=True, guide_field=0.0)
     roller = Roller.autodefault(
         scenario,
-        ncells=[resolution, resolution, 1],
+        ncells=[resolution[0], resolution[0], 1],
         options={"cfl": 0.4}
     )
     roller.orient("numpy")
 
-    # Run simulation
-    print(f"Running GEM reconnection at resolution {resolution}...")
-    try:
-        roller.roll(start_time=0.0, end_time=12.0, add_stopWatch=True)
-    except Exception as e:
-        raise RuntimeError(f"GEM reconnection simulation failed: {e}") from e
-
-    # Save output
     output_dir.mkdir(parents=True, exist_ok=True)
-    handler = fileHandler(directory=str(output_dir), prefix=f"gem_reconnection_{resolution}")
+    res_str = f"{resolution[0]}"
+    handler = fileHandler(directory=str(output_dir), prefix=f"gem_reconnection_{res_str}")
     handler.outputGrid(roller.grid)
-    handler.outputState(roller.grid, roller.state, roller.time)
+
+    print(f"Running GEM reconnection at resolution {resolution}...")
+    for i, target_time in enumerate(snapshot_times):
+        if i == 0:
+            handler.outputState(roller.grid, roller.state, roller.time, suffix=f"state_{i:03d}")
+            continue
+        try:
+            roller.roll(start_time=roller.time, end_time=target_time, add_stopWatch=False)
+        except Exception as e:
+            raise RuntimeError(f"GEM simulation failed at t={target_time}: {e}") from e
+        handler.outputState(roller.grid, roller.state, roller.time, suffix=f"state_{i:03d}")
 
 
 def run_agate_simulation(
@@ -219,9 +231,9 @@ def run_agate_simulation(
     try:
         # Run simulation
         if case == "orszag_tang":
-            _run_orszag_tang(resolution[0], output_dir)
+            _run_orszag_tang(resolution, output_dir)
         elif case == "gem_reconnection":
-            _run_gem_reconnection(resolution[0], output_dir)
+            _run_gem_reconnection(resolution, output_dir)
 
         # Save config
         _save_config(case, resolution, output_dir)
