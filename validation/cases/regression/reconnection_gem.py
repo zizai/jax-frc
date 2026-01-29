@@ -237,7 +237,10 @@ def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
         sub = f["subID0"]
         dx = float(sub.attrs.get("dx", np.diff(sub["x"][:, 0, 0]).mean()))
         dy = float(sub.attrs.get("dy", np.diff(sub["y"][0, :, 0]).mean()))
-        dz = float(sub.attrs.get("dz", 1.0))  # May be 0 for 2D
+        dz = float(sub.attrs.get("dz", 1.0))
+        # For 2D simulations, dz may be 0 in AGATE; use 1.0 for volume integration
+        if dz == 0.0:
+            dz = 1.0
 
     times = []
     metrics = {key: [] for key in ["total_energy", "magnetic_energy", "kinetic_energy", "enstrophy", "max_current"]}
@@ -251,6 +254,11 @@ def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
             if time_attr is None:
                 time_attr = float(len(times))
             rho, p, v, B = _parse_state_vector(vec)
+            # Strip ghost cells (AGATE uses 2 ghost cells on each side)
+            rho = rho[2:-2, 2:-2, :]
+            p = p[2:-2, 2:-2, :]
+            v = v[2:-2, 2:-2, :, :]
+            B = B[2:-2, 2:-2, :, :]
             metric = compute_metrics(rho, p, v, B, dx, dy, dz)
             times.append(float(time_attr))
             for key in metrics:
@@ -259,12 +267,13 @@ def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
     return np.array(times), {k: np.array(v) for k, v in metrics.items()}
 
 
-def load_agate_final_fields(case: str, resolution: int) -> dict:
-    """Load final state spatial fields from AGATE reference data.
+def load_agate_fields(case: str, resolution: int, use_initial: bool = False) -> dict:
+    """Load spatial fields from AGATE reference data.
 
     Args:
         case: Case identifier ("gem" for GEM reconnection)
         resolution: Grid resolution
+        use_initial: If True, load initial state; otherwise load final state
 
     Returns:
         Dict with keys: density, momentum, magnetic_field, pressure
@@ -282,10 +291,10 @@ def load_agate_final_fields(case: str, resolution: int) -> dict:
     if not state_files:
         raise FileNotFoundError(f"No AGATE state files found in {case_dir}")
 
-    # Load the final state file
-    final_state_path = state_files[-1]
+    # Load initial or final state file
+    state_path = state_files[0] if use_initial else state_files[-1]
 
-    with h5py.File(final_state_path, "r") as f:
+    with h5py.File(state_path, "r") as f:
         sub = f["subID0"]
         vec = sub["vector"][:]
 
@@ -465,26 +474,10 @@ def main(quick_test: bool = False) -> bool:
         t_sim = time.time() - t_start
         print(f"[{t_sim:.2f}s]")
 
-        if quick_test:
-            # Quick test: just check for NaN/Inf
-            jax_metrics = {key: np.array([m[key] for m in history["metrics"]])
-                          for key in history["metrics"][0]}
-            for key in jax_metrics:
-                val = float(jax_metrics[key][-1])
-                is_valid = not (np.isnan(val) or np.isinf(val))
-                if not is_valid:
-                    overall_pass = False
-                all_metrics[f"{key}_r{resolution}"] = {
-                    "value": val,
-                    "passed": is_valid,
-                    "description": "Quick test mode (NaN/Inf check only)",
-                }
-            print(f"  Quick test: {'PASS' if is_valid else 'FAIL'} (NaN/Inf check)")
-            continue
-
         # Load AGATE reference data
+        # For quick test, compare against initial state; for full test, compare against final state
         try:
-            agate_fields = load_agate_final_fields("gem", resolution)
+            agate_fields = load_agate_fields("gem", resolution, use_initial=quick_test)
             agate_times, agate_scalar_metrics = load_agate_series("gem", resolution)
         except Exception as exc:
             print(f"  ERROR: Failed to load AGATE data: {exc}")
@@ -503,10 +496,12 @@ def main(quick_test: bool = False) -> bool:
             geometry.dx, geometry.dy, geometry.dz
         )
 
+        # Use initial or final AGATE scalar metrics based on test mode
+        agate_idx = 0 if quick_test else -1
         scalar_results = {}
         for key in jax_final_metrics:
             jax_val = jax_final_metrics[key]
-            agate_val = float(agate_scalar_metrics[key][-1])
+            agate_val = float(agate_scalar_metrics[key][agate_idx])
             passed, stats = compare_final_values(jax_val, agate_val, key)
             scalar_results[key] = {
                 'jax_value': jax_val,
@@ -570,47 +565,46 @@ def main(quick_test: bool = False) -> bool:
         overall_pass=overall_pass,
     )
 
-    # Generate plots for each resolution (skip in quick test mode)
-    if not quick_test:
-        for resolution, data in all_results.items():
-            # Plot 1: Scalar metrics comparison (bar chart)
-            fig_scalar = create_scalar_comparison_plot(
-                data['scalar_metrics'], resolution
-            )
-            report.add_plot(fig_scalar, name=f"scalar_comparison_r{resolution}",
-                           caption=f"JAX vs AGATE scalar metrics at resolution {resolution}")
-            plt.close(fig_scalar)
+    # Generate plots for each resolution
+    for resolution, data in all_results.items():
+        # Plot 1: Scalar metrics comparison (bar chart)
+        fig_scalar = create_scalar_comparison_plot(
+            data['scalar_metrics'], resolution
+        )
+        report.add_plot(fig_scalar, name=f"scalar_comparison_r{resolution}",
+                       caption=f"JAX vs AGATE scalar metrics at resolution {resolution}")
+        plt.close(fig_scalar)
 
-            # Plot 2: Error vs threshold summary
-            fig_error = create_error_threshold_plot(
-                data['field_errors'], data['scalar_metrics'],
-                L2_ERROR_TOL, RELATIVE_ERROR_TOL
-            )
-            report.add_plot(fig_error, name=f"error_summary_r{resolution}",
-                           caption=f"All errors as percentage of threshold at resolution {resolution}")
-            plt.close(fig_error)
+        # Plot 2: Error vs threshold summary
+        fig_error = create_error_threshold_plot(
+            data['field_errors'], data['scalar_metrics'],
+            L2_ERROR_TOL, RELATIVE_ERROR_TOL
+        )
+        report.add_plot(fig_error, name=f"error_summary_r{resolution}",
+                       caption=f"All errors as percentage of threshold at resolution {resolution}")
+        plt.close(fig_error)
 
-            # Plot 3: Field comparison contours (density)
-            jax_density = np.asarray(data['jax_state'].n)[:, 0, :]
-            agate_density = data['agate_fields']['density'][:, 0, :]
-            fig_density = create_field_comparison_plot(
-                jax_density, agate_density,
-                'density', resolution, data['field_errors']['density']
-            )
-            report.add_plot(fig_density, name=f"density_comparison_r{resolution}",
-                           caption=f"Density field comparison at resolution {resolution}")
-            plt.close(fig_density)
+        # Plot 3: Field comparison contours (density)
+        jax_density = np.asarray(data['jax_state'].n)[:, 0, :]
+        agate_density = data['agate_fields']['density'][:, 0, :]
+        fig_density = create_field_comparison_plot(
+            jax_density, agate_density,
+            'density', resolution, data['field_errors']['density']
+        )
+        report.add_plot(fig_density, name=f"density_comparison_r{resolution}",
+                       caption=f"Density field comparison at resolution {resolution}")
+        plt.close(fig_density)
 
-            # Plot 4: Field comparison contours (magnetic field Bz)
-            jax_bz = np.asarray(data['jax_state'].B)[:, 0, :, 2]
-            agate_bz = data['agate_fields']['magnetic_field'][:, 0, :, 2]
-            fig_bz = create_field_comparison_plot(
-                jax_bz, agate_bz,
-                'magnetic_field_Bz', resolution, data['field_errors']['magnetic_field']
-            )
-            report.add_plot(fig_bz, name=f"magnetic_field_comparison_r{resolution}",
-                           caption=f"Magnetic field Bz comparison at resolution {resolution}")
-            plt.close(fig_bz)
+        # Plot 4: Field comparison contours (magnetic field Bz)
+        jax_bz = np.asarray(data['jax_state'].B)[:, 0, :, 2]
+        agate_bz = data['agate_fields']['magnetic_field'][:, 0, :, 2]
+        fig_bz = create_field_comparison_plot(
+            jax_bz, agate_bz,
+            'magnetic_field_Bz', resolution, data['field_errors']['magnetic_field']
+        )
+        report.add_plot(fig_bz, name=f"magnetic_field_comparison_r{resolution}",
+                       caption=f"Magnetic field Bz comparison at resolution {resolution}")
+        plt.close(fig_bz)
 
     report_dir = report.save()
     print(f"Report saved to: {report_dir}")
