@@ -10,6 +10,7 @@ from jax_frc.core.state import State
 from jax_frc.models.base import PhysicsModel
 from jax_frc.solvers.base import Solver
 from jax_frc.solvers.time_controller import TimeController
+from jax_frc.solvers.recipe import NumericalRecipe
 
 @dataclass
 class Simulation:
@@ -19,6 +20,7 @@ class Simulation:
     model: PhysicsModel
     solver: Solver
     time_controller: TimeController
+    recipe: Optional[NumericalRecipe] = None
 
     state: Optional[State] = None
 
@@ -48,6 +50,9 @@ class Simulation:
 
     def step(self) -> State:
         """Advance simulation by one timestep."""
+        if self.recipe is not None:
+            self.state = self.recipe.step(self.state, self.model, self.geometry)
+            return self.state
         dt = self.time_controller.compute_dt(self.state, self.model, self.geometry)
         self.state = self.solver.step(self.state, dt, self.model, self.geometry)
         return self.state
@@ -78,11 +83,22 @@ class Simulation:
         time_kwargs = {k: float(v) for k, v in time_config.items()}
         time_controller = TimeController(**time_kwargs)
 
+        numerics_config = config.get("numerics")
+        recipe = None
+        if numerics_config is not None:
+            recipe = NumericalRecipe(
+                solver=solver,
+                time_controller=time_controller,
+                divergence_strategy=numerics_config.get("divergence_strategy", "none"),
+                use_checked_step=bool(numerics_config.get("use_checked_step", False)),
+            )
+
         return cls(
             geometry=geometry,
             model=model,
             solver=solver,
-            time_controller=time_controller
+            time_controller=time_controller,
+            recipe=recipe,
         )
 
     @classmethod
