@@ -188,7 +188,7 @@ def setup_configuration(quick_test: bool, resolution: list[int]) -> dict:
         resolution: Grid resolution as [nx, ny, nz]
 
     Returns:
-        Configuration dictionary with nx, nz, t_end, dt
+        Configuration dictionary with nx, nz, t_end, dt, use_cfl
     """
     # Timestep for original domain [0, 2pi]:
     # B0 = 1.0, rho0 ~ 0.221
@@ -201,7 +201,8 @@ def setup_configuration(quick_test: bool, resolution: list[int]) -> dict:
         "nx": resolution[0],
         "nz": resolution[2] if resolution[2] > 1 else resolution[0],
         "t_end": 0.48,  # Full time for snapshot comparison
-        "dt": 1e-4,  # Conservative timestep
+        "dt": 1e-4,  # Fallback timestep if CFL is disabled
+        "use_cfl": True,
     }
 
 
@@ -295,19 +296,30 @@ def run_simulation(cfg: dict) -> tuple:
         nx=cfg["nx"],
         nz=cfg["nz"],
         B0=B0_agate,
+        x_max=1.0,
+        y_max=1.0,
+        z_max=1.0,
         eta=0.0,  # Ideal MHD (no resistivity) for stability
     )
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
-    # Use ResistiveMHD with CT advection (ideal MHD limit with eta=0)
-    # Use normalized_units=True for dimensionless Orszag-Tang test problem
-    from jax_frc.models.resistive_mhd import ResistiveMHD
-    model = ResistiveMHD(eta=0.0, advection_scheme="ct", normalized_units=True)
+    state = state.replace(psi=jnp.zeros_like(state.n))
+    # Use finite-volume ideal MHD solver when eta=0
+    # Match AGATE's default HLL-based solver with Dedner cleaning.
+    from jax_frc.models.finite_volume_mhd import FiniteVolumeMHD
+    model = FiniteVolumeMHD(
+        riemann_solver="hll",
+        use_divergence_cleaning=True,
+        cleaning_cr=0.18,
+    )
     # Use RK4 for explicit time integration
     solver = Solver.create({"type": "rk4"})
 
     t_end = cfg["t_end"]
-    dt = cfg["dt"]
+    if cfg.get("use_cfl", True):
+        dt = float(model.compute_stable_dt(state, geometry))
+    else:
+        dt = cfg["dt"]
     n_steps = int(t_end / dt)
     output_interval = max(1, n_steps // 100)
 
@@ -352,21 +364,32 @@ def run_simulation_with_snapshots(
         Tuple of (states_list, geometry, history)
     """
     import math
-    from jax_frc.models.resistive_mhd import ResistiveMHD
+    from jax_frc.models.finite_volume_mhd import FiniteVolumeMHD
 
     B0_agate = 1.0 / math.sqrt(4.0 * math.pi)
     config = OrszagTangConfiguration(
         nx=cfg["nx"],
         nz=cfg["nz"],
         B0=B0_agate,
+        x_max=1.0,
+        y_max=1.0,
+        z_max=1.0,
         eta=0.0,
     )
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
-    model = ResistiveMHD(eta=0.0, advection_scheme="ct", normalized_units=True)
+    state = state.replace(psi=jnp.zeros_like(state.n))
+    model = FiniteVolumeMHD(
+        riemann_solver="hll",
+        use_divergence_cleaning=True,
+        cleaning_cr=0.18,
+    )
     solver = Solver.create({"type": "rk4"})
 
-    dt = cfg["dt"]
+    if cfg.get("use_cfl", True):
+        dt = float(model.compute_stable_dt(state, geometry))
+    else:
+        dt = cfg["dt"]
     states = []
     history = {"times": [], "metrics": []}
 
@@ -613,7 +636,8 @@ def validate_all_snapshots(
     jax_states: list,
     case: str,
     resolution: list[int],
-    snapshot_times: list[float]
+    snapshot_times: list[float],
+    agate_snapshot_times: list[float] | None = None,
 ) -> list[dict]:
     """Compare JAX-FRC vs AGATE at each snapshot.
 
@@ -627,8 +651,13 @@ def validate_all_snapshots(
         List of dicts with time and per-field errors
     """
     all_errors = []
+    agate_times = np.array(agate_snapshot_times) if agate_snapshot_times is not None else None
     for i, (jax_state, t) in enumerate(zip(jax_states, snapshot_times)):
-        agate_fields = load_agate_snapshot(case, resolution, snapshot_idx=i)
+        if agate_times is not None:
+            snapshot_idx = int(np.argmin(np.abs(agate_times - t)))
+        else:
+            snapshot_idx = i
+        agate_fields = load_agate_snapshot(case, resolution, snapshot_idx=snapshot_idx)
 
         field_errors = {}
 
@@ -811,6 +840,7 @@ def main(quick_test: bool = False) -> bool:
                 # Fallback for legacy data without config
                 snapshot_times = [0.0, 0.48]
             print(f"  Using {len(snapshot_times)} snapshots")
+        agate_snapshot_times = agate_config.get("snapshot_times")
 
         # Run simulation with snapshots
         cfg = setup_configuration(quick_test, resolution)
@@ -824,7 +854,7 @@ def main(quick_test: bool = False) -> bool:
         print(f"  Validating {len(snapshot_times)} snapshots...")
         try:
             snapshot_errors = validate_all_snapshots(
-                jax_states, "ot", resolution, snapshot_times
+                jax_states, "ot", resolution, snapshot_times, agate_snapshot_times
             )
         except Exception as exc:
             print(f"  ERROR: Failed to validate snapshots: {exc}")

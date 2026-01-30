@@ -29,7 +29,7 @@ Created the foundation for finite volume MHD:
   - Proper CFL condition based on fast magnetosonic speed
 
 - **`finite_volume_mhd.py`**: FiniteVolumeMHD model class
-  - Supports `hll`, `hlld`, and `ct_hlld` solvers
+  - Supports `hll` and `hlld` solvers
   - PLM reconstruction with MC-beta limiter (beta=1.3)
   - Configurable CFL number
 
@@ -46,22 +46,6 @@ Implemented the Miyoshi & Kusano (2005) HLLD algorithm:
   - Star and double-star intermediate states
   - Proper handling of degenerate cases (Bn ~ 0)
 
-### Phase 3: CT-HLLD Integration ✅
-
-**Commits:** `dc60dd5`, `f67afa2`, `63839a4`
-
-Attempted CT integration with divergence cleaning:
-
-- **`ct_hlld.py`**: CT utilities
-  - `compute_emf_ct()`: Edge-centered EMF computation
-  - `ct_update_B()`: CT-based B field update
-  - `divergence_cleaning_projection()`: Jacobi-based cleaning
-  - `compute_div_B()`: Divergence computation
-
-**Key Finding:** Divergence cleaning caused instability by modifying B inconsistently with the energy equation. Disabled for now. The HLLD solver without cleaning is stable but div(B) grows over time.
-
----
-
 ## Test Results
 
 ### Orszag-Tang Vortex (256x256, t=0.5)
@@ -70,7 +54,6 @@ Attempted CT integration with divergence cleaning:
 |--------|-----|--------|-------------|---------------|
 | HLLD | 0.3 | ✅ | 19 | [0.59, 2.19] |
 | HLLD | 0.4 | ✅ | 13 | [0.58, 2.31] |
-| CT-HLLD (cleaning) | 0.4 | ❌ NaN | - | - |
 
 ### Unit Tests
 - 641 passed, 4 failed (pre-existing failures unrelated to HLLD)
@@ -165,7 +148,7 @@ jax_frc/solvers/riemann/
 ├── hll.py               # Original HLL (B-field only)
 ├── hll_full.py          # Full HLL solver (NEW)
 ├── hlld.py              # HLLD 5-wave solver (NEW)
-└── ct_hlld.py           # CT utilities (NEW)
+└── ct_hlld.py           # CT utilities (unused)
 
 jax_frc/models/
 └── finite_volume_mhd.py # FiniteVolumeMHD model (NEW)

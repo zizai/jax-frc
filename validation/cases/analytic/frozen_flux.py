@@ -151,6 +151,7 @@ def run_multi_model_simulation(cfg: dict, n_snapshots: int = 50) -> tuple:
             "model_type": "resistive_mhd",
             "advection_scheme": "ct",
             "eta": 0.0,
+            "use_finite_volume": False,
             "dt_scale": 1.0,
         },
         "ExtendedMHD": {
@@ -159,6 +160,13 @@ def run_multi_model_simulation(cfg: dict, n_snapshots: int = 50) -> tuple:
             "include_hall": False,  # Disable Hall for frozen flux (advection test)
             "include_electron_pressure": False,  # Disable for pure advection test
             "apply_divergence_cleaning": False,
+            "dt_scale": 1.0,
+        },
+        "FiniteVolumeMHD": {
+            "model_type": "resistive_mhd",
+            "advection_scheme": "ct",
+            "eta": 0.0,
+            "use_finite_volume": True,
             "dt_scale": 1.0,
         },
     }
@@ -227,6 +235,11 @@ ACCEPTANCE = {
     "ExtendedMHD": {
         "l2_error": 0.02,              # 2% L2 error (no CT scheme, higher diffusion)
         "peak_amplitude_ratio": 0.98,  # 98% amplitude preservation
+    },
+    "FiniteVolumeMHD": {
+        "l2_error": 0.3,               # Informational: FV is more diffusive without CT
+        "peak_amplitude_ratio": 0.95,
+        "enforce": False,
     },
 }
 
@@ -547,7 +560,9 @@ def main() -> bool:
     B_initial = jnp.array(results["analytic"][0])
     peak_initial = float(jnp.max(jnp.sqrt(jnp.sum(B_initial**2, axis=-1))))
 
-    for model_name in ["ResistiveMHD", "ExtendedMHD"]:
+    for model_name in ["ResistiveMHD", "ExtendedMHD", "FiniteVolumeMHD"]:
+        if model_name not in results:
+            continue
         B_final = jnp.array(results[model_name][-1])
         l2_err = float(l2_error(B_final, B_analytic_final))
         peak_final = float(jnp.max(jnp.sqrt(jnp.sum(B_final**2, axis=-1))))
@@ -556,14 +571,18 @@ def main() -> bool:
         thresholds = ACCEPTANCE[model_name]
         l2_pass = l2_err < thresholds["l2_error"]
         peak_pass = peak_ratio > thresholds["peak_amplitude_ratio"]
+        enforce = thresholds.get("enforce", True)
 
         model_metrics[model_name] = {
             "l2_error": {"value": l2_err, "threshold": thresholds["l2_error"], "passed": l2_pass},
             "peak_amplitude_ratio": {"value": peak_ratio, "threshold": thresholds["peak_amplitude_ratio"], "passed": peak_pass},
             "overall_pass": l2_pass and peak_pass,
+            "enforce": enforce,
         }
 
-    overall_pass = all(m["overall_pass"] for m in model_metrics.values())
+    overall_pass = all(
+        m["overall_pass"] for m in model_metrics.values() if m.get("enforce", True)
+    )
 
     print("Metrics:")
     for model_name, m in model_metrics.items():

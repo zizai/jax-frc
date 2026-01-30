@@ -28,11 +28,11 @@ from jax_frc.solvers.riemann.mhd_state import (
 )
 from jax_frc.solvers.riemann.hll_full import hll_update_full
 from jax_frc.solvers.riemann.hlld import hlld_update_full
-from jax_frc.solvers.riemann.ct_hlld import ct_hlld_update_full, compute_div_B, divergence_cleaning_projection
+from jax_frc.solvers.riemann.dedner import glm_cleaning_update
 from jax_frc.solvers.riemann.wave_speeds import fast_magnetosonic_speed
 
 
-RiemannSolver = Literal["hll", "hlld", "ct_hlld"]
+RiemannSolver = Literal["hll", "hlld"]
 Reconstruction = Literal["plm", "ppm"]
 
 
@@ -51,10 +51,9 @@ class FiniteVolumeMHD(PhysicsModel):
 
     Args:
         gamma: Adiabatic index (default 5/3)
-        riemann_solver: "hll", "hlld" (default), or "ct_hlld"
+        riemann_solver: "hll" or "hlld" (default)
             - "hll": HLL 2-wave solver (robust, diffusive)
             - "hlld": HLLD 5-wave solver (accurate)
-            - "ct_hlld": HLLD with CT for div(B)=0 preservation
         reconstruction: "plm" (default) or "ppm"
         limiter_beta: MC limiter parameter (default 1.3, AGATE default)
         cfl: CFL number for time step (default 0.4)
@@ -64,6 +63,12 @@ class FiniteVolumeMHD(PhysicsModel):
     reconstruction: Reconstruction = "plm"
     limiter_beta: float = 1.3
     cfl: float = 0.4
+    evolve_density: bool = True
+    evolve_velocity: bool = True
+    evolve_pressure: bool = True
+    use_divergence_cleaning: bool = False
+    cleaning_speed: float | None = None
+    cleaning_cr: float = 0.18
 
     @partial(jax.jit, static_argnums=(0, 2))
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
@@ -84,8 +89,6 @@ class FiniteVolumeMHD(PhysicsModel):
             dU = hll_update_full(cons, geometry, self.gamma, self.limiter_beta)
         elif self.riemann_solver == "hlld":
             dU = hlld_update_full(cons, geometry, self.gamma, self.limiter_beta)
-        elif self.riemann_solver == "ct_hlld":
-            dU = ct_hlld_update_full(cons, geometry, self.gamma, self.limiter_beta)
         else:
             # Default to HLL
             dU = hll_update_full(cons, geometry, self.gamma, self.limiter_beta)
@@ -99,7 +102,7 @@ class FiniteVolumeMHD(PhysicsModel):
 
         # For velocity: dv/dt = (d(mom)/dt - v * d(rho)/dt) / rho
         rho = jnp.maximum(state.n, 1e-12)
-        v = state.v
+        v = state.v if state.v is not None else jnp.zeros((*rho.shape, 3))
         dv_dt = jnp.stack([
             (dU.mom_x - v[..., 0] * dU.rho) / rho,
             (dU.mom_y - v[..., 1] * dU.rho) / rho,
@@ -123,7 +126,35 @@ class FiniteVolumeMHD(PhysicsModel):
 
         dp_dt = (self.gamma - 1.0) * (dU.E - 0.5 * d_rho_v2_dt - 0.5 * d_B2_dt)
 
-        return state.replace(n=dn_dt, v=dv_dt, p=dp_dt, B=dB_dt)
+        if not self.evolve_density:
+            dn_dt = jnp.zeros_like(state.n)
+        if not self.evolve_velocity:
+            dv_dt = jnp.zeros_like(v)
+        if not self.evolve_pressure:
+            dp_dt = jnp.zeros_like(state.p)
+
+        dpsi_dt = None
+        if self.use_divergence_cleaning:
+            psi = state.psi if state.psi is not None else jnp.zeros_like(state.n)
+            if self.cleaning_speed is None:
+                rho = jnp.maximum(state.n, 1e-12)
+                p = jnp.maximum(state.p, 1e-12)
+                v_mag = jnp.sqrt(jnp.sum(v**2, axis=-1))
+                cf = fast_magnetosonic_speed(
+                    rho, p, B[..., 0], B[..., 1], B[..., 2], self.gamma
+                )
+                ch = 0.95 * jnp.max(cf + v_mag)
+            else:
+                ch = jnp.asarray(self.cleaning_speed)
+            dB_clean, dpsi_dt = glm_cleaning_update(
+                B, geometry, psi, ch, self.limiter_beta
+            )
+            dB_dt = dB_dt + dB_clean
+            dpsi_dt = dpsi_dt - (ch / self.cleaning_cr) * psi
+
+        if dpsi_dt is None:
+            return state.replace(n=dn_dt, v=dv_dt, p=dp_dt, B=dB_dt)
+        return state.replace(n=dn_dt, v=dv_dt, p=dp_dt, B=dB_dt, psi=dpsi_dt)
 
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
         """Compute stable time step based on CFL condition.
@@ -164,7 +195,6 @@ class FiniteVolumeMHD(PhysicsModel):
 
         For finite volume MHD, we apply:
         - Density and pressure floors
-        - Divergence cleaning for B field (if using ct_hlld)
 
         Args:
             state: Current state
@@ -177,11 +207,4 @@ class FiniteVolumeMHD(PhysicsModel):
         n = jnp.maximum(state.n, 1e-12)
         p = jnp.maximum(state.p, 1e-12)
 
-        # Apply divergence cleaning if using ct_hlld
-        # NOTE: Divergence cleaning can cause instability by modifying B
-        # inconsistently with the energy equation. Disabled for now.
-        # if self.riemann_solver == "ct_hlld":
-        #     B_clean = divergence_cleaning_projection(state.B, geometry, n_iter=5)
-        #     return state.replace(n=n, p=p, B=B_clean)
-        # else:
         return state.replace(n=n, p=p)

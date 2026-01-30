@@ -100,7 +100,12 @@ def run_simulation(cfg: dict) -> tuple[State, Geometry]:
         v=jnp.zeros((geom.nx, geom.ny, geom.nz, 3)),
     )
 
-    model = ResistiveMHD(eta=cfg["eta"])
+    model = ResistiveMHD(
+        eta=cfg["eta"],
+        evolve_density=False,
+        evolve_velocity=False,
+        evolve_pressure=False,
+    )
     solver = RK4Solver()
 
     t_end = cfg["t_end"]

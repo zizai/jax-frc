@@ -26,6 +26,10 @@ class EulerSolver(Solver):
         new_v = state.v + dt * rhs.v if state.v is not None and rhs.v is not None else state.v
         new_p = state.p + dt * rhs.p if state.p is not None and rhs.p is not None else state.p
         new_B = state.B + dt * rhs.B
+        psi_base = state.psi if state.psi is not None else (
+            jnp.zeros_like(rhs.psi) if rhs.psi is not None else None
+        )
+        new_psi = psi_base + dt * rhs.psi if rhs.psi is not None else state.psi
 
         # Update E if computed (Hybrid Kinetic) - use lax.cond for JIT compatibility
         new_E = lax.cond(
@@ -44,6 +48,7 @@ class EulerSolver(Solver):
             v=new_v,
             p=new_p,
             B=new_B,
+            psi=new_psi,
             E=new_E,
             Te=new_Te,
             time=state.time + dt,
@@ -69,11 +74,15 @@ class RK4Solver(Solver):
             new_v = base.v + scale * rhs.v if base.v is not None and rhs.v is not None else base.v
             new_p = base.p + scale * rhs.p if base.p is not None and rhs.p is not None else base.p
             new_B = base.B + scale * rhs.B
+            psi_base = base.psi if base.psi is not None else (
+                jnp.zeros_like(rhs.psi) if rhs.psi is not None else None
+            )
+            new_psi = psi_base + scale * rhs.psi if rhs.psi is not None else base.psi
             new_E = base.E + scale * rhs.E if rhs.E is not None else base.E
             new_Te = None
             if base.Te is not None and rhs.Te is not None:
                 new_Te = base.Te + scale * rhs.Te
-            return base.replace(n=new_n, v=new_v, p=new_p, B=new_B, E=new_E, Te=new_Te)
+            return base.replace(n=new_n, v=new_v, p=new_p, B=new_B, psi=new_psi, E=new_E, Te=new_Te)
 
         # k1
         k1 = model.compute_rhs(state, geometry)
@@ -95,6 +104,12 @@ class RK4Solver(Solver):
         new_v = state.v + (dt/6) * (k1.v + 2*k2.v + 2*k3.v + k4.v) if state.v is not None and k1.v is not None else state.v
         new_p = state.p + (dt/6) * (k1.p + 2*k2.p + 2*k3.p + k4.p) if state.p is not None and k1.p is not None else state.p
         new_B = state.B + (dt/6) * (k1.B + 2*k2.B + 2*k3.B + k4.B)
+        psi_base = state.psi if state.psi is not None else (
+            jnp.zeros_like(k1.psi) if k1.psi is not None else None
+        )
+        new_psi = psi_base
+        if k1.psi is not None:
+            new_psi = psi_base + (dt/6) * (k1.psi + 2*k2.psi + 2*k3.psi + k4.psi)
 
         new_E = state.E
         if k1.E is not None:
@@ -109,6 +124,7 @@ class RK4Solver(Solver):
             v=new_v,
             p=new_p,
             B=new_B,
+            psi=new_psi,
             E=new_E,
             Te=new_Te,
             time=state.time + dt,

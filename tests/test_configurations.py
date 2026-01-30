@@ -136,14 +136,23 @@ def test_frozen_flux_builds_initial_state():
 
 
 def test_frozen_flux_builds_model():
-    """FrozenFluxConfiguration creates ResistiveMHD model."""
+    """FrozenFluxConfiguration creates expected model for eta=0."""
     from jax_frc.configurations import FrozenFluxConfiguration
+    from jax_frc.models.finite_volume_mhd import FiniteVolumeMHD
     from jax_frc.models.resistive_mhd import ResistiveMHD
 
     config = FrozenFluxConfiguration()
     model = config.build_model()
 
     assert isinstance(model, ResistiveMHD)
+
+    resistive_config = FrozenFluxConfiguration(eta=1e-3)
+    resistive_model = resistive_config.build_model()
+    assert isinstance(resistive_model, ResistiveMHD)
+
+    fv_config = FrozenFluxConfiguration(use_finite_volume=True)
+    fv_model = fv_config.build_model()
+    assert isinstance(fv_model, FiniteVolumeMHD)
 
 
 # Configuration Registry tests

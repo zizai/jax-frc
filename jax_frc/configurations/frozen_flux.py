@@ -11,6 +11,7 @@ from typing import Literal
 from jax_frc.core.geometry import Geometry
 from jax_frc.core.state import State
 from jax_frc.models.resistive_mhd import ResistiveMHD
+from jax_frc.models.finite_volume_mhd import FiniteVolumeMHD
 from jax_frc.models.extended_mhd import ExtendedMHD
 from jax_frc.models.hybrid_kinetic import HybridKinetic, RigidRotorEquilibrium
 from jax_frc.models.coupled import CoupledModel, CoupledModelConfig
@@ -87,6 +88,14 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     # "central" = Standard central differences
     advection_scheme: str = "ct"
 
+    # Freeze density/velocity/pressure for analytic advection test
+    evolve_density: bool = False
+    evolve_velocity: bool = False
+    evolve_pressure: bool = False
+
+    # Use finite-volume ideal MHD solver when requested (eta == 0)
+    use_finite_volume: bool = False
+
     # ExtendedMHD options
     include_hall: bool = True  # Include Hall term (J x B)/(ne)
     include_electron_pressure: bool = True  # Include grad(p_e)/(ne) term
@@ -155,7 +164,20 @@ class FrozenFluxConfiguration(AbstractConfiguration):
     def build_model(self):
         """Build physics model with minimal resistivity (Rm >> 1)."""
         if self.model_type == "resistive_mhd":
-            return ResistiveMHD(eta=self.eta, advection_scheme=self.advection_scheme)
+            if self.use_finite_volume and self.eta == 0.0:
+                return FiniteVolumeMHD(
+                    riemann_solver="hlld",
+                    evolve_density=self.evolve_density,
+                    evolve_velocity=self.evolve_velocity,
+                    evolve_pressure=self.evolve_pressure,
+                )
+            return ResistiveMHD(
+                eta=self.eta,
+                advection_scheme=self.advection_scheme,
+                evolve_density=self.evolve_density,
+                evolve_velocity=self.evolve_velocity,
+                evolve_pressure=self.evolve_pressure,
+            )
 
         elif self.model_type == "extended_mhd":
             return ExtendedMHD(
@@ -163,10 +185,19 @@ class FrozenFluxConfiguration(AbstractConfiguration):
                 include_hall=self.include_hall,
                 include_electron_pressure=self.include_electron_pressure,
                 apply_divergence_cleaning=self.apply_divergence_cleaning,
+                evolve_density=self.evolve_density,
+                evolve_velocity=self.evolve_velocity,
+                evolve_pressure=self.evolve_pressure,
             )
 
         elif self.model_type == "plasma_neutral":
-            plasma_model = ResistiveMHD(eta=self.eta, advection_scheme=self.advection_scheme)
+            plasma_model = ResistiveMHD(
+                eta=self.eta,
+                advection_scheme=self.advection_scheme,
+                evolve_density=self.evolve_density,
+                evolve_velocity=self.evolve_velocity,
+                evolve_pressure=self.evolve_pressure,
+            )
             neutral_model = NeutralFluid()
             coupling = AtomicCoupling()
             return CoupledModel(

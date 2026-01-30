@@ -65,6 +65,11 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
     # Model selection
     model_type: ModelType = "extended_mhd"
 
+    # Freeze density/velocity/pressure for pure diffusion test
+    evolve_density: bool = False
+    evolve_velocity: bool = False
+    evolve_pressure: bool = False
+
     def build_geometry(self) -> Geometry:
         """3D Cartesian geometry."""
         return Geometry(
@@ -112,17 +117,30 @@ class MagneticDiffusionConfiguration(AbstractConfiguration):
     def build_model(self):
         """Build physics model with resistivity configured for diffusion test."""
         if self.model_type == "resistive_mhd":
-            return ResistiveMHD(eta=self.eta)
+            return ResistiveMHD(
+                eta=self.eta,
+                evolve_density=self.evolve_density,
+                evolve_velocity=self.evolve_velocity,
+                evolve_pressure=self.evolve_pressure,
+            )
 
         elif self.model_type == "extended_mhd":
             return ExtendedMHD(
                 eta=self.eta,
                 include_hall=False,  # Disable Hall term for pure diffusion test
                 include_electron_pressure=False,  # Disable electron pressure
+                evolve_density=self.evolve_density,
+                evolve_velocity=self.evolve_velocity,
+                evolve_pressure=self.evolve_pressure,
             )
 
         elif self.model_type == "plasma_neutral":
-            plasma_model = ResistiveMHD(eta=self.eta)
+            plasma_model = ResistiveMHD(
+                eta=self.eta,
+                evolve_density=self.evolve_density,
+                evolve_velocity=self.evolve_velocity,
+                evolve_pressure=self.evolve_pressure,
+            )
             neutral_model = NeutralFluid()
             coupling = AtomicCoupling()
             return CoupledModel(

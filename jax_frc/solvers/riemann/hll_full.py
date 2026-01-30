@@ -124,22 +124,22 @@ def hll_flux_direction(
     # Compute wave speeds
     if direction == 0:
         vn_L, vn_R = vx_L, vx_R
-        Bn = 0.5 * (Bx_L + Bx_R)
+        Bn_L, Bn_R = Bx_L, Bx_R
         Bt_L = jnp.sqrt(By_L**2 + Bz_L**2)
         Bt_R = jnp.sqrt(By_R**2 + Bz_R**2)
     elif direction == 1:
         vn_L, vn_R = vy_L, vy_R
-        Bn = 0.5 * (By_L + By_R)
+        Bn_L, Bn_R = By_L, By_R
         Bt_L = jnp.sqrt(Bx_L**2 + Bz_L**2)
         Bt_R = jnp.sqrt(Bx_R**2 + Bz_R**2)
     else:
         vn_L, vn_R = vz_L, vz_R
-        Bn = 0.5 * (Bz_L + Bz_R)
+        Bn_L, Bn_R = Bz_L, Bz_R
         Bt_L = jnp.sqrt(Bx_L**2 + By_L**2)
         Bt_R = jnp.sqrt(Bx_R**2 + By_R**2)
 
-    cf_L = fast_magnetosonic_speed(rho_L, p_L, Bn, Bt_L, jnp.zeros_like(Bt_L), gamma)
-    cf_R = fast_magnetosonic_speed(rho_R, p_R, Bn, Bt_R, jnp.zeros_like(Bt_R), gamma)
+    cf_L = fast_magnetosonic_speed(rho_L, p_L, Bn_L, Bt_L, jnp.zeros_like(Bt_L), gamma)
+    cf_R = fast_magnetosonic_speed(rho_R, p_R, Bn_R, Bt_R, jnp.zeros_like(Bt_R), gamma)
 
     # Davis wave speed estimates
     S_L = jnp.minimum(vn_L - cf_L, vn_R - cf_R)

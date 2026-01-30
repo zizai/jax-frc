@@ -27,6 +27,7 @@ class State:
     E: Array           # Electric field [V/m], shape (nx, ny, nz, 3)
     n: Array           # Number density [m^-3], shape (nx, ny, nz)
     p: Array           # Pressure [Pa], shape (nx, ny, nz)
+    psi: Optional[Array] = None  # GLM divergence-cleaning scalar
     v: Optional[Array] = None  # Velocity [m/s], shape (nx, ny, nz, 3)
     Te: Optional[Array] = None # Electron temp [J], shape (nx, ny, nz)
     Ti: Optional[Array] = None # Ion temp [J], shape (nx, ny, nz)
@@ -42,6 +43,7 @@ class State:
             E=jnp.zeros((nx, ny, nz, 3)),
             n=jnp.zeros((nx, ny, nz)),
             p=jnp.zeros((nx, ny, nz)),
+            psi=jnp.zeros((nx, ny, nz)),
             time=0.0,
             step=0,
         )
@@ -59,6 +61,7 @@ def _state_flatten(state):
         state.E,
         state.n,
         state.p,
+        state.psi,
         state.v,
         state.Te,
         state.Ti,
@@ -71,12 +74,13 @@ def _state_flatten(state):
 
 
 def _state_unflatten(aux_data, children):
-    B, E, n, p, v, Te, Ti, particles, time, step = children
+    B, E, n, p, psi, v, Te, Ti, particles, time, step = children
     return State(
         B=B,
         E=E,
         n=n,
         p=p,
+        psi=psi,
         v=v,
         Te=Te,
         Ti=Ti,

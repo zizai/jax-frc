@@ -16,7 +16,6 @@ including the HLLD Riemann solver and coupled evolution of all MHD variables.
 ### Target State
 - Full finite volume method with coupled MHD evolution
 - HLLD Riemann solver (5-wave structure)
-- CT-HLLD integration for div(B)=0 preservation
 - <10% L2 errors compared to AGATE
 
 ## Architecture
@@ -30,7 +29,6 @@ jax_frc/solvers/
 │   ├── reconstruction.py    # PLM/PPM with limiters (DONE)
 │   ├── hll.py              # HLL solver (DONE, needs fixes)
 │   ├── hlld.py             # HLLD solver (NEW)
-│   └── ct_hlld.py          # CT-HLLD EMF averaging (NEW)
 ├── finite_volume/
 │   ├── __init__.py
 │   ├── mhd_system.py       # Full MHD conserved variables
@@ -91,21 +89,7 @@ p_T* = p_L + rho_L*(S_L - v_Ln)*(S_M - v_Ln)
 rho_L* = rho_L * (S_L - v_Ln) / (S_L - S_M)
 ```
 
-## Phase 3: CT-HLLD Integration (2-3 days)
-
-### Problem
-HLLD computes fluxes at cell interfaces, but CT requires EMF at cell edges.
-
-### Solution (Gardiner & Stone 2005)
-Average 1D Riemann fluxes to cell edges using upwind-biased weighting.
-
-### Tasks
-- [ ] Implement EMF averaging from 1D fluxes
-- [ ] Use contact wave direction for upwind bias
-- [ ] Ensure div(B)=0 to machine precision
-- [ ] Test with Orszag-Tang vortex
-
-## Phase 4: Finite Volume Framework (2-3 days)
+## Phase 3: Finite Volume Framework (2-3 days)
 
 ### Tasks
 - [ ] Create `FiniteVolumeMHD` model class
@@ -138,7 +122,7 @@ class FiniteVolumeMHD(PhysicsModel):
     eta: float = 0.0
 ```
 
-## Phase 5: Testing and Validation (2-3 days)
+## Phase 4: Testing and Validation (2-3 days)
 
 ### Unit Tests
 - [ ] Wave speed calculations
@@ -158,7 +142,7 @@ class FiniteVolumeMHD(PhysicsModel):
 - [ ] Target: L2 error < 10%
 - [ ] Verify div(B) < 1e-10
 
-## Phase 6: Performance Optimization (1-2 days)
+## Phase 5: Performance Optimization (1-2 days)
 
 ### Tasks
 - [ ] Profile hot paths
@@ -197,10 +181,9 @@ class FiniteVolumeMHD(PhysicsModel):
 |-------|----------|--------------|
 | 1. Fix HLL | 1-2 days | None |
 | 2. HLLD | 3-4 days | Phase 1 |
-| 3. CT-HLLD | 2-3 days | Phase 2 |
-| 4. FV Framework | 2-3 days | Phase 3 |
-| 5. Testing | 2-3 days | Phase 4 |
-| 6. Optimization | 1-2 days | Phase 5 |
+| 3. FV Framework | 2-3 days | Phase 2 |
+| 4. Testing | 2-3 days | Phase 3 |
+| 5. Optimization | 1-2 days | Phase 4 |
 
 **Total: ~12-17 days**
 

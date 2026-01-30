@@ -36,6 +36,7 @@ class Solver(ABC):
             ("E", state.E),
             ("n", state.n),
             ("p", state.p),
+            ("psi", state.psi),
             ("v", state.v),
         ]
         for name, field in fields_to_check:
