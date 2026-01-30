@@ -41,7 +41,7 @@ def test_gaussian_diffusion_converges():
     state = state.replace(B=B_init)
 
     # Model with uniform resistivity (no advection)
-    model = ResistiveMHD(eta=eta_0)
+    model = ResistiveMHD(eta=eta_0, advection_scheme="ct")
 
     # IMEX solver
     config = ImexConfig(theta=1.0, cg_tol=1e-8, cg_max_iter=500)
@@ -88,7 +88,7 @@ def test_imex_large_timestep_stable():
     )
     state = state.replace(B=B_init)
 
-    model = ResistiveMHD(eta=eta_0)
+    model = ResistiveMHD(eta=eta_0, advection_scheme="ct")
     solver = ImexSolver(config=ImexConfig(theta=1.0))
 
     # Run several steps

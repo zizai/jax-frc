@@ -29,7 +29,14 @@ CASE_CONFIGS = {
 }
 
 
-def get_expected_config(case: str, resolution: list[int]) -> dict:
+def _normalize_resolution(resolution: int | list[int] | tuple[int, ...]) -> list[int]:
+    """Normalize resolution to [nx, ny, nz]."""
+    if isinstance(resolution, int):
+        return [resolution, resolution, 1]
+    return list(resolution)
+
+
+def get_expected_config(case: str, resolution: list[int] | tuple[int, ...] | int) -> dict:
     """Get expected configuration for a case.
 
     Args:
@@ -45,6 +52,7 @@ def get_expected_config(case: str, resolution: list[int]) -> dict:
     if case not in CASE_CONFIGS:
         raise ValueError(f"Unknown case: {case}. Valid cases: {list(CASE_CONFIGS.keys())}")
 
+    resolution = _normalize_resolution(resolution)
     base_config = CASE_CONFIGS[case].copy()
     end_time = base_config["end_time"]
     num_snapshots = base_config["num_snapshots"]
@@ -63,7 +71,7 @@ def get_expected_config(case: str, resolution: list[int]) -> dict:
     }
 
 
-def is_cache_valid(case: str, resolution: list[int], output_dir: Path) -> bool:
+def is_cache_valid(case: str, resolution: list[int] | tuple[int, ...] | int, output_dir: Path) -> bool:
     """Check if cached data matches current configuration.
 
     Args:
@@ -74,6 +82,7 @@ def is_cache_valid(case: str, resolution: list[int], output_dir: Path) -> bool:
     Returns:
         True if cache is valid, False otherwise
     """
+    resolution = _normalize_resolution(resolution)
     res_str = f"{resolution[0]}"
     config_file = output_dir / f"{case}_{res_str}.config.yaml"
     if not config_file.exists():
@@ -104,8 +113,9 @@ def _get_agate_version() -> str:
         return "not_installed"
 
 
-def _save_config(case: str, resolution: list[int], output_dir: Path) -> None:
+def _save_config(case: str, resolution: list[int] | tuple[int, ...] | int, output_dir: Path) -> None:
     """Save configuration to YAML file."""
+    resolution = _normalize_resolution(resolution)
     config = get_expected_config(case, resolution)
     config["agate_version"] = _get_agate_version()
     config["generated_at"] = datetime.now(timezone.utc).isoformat()
@@ -122,6 +132,7 @@ def _run_orszag_tang(resolution: list[int], output_dir: Path) -> None:
     from agate.framework.roller import Roller
     from agate.framework.fileHandler import fileHandler
 
+    resolution = _normalize_resolution(resolution)
     config = get_expected_config("orszag_tang", resolution)
     snapshot_times = config["snapshot_times"]
 
@@ -132,23 +143,29 @@ def _run_orszag_tang(resolution: list[int], output_dir: Path) -> None:
         options={"cfl": 0.4, "slopeName": "mcbeta", "mcbeta": 1.3}
     )
     roller.orient("numpy")
+    roller.time = 0.0
 
     output_dir.mkdir(parents=True, exist_ok=True)
     res_str = f"{resolution[0]}"
     handler = fileHandler(directory=str(output_dir), prefix=f"orszag_tang_{res_str}")
     handler.outputGrid(roller.grid)
 
+    def _safe_time(value: object) -> float:
+        return float(value) if value is not None else 0.0
+
     print(f"Running Orszag-Tang at resolution {resolution}...")
     for i, target_time in enumerate(snapshot_times):
+        time_value = _safe_time(roller.time)
         if i == 0:
             # Output initial state
-            handler.outputState(roller.grid, roller.state, roller.time, suffix=f"state_{i:03d}")
+            handler.outputState(roller.grid, roller.state, time_value, newCount=i)
             continue
         try:
             roller.roll(start_time=roller.time, end_time=target_time, add_stopWatch=False)
         except Exception as e:
             raise RuntimeError(f"Orszag-Tang simulation failed at t={target_time}: {e}") from e
-        handler.outputState(roller.grid, roller.state, roller.time, suffix=f"state_{i:03d}")
+        time_value = _safe_time(roller.time)
+        handler.outputState(roller.grid, roller.state, time_value, newCount=i)
 
 
 def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
@@ -157,6 +174,7 @@ def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
     from agate.framework.roller import Roller
     from agate.framework.fileHandler import fileHandler
 
+    resolution = _normalize_resolution(resolution)
     config = get_expected_config("gem_reconnection", resolution)
     snapshot_times = config["snapshot_times"]
 
@@ -167,27 +185,33 @@ def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
         options={"cfl": 0.4}
     )
     roller.orient("numpy")
+    roller.time = 0.0
 
     output_dir.mkdir(parents=True, exist_ok=True)
     res_str = f"{resolution[0]}"
     handler = fileHandler(directory=str(output_dir), prefix=f"gem_reconnection_{res_str}")
     handler.outputGrid(roller.grid)
 
+    def _safe_time(value: object) -> float:
+        return float(value) if value is not None else 0.0
+
     print(f"Running GEM reconnection at resolution {resolution}...")
     for i, target_time in enumerate(snapshot_times):
+        time_value = _safe_time(roller.time)
         if i == 0:
-            handler.outputState(roller.grid, roller.state, roller.time, suffix=f"state_{i:03d}")
+            handler.outputState(roller.grid, roller.state, time_value, newCount=i)
             continue
         try:
             roller.roll(start_time=roller.time, end_time=target_time, add_stopWatch=False)
         except Exception as e:
             raise RuntimeError(f"GEM simulation failed at t={target_time}: {e}") from e
-        handler.outputState(roller.grid, roller.state, roller.time, suffix=f"state_{i:03d}")
+        time_value = _safe_time(roller.time)
+        handler.outputState(roller.grid, roller.state, time_value, newCount=i)
 
 
 def run_agate_simulation(
     case: Literal["orszag_tang", "gem_reconnection"],
-    resolution: list[int],
+    resolution: list[int] | tuple[int, ...] | int,
     output_dir: Path,
     overwrite: bool = False
 ) -> Path:
@@ -216,6 +240,7 @@ def run_agate_simulation(
     if case not in CASE_CONFIGS:
         raise ValueError(f"Unknown case: {case}")
 
+    resolution = _normalize_resolution(resolution)
     res_str = f"{resolution[0]}"
 
     # Check cache

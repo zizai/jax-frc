@@ -4,20 +4,36 @@
 
 GPU-accelerated JAX-based multi-physics simulation. Design, build, control production-level FRC fusion reactor.
 
+Reference implementations:
+- [AGATE](https://git.smce.nasa.gov/marble/agate-open-source) 
+- [Athena](https://github.com/PrincetonUniversity/athena)
+- [gPLUTO](https://gitlab.com/PLUTO-code/gPLUTO)
+
 ## Key Features
 
-- **Five Physics Models**: Resistive MHD, Extended MHD, Hybrid Kinetic, Neutral Fluid, Burning Plasma
+- **Plasma Physics**: Resistive MHD, Extended MHD, Hybrid Kinetic, Coupled Fluid, Burning Plasma
 - **Fusion Burn Physics**: D-T/D-D/D-He3 reactions with Bosch-Hale rates
 - **Anomalous Transport**: Configurable particle and energy diffusion
-- **Multi-Phase Scenarios**: Automatic phase transitions for complex simulations
-- **FRC Merging**: Two-FRC collision with Belova et al. validation
-- **Direct Energy Conversion**: Induction-based power recovery modeling
-- **Property-Based Testing**: Physics invariant validation
+- **FRC Fusion Cycle**: Two-FRC collision Induction-based power recovery modeling
+
+## Installation
+
+```bash
+# (Optional) create and activate a virtual environment
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# Install the package and dependencies
+pip install -e .
+
+# Optional: install AGATE for regression/validation data generation
+pip install -e ../agate-open-source
+```
 
 ## Quick Start
 
 ```bash
-pip install jax jaxlib numpy matplotlib
+python scripts/run.py examples/merging.yaml
 ```
 
 ```python
@@ -50,7 +66,7 @@ Full documentation is available in the [docs/](docs/index.md) directory:
 
 ```bash
 # Run examples
-python run_example.py examples/merging.yaml
+python scripts/run.py examples/merging.yaml
 
 # Run tests
 py -m pytest tests/ -v

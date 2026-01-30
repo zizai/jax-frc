@@ -37,6 +37,11 @@ class SemiImplicitSolver(Solver):
         # Get explicit RHS
         rhs = model.compute_rhs(state, geometry)
 
+        # Update MHD fields (n, v, p)
+        new_n = state.n + dt * rhs.n if state.n is not None and rhs.n is not None else state.n
+        new_v = state.v + dt * rhs.v if state.v is not None and rhs.v is not None else state.v
+        new_p = state.p + dt * rhs.p if state.p is not None and rhs.p is not None else state.p
+
         # For B-based models (Extended MHD), apply semi-implicit correction
         if jnp.any(rhs.B != 0):
             new_B = self._semi_implicit_B_update(state, rhs, dt, geometry)
@@ -54,6 +59,9 @@ class SemiImplicitSolver(Solver):
         new_E = rhs.E if jnp.any(rhs.E != 0) else state.E
 
         new_state = state.replace(
+            n=new_n,
+            v=new_v,
+            p=new_p,
             B=new_B,
             E=new_E,
             Te=new_T,

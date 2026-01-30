@@ -101,7 +101,7 @@ class ExtendedMHD(PhysicsModel):
         E = -v×B + eta*J + (J×B)/(ne) - grad(p_e)/(ne)
 
     Attributes:
-        eta: Resistivity [Ohm*m]
+        eta: Resistivity [Ohm*m] (or dimensionless if normalized_units=True)
         include_hall: Include Hall term (J x B)/(ne)
         include_electron_pressure: Include grad(p_e)/(ne) term
         kappa_parallel: Parallel thermal conductivity
@@ -109,6 +109,10 @@ class ExtendedMHD(PhysicsModel):
         evolve_density: Whether to evolve density (default True)
         evolve_velocity: Whether to evolve velocity (default True)
         evolve_pressure: Whether to evolve pressure (default True)
+        normalized_units: If True, use normalized/dimensionless units where n is
+            mass density directly (rho=n). If False (default), use SI units where
+            n is particle number density (rho=m_i*n). Set True for standard MHD
+            test problems like Orszag-Tang.
     """
     eta: float = 1e-4
     include_hall: bool = True
@@ -121,6 +125,7 @@ class ExtendedMHD(PhysicsModel):
     evolve_density: bool = True
     evolve_velocity: bool = True
     evolve_pressure: bool = True
+    normalized_units: bool = False
 
     @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
@@ -131,8 +136,12 @@ class ExtendedMHD(PhysicsModel):
         v = state.v if state.v is not None else jnp.zeros((*n.shape, 3))
 
         # Avoid division by zero
-        n_safe = jnp.maximum(n, 1e16)
-        rho = MI * n
+        n_safe = jnp.maximum(n, 1e16 if not self.normalized_units else 1e-10)
+        # Mass density: rho = n for normalized units, rho = m_i * n for SI units
+        if self.normalized_units:
+            rho = n
+        else:
+            rho = MI * n
         rho_safe = jnp.maximum(rho, 1e-20)
 
         # =====================================================================
@@ -147,8 +156,11 @@ class ExtendedMHD(PhysicsModel):
         # =====================================================================
         # Momentum equation: dv/dt = -grad(p)/rho + J×B/rho - (v·grad)v
         # =====================================================================
-        # Current density: J = curl(B) / mu_0
-        J = curl_3d(B, geometry) / MU0
+        # Current density: J = curl(B) / mu_0 (SI) or J = curl(B) (normalized)
+        if self.normalized_units:
+            J = curl_3d(B, geometry)  # Normalized: mu0 = 1
+        else:
+            J = curl_3d(B, geometry) / MU0  # SI units
 
         if self.evolve_velocity:
             # Pressure gradient force: -grad(p)/rho
@@ -201,34 +213,40 @@ class ExtendedMHD(PhysicsModel):
 
             # Advection via CT for ideal-MHD limit
             dB_dt_advection = induction_rhs_ct(v, B, geometry)
-            dB_dt_resistive = (
-                self.eta / MU0 * jnp.stack([
+            if self.eta > 0:
+                diffusion_coeff = self.eta if self.normalized_units else self.eta / MU0
+                dB_dt_resistive = diffusion_coeff * jnp.stack([
                     laplacian_3d(B[..., 0], geometry),
                     laplacian_3d(B[..., 1], geometry),
                     laplacian_3d(B[..., 2], geometry),
                 ], axis=-1)
-                if self.eta > 0
-                else jnp.zeros_like(B)
-            )
+            else:
+                dB_dt_resistive = jnp.zeros_like(B)
             dB_dt = dB_dt_advection + dB_dt_resistive
         else:
             # Start with resistive term: E = eta*J
             E = self.eta * J
 
-            # Hall term: (J x B) / (ne)
+            # Hall term: (J x B) / (ne) for SI, (J x B) / n for normalized
             if self.include_hall:
                 J_cross_B = jnp.stack([
                     J[..., 1] * B[..., 2] - J[..., 2] * B[..., 1],
                     J[..., 2] * B[..., 0] - J[..., 0] * B[..., 2],
                     J[..., 0] * B[..., 1] - J[..., 1] * B[..., 0],
                 ], axis=-1)
-                E = E + J_cross_B / (n_safe[..., None] * QE)
+                if self.normalized_units:
+                    E = E + J_cross_B / n_safe[..., None]  # Normalized: e = 1
+                else:
+                    E = E + J_cross_B / (n_safe[..., None] * QE)  # SI units
 
-            # Electron pressure term: -grad(p_e) / (ne)
+            # Electron pressure term: -grad(p_e) / (ne) for SI, -grad(p_e) / n for normalized
             if self.include_electron_pressure and state.Te is not None:
                 p_e = n_safe * state.Te  # Electron pressure
                 grad_pe = gradient_3d(p_e, geometry)
-                E = E - grad_pe / (n_safe[..., None] * QE)
+                if self.normalized_units:
+                    E = E - grad_pe / n_safe[..., None]  # Normalized: e = 1
+                else:
+                    E = E - grad_pe / (n_safe[..., None] * QE)  # SI units
 
             # Convective term: -v x B
             v_cross_B = jnp.stack([
@@ -264,13 +282,25 @@ class ExtendedMHD(PhysicsModel):
         dx_min = min(geometry.dx, geometry.dy, geometry.dz)
 
         # Resistive diffusion
-        dt_resistive = 0.25 * dx_min**2 * MU0 / self.eta if self.eta > 0 else float('inf')
+        if self.eta > 0:
+            if self.normalized_units:
+                dt_resistive = 0.25 * dx_min**2 / self.eta  # Normalized: mu0 = 1
+            else:
+                dt_resistive = 0.25 * dx_min**2 * MU0 / self.eta  # SI units
+        else:
+            dt_resistive = float('inf')
 
         # Alfven wave CFL
         B_mag = jnp.sqrt(jnp.sum(state.B**2, axis=-1))
-        rho = MI * state.n
+        if self.normalized_units:
+            rho = state.n
+        else:
+            rho = MI * state.n
         rho_safe = jnp.maximum(rho, 1e-20)
-        v_alfven = jnp.max(B_mag / jnp.sqrt(MU0 * rho_safe))
+        if self.normalized_units:
+            v_alfven = jnp.max(B_mag / jnp.sqrt(rho_safe))  # Normalized: mu0 = 1
+        else:
+            v_alfven = jnp.max(B_mag / jnp.sqrt(MU0 * rho_safe))  # SI units
         dt_alfven = dx_min / max(float(v_alfven), 1e-10)
 
         # Sound wave CFL
@@ -284,11 +314,14 @@ class ExtendedMHD(PhysicsModel):
         else:
             dt_flow = float('inf')
 
-        # Hall wave (whistler): omega ~ k^2 * B / (mu0 * n * e)
+        # Hall wave (whistler): omega ~ k^2 * B / (mu0 * n * e) for SI, k^2 * B / n for normalized
         if self.include_hall:
             B_max = jnp.max(B_mag)
-            n_min = jnp.maximum(jnp.min(state.n), 1e16)
-            whistler_speed = B_max / (MU0 * n_min * QE) * (2 * jnp.pi / dx_min)
+            n_min = jnp.maximum(jnp.min(state.n), 1e-10 if self.normalized_units else 1e16)
+            if self.normalized_units:
+                whistler_speed = B_max / n_min * (2 * jnp.pi / dx_min)  # Normalized
+            else:
+                whistler_speed = B_max / (MU0 * n_min * QE) * (2 * jnp.pi / dx_min)  # SI
             dt_hall = 0.1 * dx_min / jnp.maximum(whistler_speed, 1e-10)
         else:
             dt_hall = float('inf')

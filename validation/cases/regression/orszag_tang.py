@@ -300,8 +300,9 @@ def run_simulation(cfg: dict) -> tuple:
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
     # Use ResistiveMHD with CT advection (ideal MHD limit with eta=0)
+    # Use normalized_units=True for dimensionless Orszag-Tang test problem
     from jax_frc.models.resistive_mhd import ResistiveMHD
-    model = ResistiveMHD(eta=0.0, advection_scheme="ct")
+    model = ResistiveMHD(eta=0.0, advection_scheme="ct", normalized_units=True)
     # Use RK4 for explicit time integration
     solver = Solver.create({"type": "rk4"})
 
@@ -362,7 +363,7 @@ def run_simulation_with_snapshots(
     )
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
-    model = ResistiveMHD(eta=0.0, advection_scheme="ct")
+    model = ResistiveMHD(eta=0.0, advection_scheme="ct", normalized_units=True)
     solver = Solver.create({"type": "rk4"})
 
     dt = cfg["dt"]

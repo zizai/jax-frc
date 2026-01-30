@@ -33,7 +33,7 @@ class TestResistiveDiffusionAnalytic:
 
         # Use moderately higher resistivity for faster decay
         eta = 2e-4
-        model = ResistiveMHD(eta=eta)
+        model = ResistiveMHD(eta=eta, advection_scheme="ct")
 
         # Backward Euler is unconditionally stable, tight CG tolerance
         config = ImexConfig(theta=1.0, cg_tol=1e-10, cg_max_iter=1000)
@@ -115,7 +115,7 @@ class TestResistiveDiffusionAnalytic:
         geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
         eta = 1e-4
-        model = ResistiveMHD(eta=eta)
+        model = ResistiveMHD(eta=eta, advection_scheme="ct")
         config = ImexConfig(theta=1.0, cg_tol=1e-10)
         solver = ImexSolver(config=config)
 
@@ -168,7 +168,7 @@ class TestResistiveDiffusionAnalytic:
         geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
         eta = 1e-4
-        model = ResistiveMHD(eta=eta)
+        model = ResistiveMHD(eta=eta, advection_scheme="ct")
         config = ImexConfig(theta=1.0, cg_tol=1e-10)
         solver = ImexSolver(config=config)
 
@@ -223,7 +223,7 @@ class TestResistiveDiffusionAnalytic:
 
         def measure_decay(eta_val, dt, n_steps):
             """Run simulation and return peak amplitude at end."""
-            model = ResistiveMHD(eta=eta_val)
+            model = ResistiveMHD(eta=eta_val, advection_scheme="ct")
             solver = ImexSolver(config=config)
 
             B = jnp.zeros((nx, ny, nz, 3))

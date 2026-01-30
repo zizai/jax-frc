@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# scripts/run_example.py
+# scripts/run.py
 """CLI entry point for running examples."""
 import argparse
 import logging
@@ -200,6 +200,11 @@ Examples:
         return 0
 
     if not args.examples and not args.all:
+        print(
+            "Usage: provide example names, example .yaml paths, or use --all/--list.\n"
+            "Example names resolve from examples/*.yaml (e.g., `merging`),\n"
+            "or pass a direct path like `examples/merging.yaml`."
+        )
         parser.print_help()
         return 2
 

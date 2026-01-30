@@ -84,6 +84,10 @@ class ImexSolver(Solver):
         else:
             rhs = model.compute_rhs(state, geometry)
 
+        # Update MHD fields (n, v, p, B)
+        new_n = state.n + dt * rhs.n if state.n is not None and rhs.n is not None else state.n
+        new_v = state.v + dt * rhs.v if state.v is not None and rhs.v is not None else state.v
+        new_p = state.p + dt * rhs.p if state.p is not None and rhs.p is not None else state.p
         new_B = state.B + dt * rhs.B
 
         new_E = jnp.where(
@@ -96,7 +100,7 @@ class ImexSolver(Solver):
         if state.Te is not None and rhs.Te is not None:
             new_Te = state.Te + dt * rhs.Te
 
-        new_state = state.replace(B=new_B, E=new_E, Te=new_Te)
+        new_state = state.replace(n=new_n, v=new_v, p=new_p, B=new_B, E=new_E, Te=new_Te)
         return model.apply_constraints(new_state, geometry)
 
     def _implicit_diffusion(self, state: State, dt: float,

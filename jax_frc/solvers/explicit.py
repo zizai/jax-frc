@@ -21,7 +21,10 @@ class EulerSolver(Solver):
     def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         rhs = model.compute_rhs(state, geometry)
 
-        # Update B from dB/dt
+        # Update MHD fields (n, v, p, B) if they exist
+        new_n = state.n + dt * rhs.n if state.n is not None and rhs.n is not None else state.n
+        new_v = state.v + dt * rhs.v if state.v is not None and rhs.v is not None else state.v
+        new_p = state.p + dt * rhs.p if state.p is not None and rhs.p is not None else state.p
         new_B = state.B + dt * rhs.B
 
         # Update E if computed (Hybrid Kinetic) - use lax.cond for JIT compatibility
@@ -37,6 +40,9 @@ class EulerSolver(Solver):
             new_Te = state.Te + dt * rhs.Te
 
         new_state = state.replace(
+            n=new_n,
+            v=new_v,
+            p=new_p,
             B=new_B,
             E=new_E,
             Te=new_Te,
@@ -59,12 +65,15 @@ class RK4Solver(Solver):
 
         def add_scaled_rhs(base: State, rhs: State, scale: float) -> State:
             """Add scaled RHS to base state for all fields."""
+            new_n = base.n + scale * rhs.n if base.n is not None and rhs.n is not None else base.n
+            new_v = base.v + scale * rhs.v if base.v is not None and rhs.v is not None else base.v
+            new_p = base.p + scale * rhs.p if base.p is not None and rhs.p is not None else base.p
             new_B = base.B + scale * rhs.B
             new_E = base.E + scale * rhs.E if rhs.E is not None else base.E
             new_Te = None
             if base.Te is not None and rhs.Te is not None:
                 new_Te = base.Te + scale * rhs.Te
-            return base.replace(B=new_B, E=new_E, Te=new_Te)
+            return base.replace(n=new_n, v=new_v, p=new_p, B=new_B, E=new_E, Te=new_Te)
 
         # k1
         k1 = model.compute_rhs(state, geometry)
@@ -82,6 +91,9 @@ class RK4Solver(Solver):
         k4 = model.compute_rhs(state_k4, geometry)
 
         # Combine: y_new = y + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+        new_n = state.n + (dt/6) * (k1.n + 2*k2.n + 2*k3.n + k4.n) if state.n is not None and k1.n is not None else state.n
+        new_v = state.v + (dt/6) * (k1.v + 2*k2.v + 2*k3.v + k4.v) if state.v is not None and k1.v is not None else state.v
+        new_p = state.p + (dt/6) * (k1.p + 2*k2.p + 2*k3.p + k4.p) if state.p is not None and k1.p is not None else state.p
         new_B = state.B + (dt/6) * (k1.B + 2*k2.B + 2*k3.B + k4.B)
 
         new_E = state.E
@@ -93,6 +105,9 @@ class RK4Solver(Solver):
             new_Te = state.Te + (dt/6) * (k1.Te + 2*k2.Te + 2*k3.Te + k4.Te)
 
         new_state = state.replace(
+            n=new_n,
+            v=new_v,
+            p=new_p,
             B=new_B,
             E=new_E,
             Te=new_Te,
