@@ -46,6 +46,35 @@ class TestSimulationIntegration:
         assert sim.state is not None
         assert sim.state.B.shape == (32, 4, 64, 3)
 
+    def test_simulation_from_config_with_recipe(self):
+        """Test Simulation supports numerics recipe configuration."""
+        config = {
+            'geometry': {
+                'nx': 8,
+                'ny': 2,
+                'nz': 8,
+                'x_min': -1.0,
+                'x_max': 1.0,
+                'y_min': -1.0,
+                'y_max': 1.0,
+                'z_min': -1.0,
+                'z_max': 1.0,
+                'bc_x': 'neumann',
+                'bc_y': 'periodic',
+                'bc_z': 'neumann'
+            },
+            'model': {'type': 'resistive_mhd', 'eta': 1e-4},
+            'solver': {'type': 'rk4'},
+            'time': {'cfl_safety': 0.25, 'dt_max': 1e-4},
+            'numerics': {'divergence_strategy': 'none'}
+        }
+
+        sim = Simulation.from_config(config)
+        sim.initialize()
+        state = sim.step()
+
+        assert state.step == 1
+
     def test_simulation_run_steps(self):
         """Test running simulation for fixed number of steps."""
         config = {
