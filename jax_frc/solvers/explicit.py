@@ -18,7 +18,7 @@ class EulerSolver(Solver):
     """
 
     @partial(jax.jit, static_argnums=(0, 3, 4))  # self, model, geometry static
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         rhs = model.compute_rhs(state, geometry)
 
         # Update MHD fields (n, v, p, B) if they exist
@@ -54,7 +54,7 @@ class EulerSolver(Solver):
             time=state.time + dt,
             step=state.step + 1,
         )
-        return model.apply_constraints(new_state, geometry)
+        return new_state
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ class RK4Solver(Solver):
     """
 
     @partial(jax.jit, static_argnums=(0, 3, 4))  # self, model, geometry static
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """RK4 time step updating all state fields."""
 
         def add_scaled_rhs(base: State, rhs: State, scale: float) -> State:
@@ -130,7 +130,7 @@ class RK4Solver(Solver):
             time=state.time + dt,
             step=state.step + 1,
         )
-        return model.apply_constraints(new_state, geometry)
+        return new_state
 
 
 @dataclass(frozen=True)
@@ -148,7 +148,7 @@ class SemiLagrangianSolver(Solver):
     """
 
     @partial(jax.jit, static_argnums=(0, 3, 4))
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Semi-Lagrangian time step.
 
         1. Advect B using backward characteristic tracing
@@ -181,4 +181,4 @@ class SemiLagrangianSolver(Solver):
             time=state.time + dt,
             step=state.step + 1,
         )
-        return model.apply_constraints(new_state, geometry)
+        return new_state
