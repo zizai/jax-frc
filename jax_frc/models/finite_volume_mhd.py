@@ -27,6 +27,7 @@ from jax_frc.solvers.riemann.mhd_state import (
     conserved_to_state,
 )
 from jax_frc.solvers.riemann.hll_full import hll_update_full
+from jax_frc.solvers.riemann.hlld import hlld_update_full
 from jax_frc.solvers.riemann.wave_speeds import fast_magnetosonic_speed
 
 
@@ -74,11 +75,13 @@ class FiniteVolumeMHD(PhysicsModel):
         # Convert to conserved variables
         cons = state_to_conserved(state, self.gamma)
 
-        # Compute update using HLL solver
+        # Compute update using Riemann solver
         if self.riemann_solver == "hll":
             dU = hll_update_full(cons, geometry, self.gamma, self.limiter_beta)
+        elif self.riemann_solver == "hlld":
+            dU = hlld_update_full(cons, geometry, self.gamma, self.limiter_beta)
         else:
-            # TODO: Implement HLLD
+            # Default to HLL
             dU = hll_update_full(cons, geometry, self.gamma, self.limiter_beta)
 
         # Convert dU back to State format
