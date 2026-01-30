@@ -67,10 +67,14 @@ def load_agate_config(case: str, resolution: list[int]) -> dict:
     Returns:
         Configuration dictionary with snapshot_times
     """
+    # Map short names to full names
+    case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
+    full_case = case_map.get(case.lower(), case.lower())
+
     loader = AgateDataLoader()
     loader.ensure_files(case, resolution[0])
-    case_dir = Path(loader.cache_dir) / case / str(resolution[0])
-    config_path = case_dir / f"{case}_{resolution[0]}.config.yaml"
+    case_dir = Path(loader.cache_dir) / full_case / str(resolution[0])
+    config_path = case_dir / f"{full_case}_{resolution[0]}.config.yaml"
 
     # If config doesn't exist (old data format), return default
     if not config_path.exists():
@@ -92,12 +96,16 @@ def load_agate_snapshot(case: str, resolution: list[int], snapshot_idx: int) -> 
     Returns:
         Dict with keys: density, momentum, magnetic_field, pressure
     """
+    # Map short names to full names
+    case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
+    full_case = case_map.get(case.lower(), case.lower())
+
     loader = AgateDataLoader()
     loader.ensure_files(case, resolution[0])
-    case_dir = Path(loader.cache_dir) / case / str(resolution[0])
+    case_dir = Path(loader.cache_dir) / full_case / str(resolution[0])
 
-    # Try new naming convention first (state_000, state_001, etc.)
-    state_path = case_dir / f"{case}_{resolution[0]}.state_{snapshot_idx:03d}.h5"
+    # Try new naming convention first (state_000000, state_000001, etc. - 6 digits from AGATE)
+    state_path = case_dir / f"{full_case}_{resolution[0]}.state_{snapshot_idx:06d}.h5"
 
     if not state_path.exists():
         # Fall back to old naming convention (state_0, state_1, etc.)
@@ -389,9 +397,13 @@ def _parse_state_vector(vec: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nda
 
 
 def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
+    # Map short names to full names
+    case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
+    full_case = case_map.get(case.lower(), case.lower())
+
     loader = AgateDataLoader()
     loader.ensure_files(case, resolution)
-    case_dir = Path(loader.cache_dir) / case / str(resolution)
+    case_dir = Path(loader.cache_dir) / full_case / str(resolution)
     grid_files = list(case_dir.rglob("*.grid.h5"))
     if not grid_files:
         raise FileNotFoundError(f"No AGATE grid file found in {case_dir}")
@@ -451,9 +463,13 @@ def load_agate_fields(case: str, resolution: int, use_initial: bool = False) -> 
         Dict with keys: density, momentum, magnetic_field, pressure
         Each value is a numpy array of the spatial field.
     """
+    # Map short names to full names
+    case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
+    full_case = case_map.get(case.lower(), case.lower())
+
     loader = AgateDataLoader()
     loader.ensure_files(case, resolution)
-    case_dir = Path(loader.cache_dir) / case / str(resolution)
+    case_dir = Path(loader.cache_dir) / full_case / str(resolution)
 
     def _state_key(path: Path) -> int:
         match = re.search(r"state_(\d+)", path.name)
@@ -793,7 +809,14 @@ def main(quick_test: bool = False) -> bool:
         cfg = setup_configuration(quick_test, resolution)
         print(f"  Running simulation to t={cfg['t_end']}...", end="", flush=True)
         t_start = time.time()
-        jax_states, geometry, history = run_simulation_with_snapshots(cfg, snapshot_times)
+        try:
+            jax_states, geometry, history = run_simulation_with_snapshots(cfg, snapshot_times)
+        except Exception as exc:
+            t_sim = time.time() - t_start
+            print(f" [{t_sim:.2f}s]")
+            print(f"  ERROR: Simulation failed: {exc}")
+            overall_pass = False
+            continue
         t_sim = time.time() - t_start
         print(f" [{t_sim:.2f}s]")
 
@@ -809,6 +832,8 @@ def main(quick_test: bool = False) -> bool:
             continue
 
         # Compute aggregate metrics
+        agate_times = None
+        agate_scalar_metrics = None
         try:
             agate_times, agate_scalar_metrics = load_agate_series("gem", resolution[0])
             aggregate_metrics = compute_aggregate_metrics(
