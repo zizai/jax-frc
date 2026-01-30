@@ -28,10 +28,11 @@ from jax_frc.solvers.riemann.mhd_state import (
 )
 from jax_frc.solvers.riemann.hll_full import hll_update_full
 from jax_frc.solvers.riemann.hlld import hlld_update_full
+from jax_frc.solvers.riemann.ct_hlld import ct_hlld_update_full, compute_div_B, divergence_cleaning_projection
 from jax_frc.solvers.riemann.wave_speeds import fast_magnetosonic_speed
 
 
-RiemannSolver = Literal["hll", "hlld"]
+RiemannSolver = Literal["hll", "hlld", "ct_hlld"]
 Reconstruction = Literal["plm", "ppm"]
 
 
@@ -50,7 +51,10 @@ class FiniteVolumeMHD(PhysicsModel):
 
     Args:
         gamma: Adiabatic index (default 5/3)
-        riemann_solver: "hll" (default) or "hlld"
+        riemann_solver: "hll", "hlld" (default), or "ct_hlld"
+            - "hll": HLL 2-wave solver (robust, diffusive)
+            - "hlld": HLLD 5-wave solver (accurate)
+            - "ct_hlld": HLLD with CT for div(B)=0 preservation
         reconstruction: "plm" (default) or "ppm"
         limiter_beta: MC limiter parameter (default 1.3, AGATE default)
         cfl: CFL number for time step (default 0.4)
@@ -80,6 +84,8 @@ class FiniteVolumeMHD(PhysicsModel):
             dU = hll_update_full(cons, geometry, self.gamma, self.limiter_beta)
         elif self.riemann_solver == "hlld":
             dU = hlld_update_full(cons, geometry, self.gamma, self.limiter_beta)
+        elif self.riemann_solver == "ct_hlld":
+            dU = ct_hlld_update_full(cons, geometry, self.gamma, self.limiter_beta)
         else:
             # Default to HLL
             dU = hll_update_full(cons, geometry, self.gamma, self.limiter_beta)
@@ -156,8 +162,9 @@ class FiniteVolumeMHD(PhysicsModel):
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
         """Apply physical constraints.
 
-        For finite volume MHD, we don't need explicit div(B) cleaning
-        since the CT-compatible flux formulation preserves div(B)=0.
+        For finite volume MHD, we apply:
+        - Density and pressure floors
+        - Divergence cleaning for B field (if using ct_hlld)
 
         Args:
             state: Current state
@@ -170,4 +177,9 @@ class FiniteVolumeMHD(PhysicsModel):
         n = jnp.maximum(state.n, 1e-12)
         p = jnp.maximum(state.p, 1e-12)
 
-        return state.replace(n=n, p=p)
+        # Apply divergence cleaning if using ct_hlld
+        if self.riemann_solver == "ct_hlld":
+            B_clean = divergence_cleaning_projection(state.B, geometry, n_iter=5)
+            return state.replace(n=n, p=p, B=B_clean)
+        else:
+            return state.replace(n=n, p=p)
