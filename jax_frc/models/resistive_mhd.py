@@ -22,7 +22,7 @@ from jax_frc.constants import MU0, MI
 from jax_frc.fields import CoilField
 
 
-AdvectionScheme = Literal["central", "ct", "skew_symmetric"]
+AdvectionScheme = Literal["central", "ct", "skew_symmetric", "hll"]
 
 # Adiabatic index for ideal gas
 GAMMA = 5.0 / 3.0
@@ -41,14 +41,20 @@ class ResistiveMHD(PhysicsModel):
     Where rho = m_i * n (mass density), J = curl(B)/mu0 (current density).
 
     Args:
-        eta: Resistivity [Ohm*m]
+        eta: Resistivity [Ohm*m] (or dimensionless if normalized_units=True)
         advection_scheme: Numerical scheme for advection term curl(v×B).
             - "central": Standard central differences (default, backward compatible)
             - "ct": Constrained Transport scheme (preserves div(B)=0, less diffusive)
             - "skew_symmetric": Energy-conserving skew-symmetric formulation
+            - "hll": HLL Riemann solver with PLM reconstruction (AGATE-compatible)
         evolve_density: Whether to evolve density (default True)
         evolve_velocity: Whether to evolve velocity (default True)
         evolve_pressure: Whether to evolve pressure (default True)
+        normalized_units: If True, use normalized/dimensionless units where n is
+            mass density directly (rho=n). If False (default), use SI units where
+            n is particle number density (rho=m_i*n). Set True for standard MHD
+            test problems like Orszag-Tang.
+        hll_beta: MC limiter parameter for HLL reconstruction (default 1.3, AGATE default)
     """
     eta: float = 1e-4  # Resistivity [Ohm*m]
     external_field: Optional[CoilField] = None
@@ -56,6 +62,8 @@ class ResistiveMHD(PhysicsModel):
     evolve_density: bool = True
     evolve_velocity: bool = True
     evolve_pressure: bool = True
+    normalized_units: bool = False
+    hll_beta: float = 1.3  # MC limiter parameter for HLL (AGATE default)
 
     @partial(jax.jit, static_argnums=(0, 2))  # self and geometry are static
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
@@ -73,8 +81,11 @@ class ResistiveMHD(PhysicsModel):
         B = state.B
         v = state.v if state.v is not None else jnp.zeros((*n.shape, 3))
 
-        # Mass density rho = m_i * n
-        rho = MI * n
+        # Mass density: rho = n for normalized units, rho = m_i * n for SI units
+        if self.normalized_units:
+            rho = n
+        else:
+            rho = MI * n
         # Avoid division by zero
         rho_safe = jnp.maximum(rho, 1e-20)
 
@@ -97,8 +108,11 @@ class ResistiveMHD(PhysicsModel):
             grad_p = gradient_3d(p, geometry)  # (nx, ny, nz, 3)
             pressure_force = -grad_p / rho_safe[..., None]
 
-            # Lorentz force: J×B/rho where J = curl(B)/mu0
-            J = curl_3d(B, geometry) / MU0  # Current density
+            # Lorentz force: J×B/rho where J = curl(B)/mu0 (SI) or J = curl(B) (normalized)
+            if self.normalized_units:
+                J = curl_3d(B, geometry)  # Normalized: mu0 = 1
+            else:
+                J = curl_3d(B, geometry) / MU0  # SI units
             # J×B cross product
             JxB = jnp.stack([
                 J[..., 1] * B[..., 2] - J[..., 2] * B[..., 1],
@@ -135,9 +149,13 @@ class ResistiveMHD(PhysicsModel):
         # =====================================================================
         # Induction equation: dB/dt = curl(v×B) + eta*laplacian(B)/mu0
         # =====================================================================
-        # Resistive term: eta * laplacian(B) / mu0
+        # Resistive term: eta * laplacian(B) / mu0 (SI) or eta * laplacian(B) (normalized)
         # Apply Laplacian component-by-component (vector Laplacian)
-        dB_dt_resistive = self.eta / MU0 * jnp.stack([
+        if self.normalized_units:
+            diffusion_coeff = self.eta  # Normalized: mu0 = 1
+        else:
+            diffusion_coeff = self.eta / MU0  # SI units
+        dB_dt_resistive = diffusion_coeff * jnp.stack([
             laplacian_3d(B[..., 0], geometry),
             laplacian_3d(B[..., 1], geometry),
             laplacian_3d(B[..., 2], geometry),
@@ -152,6 +170,18 @@ class ResistiveMHD(PhysicsModel):
             # Energy-conserving skew-symmetric formulation
             from jax_frc.solvers.constrained_transport import induction_rhs_skew_symmetric
             dB_dt_advection = induction_rhs_skew_symmetric(v, B, geometry)
+        elif self.advection_scheme == "hll":
+            # HLL Riemann solver with PLM reconstruction (AGATE-compatible)
+            from jax_frc.solvers.riemann import hll_flux_3d
+            # Sum contributions from all directions
+            dB_dt_x = hll_flux_3d(state, geometry, GAMMA, self.hll_beta, direction=0)
+            dB_dt_z = hll_flux_3d(state, geometry, GAMMA, self.hll_beta, direction=2)
+            # For 2D (ny=1), skip y-direction
+            if geometry.ny > 1:
+                dB_dt_y = hll_flux_3d(state, geometry, GAMMA, self.hll_beta, direction=1)
+                dB_dt_advection = dB_dt_x + dB_dt_y + dB_dt_z
+            else:
+                dB_dt_advection = dB_dt_x + dB_dt_z
         else:
             # Standard central difference scheme
             v_cross_B = jnp.stack([
@@ -182,8 +212,11 @@ class ResistiveMHD(PhysicsModel):
         zero_E = jnp.zeros_like(state.E) if state.E is not None else None
         zero_Te = jnp.zeros_like(state.Te) if state.Te is not None else None
 
-        # Mass density
-        rho = MI * n
+        # Mass density: rho = n for normalized units, rho = m_i * n for SI units
+        if self.normalized_units:
+            rho = n
+        else:
+            rho = MI * n
         rho_safe = jnp.maximum(rho, 1e-20)
 
         # Continuity: dn/dt = -div(n*v)
@@ -198,7 +231,10 @@ class ResistiveMHD(PhysicsModel):
             grad_p = gradient_3d(p, geometry)
             pressure_force = -grad_p / rho_safe[..., None]
 
-            J = curl_3d(B, geometry) / MU0
+            if self.normalized_units:
+                J = curl_3d(B, geometry)  # Normalized: mu0 = 1
+            else:
+                J = curl_3d(B, geometry) / MU0  # SI units
             JxB = jnp.stack([
                 J[..., 1] * B[..., 2] - J[..., 2] * B[..., 1],
                 J[..., 2] * B[..., 0] - J[..., 0] * B[..., 2],
@@ -254,14 +290,23 @@ class ResistiveMHD(PhysicsModel):
         dx_min = min(geometry.dx, geometry.dy, geometry.dz)
 
         # Resistive diffusion CFL
-        diffusivity = self.eta / MU0
+        if self.normalized_units:
+            diffusivity = self.eta  # Normalized: mu0 = 1
+        else:
+            diffusivity = self.eta / MU0  # SI units
         dt_resistive = 0.25 * dx_min**2 / max(diffusivity, 1e-20)
 
         # Alfven wave CFL
         B_mag = jnp.sqrt(jnp.sum(state.B**2, axis=-1))
-        rho = MI * state.n
+        if self.normalized_units:
+            rho = state.n
+        else:
+            rho = MI * state.n
         rho_safe = jnp.maximum(rho, 1e-20)
-        v_alfven = jnp.max(B_mag / jnp.sqrt(MU0 * rho_safe))
+        if self.normalized_units:
+            v_alfven = jnp.max(B_mag / jnp.sqrt(rho_safe))  # Normalized: mu0 = 1
+        else:
+            v_alfven = jnp.max(B_mag / jnp.sqrt(MU0 * rho_safe))  # SI units
         dt_alfven = dx_min / max(float(v_alfven), 1e-10)
 
         # Sound wave CFL
