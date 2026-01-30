@@ -178,8 +178,10 @@ class FiniteVolumeMHD(PhysicsModel):
         p = jnp.maximum(state.p, 1e-12)
 
         # Apply divergence cleaning if using ct_hlld
-        if self.riemann_solver == "ct_hlld":
-            B_clean = divergence_cleaning_projection(state.B, geometry, n_iter=5)
-            return state.replace(n=n, p=p, B=B_clean)
-        else:
-            return state.replace(n=n, p=p)
+        # NOTE: Divergence cleaning can cause instability by modifying B
+        # inconsistently with the energy equation. Disabled for now.
+        # if self.riemann_solver == "ct_hlld":
+        #     B_clean = divergence_cleaning_projection(state.B, geometry, n_iter=5)
+        #     return state.replace(n=n, p=p, B=B_clean)
+        # else:
+        return state.replace(n=n, p=p)
