@@ -21,3 +21,21 @@ def test_solver_default_values():
     assert Solver.dt_max == 1e-3
     assert Solver.use_checked_step is True
     assert Solver.divergence_cleaning == "projection"
+
+
+def test_solver_compute_dt():
+    """Solver._compute_dt should compute timestep from model CFL."""
+    from jax_frc.solvers.explicit import RK4Solver
+    from jax_frc.models.extended_mhd import ExtendedMHD
+    from jax_frc.core.state import State
+    from jax_frc.core.geometry import Geometry
+    
+    solver = RK4Solver()
+    model = ExtendedMHD(eta=1e-4)
+    geometry = Geometry(nx=8, ny=8, nz=1)
+    state = State.zeros(8, 8, 1)
+    
+    dt = solver._compute_dt(state, model, geometry)
+    assert dt > 0
+    assert dt <= solver.dt_max
+    assert dt >= solver.dt_min

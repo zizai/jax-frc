@@ -23,6 +23,11 @@ class Solver(ABC):
     use_checked_step: bool = True
     divergence_cleaning: str = "projection"
 
+    def _compute_dt(self, state: State, model: PhysicsModel, geometry) -> float:
+        """Compute timestep from model CFL and config bounds."""
+        dt_cfl = model.compute_stable_dt(state, geometry) * self.cfl_safety
+        return float(jnp.clip(dt_cfl, self.dt_min, self.dt_max))
+
     @abstractmethod
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state by one timestep without applying constraints."""
