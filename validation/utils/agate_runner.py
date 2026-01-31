@@ -33,6 +33,14 @@ CASE_CONFIGS = {
         "guide_field": 0.0,
         "num_snapshots": 40,
     },
+    "gem_reconnection_hall": {
+        "physics": "hall_mhd",
+        "hall": True,
+        "end_time": 2.0,
+        "cfl": 0.4,
+        "guide_field": 0.0,
+        "num_snapshots": 40,
+    },
 }
 
 
@@ -216,6 +224,47 @@ def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
         handler.outputState(roller.grid, roller.state, time_value, newCount=i)
 
 
+def _run_gem_reconnection_hall(resolution: list[int], output_dir: Path) -> None:
+    """Run GEM reconnection Hall-MHD simulation with multiple snapshots."""
+    from agate.framework.scenario import ReconnectionGEM as GEMReconnection
+    from agate.framework.roller import Roller
+    from agate.framework.fileHandler import fileHandler
+
+    resolution = _normalize_resolution(resolution)
+    config = get_expected_config("gem_reconnection_hall", resolution)
+    snapshot_times = config["snapshot_times"]
+
+    scenario = GEMReconnection(divClean=True, hall=True, guide_field=0.0)
+    roller = Roller.autodefault(
+        scenario,
+        ncells=[resolution[0], resolution[1], 1],
+        options={"cfl": 0.4}
+    )
+    roller.orient("numpy")
+    roller.time = 0.0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    res_str = f"{resolution[0]}"
+    handler = fileHandler(directory=str(output_dir), prefix=f"gem_reconnection_hall_{res_str}")
+    handler.outputGrid(roller.grid)
+
+    def _safe_time(value: object) -> float:
+        return float(value) if value is not None else 0.0
+
+    print(f"Running GEM reconnection (Hall) at resolution {resolution}...")
+    for i, target_time in enumerate(snapshot_times):
+        time_value = _safe_time(roller.time)
+        if i == 0:
+            handler.outputState(roller.grid, roller.state, time_value, newCount=i)
+            continue
+        try:
+            roller.roll(start_time=roller.time, end_time=target_time, add_stopWatch=False)
+        except Exception as e:
+            raise RuntimeError(f"GEM Hall simulation failed at t={target_time}: {e}") from e
+        time_value = _safe_time(roller.time)
+        handler.outputState(roller.grid, roller.state, time_value, newCount=i)
+
+
 def _run_brio_wu(resolution: list[int], output_dir: Path) -> None:
     """Run Brio-Wu shock tube with multiple snapshots."""
     from agate.framework.scenario import BrioWu
@@ -258,7 +307,7 @@ def _run_brio_wu(resolution: list[int], output_dir: Path) -> None:
 
 
 def run_agate_simulation(
-    case: Literal["brio_wu", "orszag_tang", "gem_reconnection"],
+    case: Literal["brio_wu", "orszag_tang", "gem_reconnection", "gem_reconnection_hall"],
     resolution: list[int] | tuple[int, ...] | int,
     output_dir: Path,
     overwrite: bool = False
@@ -309,6 +358,8 @@ def run_agate_simulation(
             _run_orszag_tang(resolution, output_dir)
         elif case == "gem_reconnection":
             _run_gem_reconnection(resolution, output_dir)
+        elif case == "gem_reconnection_hall":
+            _run_gem_reconnection_hall(resolution, output_dir)
 
         # Save config
         _save_config(case, resolution, output_dir)

@@ -35,6 +35,11 @@ class AgateDataLoader:
                 for f in files
                 if "brio" in f["key"].lower() and res_token in f["key"]
             ]
+        if case in ("gem_hall", "gem_reconnection_hall"):
+            raise ValueError(
+                "Hall GEM reference data is not available via Zenodo; "
+                "generate locally with AGATE."
+            )
         if case == "gem":
             return [
                 f
@@ -84,7 +89,15 @@ class AgateDataLoader:
         3. Return paths to data files
         """
         # Map short names to full names
-        case_map = {"ot": "orszag_tang", "gem": "gem_reconnection", "bw": "brio_wu", "brio_wu": "brio_wu", "brio": "brio_wu"}
+        case_map = {
+            "ot": "orszag_tang",
+            "gem": "gem_reconnection",
+            "gem_hall": "gem_reconnection_hall",
+            "gem_reconnection_hall": "gem_reconnection_hall",
+            "bw": "brio_wu",
+            "brio_wu": "brio_wu",
+            "brio": "brio_wu",
+        }
         full_case = case_map.get(case.lower(), case.lower())
 
         if isinstance(resolution, (list, tuple)):
@@ -115,9 +128,22 @@ class AgateDataLoader:
     def _ensure_files_zenodo(self, case: str, resolution: int) -> list[Path]:
         """Original Zenodo download logic (fallback)."""
         # Map to full case name for consistent directory structure
-        case_map = {"ot": "orszag_tang", "gem": "gem_reconnection", "bw": "brio_wu", "brio_wu": "brio_wu", "brio": "brio_wu"}
+        case_map = {
+            "ot": "orszag_tang",
+            "gem": "gem_reconnection",
+            "gem_hall": "gem_reconnection_hall",
+            "gem_reconnection_hall": "gem_reconnection_hall",
+            "bw": "brio_wu",
+            "brio_wu": "brio_wu",
+            "brio": "brio_wu",
+        }
         full_case = case_map.get(case.lower(), case.lower())
 
+        if case.lower() in ("gem_hall", "gem_reconnection_hall"):
+            raise RuntimeError(
+                "Hall GEM reference data is not available via Zenodo. "
+                "Install AGATE locally to generate the reference data."
+            )
         files = self._select_files(case, resolution)  # Keep original for API
         local_paths: list[Path] = []
         for file_meta in files:
