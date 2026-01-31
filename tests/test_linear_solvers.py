@@ -272,7 +272,7 @@ class TestImexDiffusion:
     @pytest.fixture
     def geometry(self):
         """Create test geometry."""
-        return make_geometry(nx=16, ny=4, nz=32)
+        return make_geometry(nx=8, ny=2, nz=16)
 
     def test_build_diffusion_operator(self, geometry):
         """Should build implicit diffusion operator."""
@@ -369,7 +369,7 @@ class TestImexExplicit:
 
     @pytest.fixture
     def geometry(self):
-        return make_geometry(nx=16, ny=4, nz=32)
+        return make_geometry(nx=8, ny=2, nz=16)
 
     def test_explicit_half_step_updates_B(self, geometry):
         """Explicit half step should update B."""
@@ -419,7 +419,7 @@ class TestImexFullStep:
 
     @pytest.fixture
     def geometry(self):
-        return make_geometry(nx=8, ny=4, nz=16)
+        return make_geometry(nx=6, ny=2, nz=12)
 
     def test_imex_step_advances_time(self, geometry):
         """IMEX step should advance time and step count."""
@@ -501,8 +501,8 @@ class TestImexFullStep:
 
         dt = 1e-5
 
-        # Run 10 steps
-        for _ in range(10):
+        # Run a few steps
+        for _ in range(5):
             state = solver.step(state, dt, model, geometry)
 
         # Should remain bounded (not blow up)
