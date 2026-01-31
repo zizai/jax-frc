@@ -2,8 +2,7 @@
 import jax.numpy as jnp
 from dataclasses import dataclass
 
-from jax_frc.core.geometry import Geometry
-from jax_frc.core.state import State
+from jax_frc.simulation import Geometry, State
 from jax_frc.models.extended_mhd import ExtendedMHD
 from .base import AbstractConfiguration
 

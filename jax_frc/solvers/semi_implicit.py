@@ -27,6 +27,12 @@ class SemiImplicitSolver(Solver):
     damping_factor: float = 1e6  # Controls implicit damping strength for B
     sts_stages: int = 5          # Number of STS stages for temperature
     sts_safety: float = 0.8      # Safety factor for STS timestep
+    # Timestep control (inherited from Solver, made configurable)
+    cfl_safety: float = 0.5
+    dt_min: float = 1e-12
+    dt_max: float = 1e-3
+    use_checked_step: bool = True
+    divergence_cleaning: str = "projection"
 
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state using semi-implicit Hall damping and STS for temperature."""
@@ -197,6 +203,12 @@ class HybridSolver(Solver):
     4. Push particles with Boris algorithm
     5. Update delta-f weights
     """
+    # Timestep control (inherited from Solver, made configurable)
+    cfl_safety: float = 0.5
+    dt_min: float = 1e-12
+    dt_max: float = 1e-3
+    use_checked_step: bool = True
+    divergence_cleaning: str = "projection"
 
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance hybrid simulation by one timestep."""

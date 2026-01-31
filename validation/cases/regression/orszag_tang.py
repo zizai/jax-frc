@@ -150,12 +150,13 @@ DESCRIPTION = "Orszag–Tang vortex regression vs AGATE reference data"
 
 RESOLUTIONS = ([128, 128, 1], [256, 256, 1], [512, 512, 1])
 QUICK_RESOLUTIONS = ([128, 128, 1],)
-QUICK_NUM_SNAPSHOTS = 5  # t=0, 0.25*end, 0.5*end, 0.75*end, end
+QUICK_T_END = 0.12
+QUICK_NUM_SNAPSHOTS = 3  # t=0, 0.5*end, end
 
 
 def get_quick_snapshot_times(end_time: float) -> list[float]:
-    """Get 5 evenly-spaced snapshot times for quick test mode."""
-    return [i * end_time / 4 for i in range(5)]
+    """Get 3 evenly-spaced snapshot times for quick test mode."""
+    return [0.0, end_time / 2.0, end_time]
 # Thresholds for comparison with AGATE
 # Note: AGATE uses Hall MHD, JAX uses ideal MHD, so larger errors expected
 L2_ERROR_TOL = 0.20  # 20% for field L2 errors (relaxed due to physics mismatch)
@@ -189,11 +190,11 @@ def setup_configuration(quick_test: bool, resolution: list[int]) -> dict:
     # dx = 2pi/resolution
     # CFL: dt < dx / (v_max + v_A) ~ 2pi/(resolution * 3.13)
     # For resolution=256: dt_max ~ 7.8e-3
-    # Quick test mode: still run full time (t=0.48) but compare at fewer snapshots
+    # Quick test mode: shorter run with fewer snapshots for faster smoke coverage
     return {
         "nx": resolution[0],
         "nz": resolution[2] if resolution[2] > 1 else resolution[0],
-        "t_end": 0.48,  # Full time for snapshot comparison
+        "t_end": QUICK_T_END if quick_test else 0.48,
         "dt": 1e-4,  # Fallback timestep if CFL is disabled
         "use_cfl": True,
     }
@@ -786,7 +787,7 @@ def main(quick_test: bool = False) -> bool:
     print(f"Running validation: {NAME}")
     print(f"  {DESCRIPTION}")
     if quick_test:
-        print("  (QUICK TEST MODE - 5 snapshots)")
+        print(f"  (QUICK TEST MODE - {QUICK_NUM_SNAPSHOTS} snapshots, t_end={QUICK_T_END})")
     print()
 
     print("Configuration:")
@@ -825,7 +826,7 @@ def main(quick_test: bool = False) -> bool:
 
         # Determine snapshot times
         if quick_test:
-            snapshot_times = get_quick_snapshot_times(0.48)
+            snapshot_times = get_quick_snapshot_times(QUICK_T_END)
             print(f"  Using {len(snapshot_times)} snapshots (quick mode)")
         else:
             snapshot_times = agate_config.get("snapshot_times")

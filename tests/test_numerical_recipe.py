@@ -1,4 +1,8 @@
-"""Tests for NumericalRecipe stepping and divergence handling."""
+"""Tests for NumericalRecipe stepping and divergence handling.
+
+NOTE: NumericalRecipe and TimeController are deprecated. These tests verify
+backward compatibility and should expect deprecation warnings.
+"""
 
 from dataclasses import dataclass
 
@@ -32,6 +36,7 @@ class DummyModel(PhysicsModel):
         return state.replace(p=state.p + 1.0)
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_recipe_step_uses_time_controller_and_constraints_once():
     geom = make_geometry(nx=4, ny=2, nz=4)
     model = DummyModel()
@@ -47,6 +52,7 @@ def test_recipe_step_uses_time_controller_and_constraints_once():
     assert jnp.allclose(next_state.p, state.p + 1.0)
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_recipe_divergence_cleaning_reduces_div_b():
     geom = make_geometry(nx=8, ny=2, nz=8)
     model = DummyModel()

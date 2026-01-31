@@ -85,7 +85,7 @@ def test_resistive_mhd_rk4_tiny_dt_rhs_consistency():
 
     dt = 1e-7
     rhs = model.compute_rhs(state, geometry)
-    next_state = solver.step(state, dt, model, geometry)
+    next_state = solver.step_with_dt(state, dt, model, geometry)
 
     residual = relative_l2_norm((next_state.B - state.B) / dt, rhs.B)
     assert residual < 5e-4
@@ -108,7 +108,7 @@ def test_extended_mhd_rk4_tiny_dt_rhs_consistency():
 
     dt = 1e-7
     rhs = model.compute_rhs(state, geometry)
-    next_state = solver.step(state, dt, model, geometry)
+    next_state = solver.step_with_dt(state, dt, model, geometry)
 
     residual = relative_l2_norm((next_state.B - state.B) / dt, rhs.B)
     assert residual < 5e-4

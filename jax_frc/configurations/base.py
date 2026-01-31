@@ -1,8 +1,7 @@
 """Base class for all reactor/benchmark configurations."""
 from abc import ABC, abstractmethod
 
-from jax_frc.core.geometry import Geometry
-from jax_frc.core.state import State
+from jax_frc.simulation import Geometry, State
 from jax_frc.models.base import PhysicsModel
 
 

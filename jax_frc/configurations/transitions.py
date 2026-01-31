@@ -3,10 +3,10 @@
 from dataclasses import dataclass
 from typing import Callable, Optional, TYPE_CHECKING
 import jax.numpy as jnp
-from jax_frc.core.state import State
+from jax_frc.simulation import State
 
 if TYPE_CHECKING:
-    from jax_frc.core.geometry import Geometry
+    from jax_frc.simulation import Geometry
 
 
 @dataclass

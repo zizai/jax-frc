@@ -39,7 +39,7 @@ def test_imex_tiny_dt_rhs_consistency():
 
     dt = 1e-6
     rhs = model.compute_rhs(state, geometry)
-    next_state = solver.step(state, dt, model, geometry)
+    next_state = solver.step_with_dt(state, dt, model, geometry)
 
     # IMEX uses a 2D laplacian in x-z; compare interior where stencil is valid.
     interior = (slice(1, -1), slice(None), slice(1, -1), slice(None))
@@ -63,7 +63,7 @@ def test_semi_implicit_tiny_dt_rhs_consistency():
 
     dt = 1e-7
     rhs = model.compute_rhs(state, geometry)
-    next_state = solver.step(state, dt, model, geometry)
+    next_state = solver.step_with_dt(state, dt, model, geometry)
 
     residual = relative_l2_norm((next_state.B - state.B) / dt, rhs.B)
     assert residual < 1e-3
@@ -85,8 +85,8 @@ def test_imex_residual_scales_with_dt():
     dt_coarse = 2e-6
     dt_fine = 1e-6
 
-    next_state_coarse = solver.step(state, dt_coarse, model, geometry)
-    next_state_fine = solver.step(state, dt_fine, model, geometry)
+    next_state_coarse = solver.step_with_dt(state, dt_coarse, model, geometry)
+    next_state_fine = solver.step_with_dt(state, dt_fine, model, geometry)
 
     interior = (slice(1, -1), slice(None), slice(1, -1), slice(None))
     residual_coarse = relative_l2_norm(
@@ -116,8 +116,8 @@ def test_semi_implicit_residual_scales_with_dt():
     dt_coarse = 2e-7
     dt_fine = 1e-7
 
-    next_state_coarse = solver.step(state, dt_coarse, model, geometry)
-    next_state_fine = solver.step(state, dt_fine, model, geometry)
+    next_state_coarse = solver.step_with_dt(state, dt_coarse, model, geometry)
+    next_state_fine = solver.step_with_dt(state, dt_fine, model, geometry)
 
     residual_coarse = relative_l2_norm((next_state_coarse.B - state.B) / dt_coarse, rhs.B)
     residual_fine = relative_l2_norm((next_state_fine.B - state.B) / dt_fine, rhs.B)

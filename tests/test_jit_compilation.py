@@ -96,7 +96,7 @@ class TestExplicitSolversJIT:
         solver = EulerSolver()
         dt = 1e-6
         # Should compile and run
-        result = solver.step(state, dt, model, geometry)
+        result = solver.step_with_dt(state, dt, model, geometry)
         assert result.B.shape == state.B.shape
 
     def test_rk4_step_is_jittable(self, setup):
@@ -104,5 +104,5 @@ class TestExplicitSolversJIT:
         state, model, geometry = setup
         solver = RK4Solver()
         dt = 1e-6
-        result = solver.step(state, dt, model, geometry)
+        result = solver.step_with_dt(state, dt, model, geometry)
         assert result.B.shape == state.B.shape

@@ -44,6 +44,7 @@ class TestResistiveMHD3D:
     def test_apply_constraints_cleans_divergence(self):
         """apply_constraints should reduce div(B)."""
         from jax_frc.operators import divergence_3d
+        from jax_frc.solvers.explicit import RK4Solver
 
         geom = Geometry(nx=16, ny=16, nz=16, bc_x="periodic", bc_y="periodic", bc_z="periodic")
 
@@ -60,10 +61,10 @@ class TestResistiveMHD3D:
             v=jnp.zeros((16, 16, 16, 3)),
         )
 
-        model = ResistiveMHD(eta=1e-4)
+        solver = RK4Solver()
 
         div_before = jnp.linalg.norm(divergence_3d(state.B, geom))
-        cleaned_state = model.apply_constraints(state, geom)
+        cleaned_state = solver._apply_constraints(state, geom)
         div_after = jnp.linalg.norm(divergence_3d(cleaned_state.B, geom))
 
         assert div_after < div_before * 0.2  # At least 5x reduction

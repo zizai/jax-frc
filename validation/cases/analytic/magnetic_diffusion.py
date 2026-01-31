@@ -149,7 +149,7 @@ def run_simulation(cfg: dict, model_type: str) -> tuple:
     n_steps = int(t_end / dt)
 
     for _ in range(n_steps):
-        state = solver.step(state, dt, model, geometry)
+        state = solver.step_with_dt(state, dt, model, geometry)
 
     return state, geometry, config
 

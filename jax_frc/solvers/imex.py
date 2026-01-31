@@ -39,6 +39,13 @@ class ImexSolver(Solver):
     """
 
     config: ImexConfig = field(default_factory=ImexConfig)
+    # Timestep control (inherited from Solver, made configurable)
+    cfl_safety: float = 0.5
+    dt_min: float = 1e-12
+    dt_max: float = 1e-3
+    use_checked_step: bool = True
+    # IMEX uses CT scheme internally, so disable additional divergence cleaning
+    divergence_cleaning: str = "none"
 
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry: Geometry) -> State:
         """Advance state by dt using IMEX Strang splitting.

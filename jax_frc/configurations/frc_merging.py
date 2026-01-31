@@ -5,8 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 import jax.numpy as jnp
 
-from jax_frc.core.geometry import Geometry
-from jax_frc.core.state import State
+from jax_frc.simulation import Geometry, State
 from jax_frc.models.base import PhysicsModel
 from jax_frc.configurations.linear_configuration import (
     LinearConfiguration,

@@ -1,5 +1,9 @@
-"""Numerical recipe for bundling solver and constraint strategies."""
+"""Numerical recipe for bundling solver and constraint strategies.
 
+DEPRECATED: NumericalRecipe functionality has been absorbed into Solver.
+Use Solver.step() directly - it now handles timestep control and constraints.
+"""
+import warnings
 from dataclasses import dataclass
 from typing import Literal
 
@@ -13,12 +17,27 @@ DivergenceStrategy = Literal["ct", "clean", "none"]
 
 @dataclass(frozen=True)
 class NumericalRecipe:
-    """Runtime bundle for numerical scheme selection and stepping."""
+    """Runtime bundle for numerical scheme selection and stepping.
+    
+    DEPRECATED: Use Solver directly. Solver now has:
+    - cfl_safety, dt_min, dt_max for timestep control
+    - divergence_cleaning for constraint enforcement
+    - step(state, model, geometry) that handles everything
+    """
 
     solver: Solver
     time_controller: TimeController
     divergence_strategy: DivergenceStrategy = "none"
     use_checked_step: bool = False
+
+    def __post_init__(self):
+        warnings.warn(
+            "NumericalRecipe is deprecated. Use Solver directly - it now has "
+            "timestep control (cfl_safety, dt_min, dt_max) and divergence_cleaning. "
+            "Call solver.step(state, model, geometry) instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
 
     def validate(self, model, geometry) -> None:
         if self.divergence_strategy not in ("ct", "clean", "none"):
