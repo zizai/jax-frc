@@ -130,8 +130,11 @@ def load_agate_snapshot(case: str, resolution: list[int], snapshot_idx: int) -> 
     B = np.transpose(B, (0, 2, 1, 3))
 
     # Swap velocity/B components: AGATE's vy -> JAX's vz
+    # Flip the out-of-plane component to preserve right-handed orientation.
     v = v[..., [0, 2, 1]]
     B = B[..., [0, 2, 1]]
+    v[..., 1] *= -1.0
+    B[..., 1] *= -1.0
 
     mom = rho[..., None] * v
 
@@ -515,8 +518,11 @@ def load_agate_fields(case: str, resolution: list[int], use_initial: bool = Fals
     B = np.transpose(B, (0, 2, 1, 3))
 
     # Also need to swap velocity/B components: AGATE's vy -> JAX's vz, AGATE's vz -> JAX's vy
-    v = v[..., [0, 2, 1]]  # Swap y and z components
-    B = B[..., [0, 2, 1]]  # Swap y and z components
+    # Flip the out-of-plane component to preserve right-handed orientation.
+    v = v[..., [0, 2, 1]]
+    B = B[..., [0, 2, 1]]
+    v[..., 1] *= -1.0
+    B[..., 1] *= -1.0
 
     # Compute momentum from density and velocity
     mom = rho[..., None] * v

@@ -32,7 +32,7 @@ from jax_frc.solvers.riemann.mhd_state import (
     P_FLOOR,
 )
 from jax_frc.solvers.riemann.wave_speeds import fast_magnetosonic_speed
-from jax_frc.solvers.riemann.reconstruction import reconstruct_plm
+from jax_frc.solvers.riemann.reconstruction import reconstruct_plm, reconstruct_plm_bc
 
 
 class CTFluxData(NamedTuple):
@@ -73,15 +73,22 @@ def compute_ct_flux_data(
     # Convert to primitive for reconstruction
     prim = conserved_to_primitive(cons, gamma)
 
+    if direction == 0:
+        bc = geometry.bc_x
+    elif direction == 1:
+        bc = geometry.bc_y
+    else:
+        bc = geometry.bc_z
+
     # Reconstruct all primitive variables at interfaces
-    rho_L, rho_R = reconstruct_plm(prim.rho, direction, beta)
-    vx_L, vx_R = reconstruct_plm(prim.vx, direction, beta)
-    vy_L, vy_R = reconstruct_plm(prim.vy, direction, beta)
-    vz_L, vz_R = reconstruct_plm(prim.vz, direction, beta)
-    p_L, p_R = reconstruct_plm(prim.p, direction, beta)
-    Bx_L, Bx_R = reconstruct_plm(prim.Bx, direction, beta)
-    By_L, By_R = reconstruct_plm(prim.By, direction, beta)
-    Bz_L, Bz_R = reconstruct_plm(prim.Bz, direction, beta)
+    rho_L, rho_R = reconstruct_plm_bc(prim.rho, direction, beta, bc)
+    vx_L, vx_R = reconstruct_plm_bc(prim.vx, direction, beta, bc)
+    vy_L, vy_R = reconstruct_plm_bc(prim.vy, direction, beta, bc)
+    vz_L, vz_R = reconstruct_plm_bc(prim.vz, direction, beta, bc)
+    p_L, p_R = reconstruct_plm_bc(prim.p, direction, beta, bc)
+    Bx_L, Bx_R = reconstruct_plm_bc(prim.Bx, direction, beta, bc)
+    By_L, By_R = reconstruct_plm_bc(prim.By, direction, beta, bc)
+    Bz_L, Bz_R = reconstruct_plm_bc(prim.Bz, direction, beta, bc)
 
     # Ensure positive density and pressure
     rho_L = jnp.maximum(rho_L, RHO_FLOOR)

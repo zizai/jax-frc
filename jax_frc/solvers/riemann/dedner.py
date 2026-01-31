@@ -12,7 +12,7 @@ from functools import partial
 import jax.numpy as jnp
 from jax import jit
 
-from jax_frc.solvers.riemann.reconstruction import reconstruct_plm
+from jax_frc.solvers.riemann.reconstruction import reconstruct_plm, reconstruct_plm_bc
 
 
 @jit
@@ -46,31 +46,43 @@ def glm_cleaning_update(
     ch = jnp.asarray(ch)
     Bx, By, Bz = B[..., 0], B[..., 1], B[..., 2]
 
+    def flux_divergence(flux, axis: int, spacing: float, bc: str):
+        if bc == "periodic":
+            return -(flux - jnp.roll(flux, 1, axis=axis)) / spacing
+        pad_width = [(0, 0)] * flux.ndim
+        pad_width[axis] = (1, 1)
+        flux_pad = jnp.pad(flux, pad_width, mode="edge")
+        slicer_hi = [slice(None)] * flux.ndim
+        slicer_lo = [slice(None)] * flux.ndim
+        slicer_hi[axis] = slice(1, -1)
+        slicer_lo[axis] = slice(0, -2)
+        return -(flux_pad[tuple(slicer_hi)] - flux_pad[tuple(slicer_lo)]) / spacing
+
     # X-direction cleaning fluxes
-    Bx_L, Bx_R = reconstruct_plm(Bx, 0, beta)
-    psi_L, psi_R = reconstruct_plm(psi, 0, beta)
+    Bx_L, Bx_R = reconstruct_plm_bc(Bx, 0, beta, geometry.bc_x)
+    psi_L, psi_R = reconstruct_plm_bc(psi, 0, beta, geometry.bc_x)
     flux_Bx, flux_psi_x = dedner_flux(Bx_L, Bx_R, psi_L, psi_R, ch)
 
     # Z-direction cleaning fluxes
-    Bz_L, Bz_R = reconstruct_plm(Bz, 2, beta)
-    psi_Lz, psi_Rz = reconstruct_plm(psi, 2, beta)
+    Bz_L, Bz_R = reconstruct_plm_bc(Bz, 2, beta, geometry.bc_z)
+    psi_Lz, psi_Rz = reconstruct_plm_bc(psi, 2, beta, geometry.bc_z)
     flux_Bz, flux_psi_z = dedner_flux(Bz_L, Bz_R, psi_Lz, psi_Rz, ch)
 
     dx = geometry.dx
     dz = geometry.dz
 
-    dBx = -(flux_Bx - jnp.roll(flux_Bx, 1, axis=0)) / dx
-    dBz = -(flux_Bz - jnp.roll(flux_Bz, 1, axis=2)) / dz
-    dpsi = -(flux_psi_x - jnp.roll(flux_psi_x, 1, axis=0)) / dx
-    dpsi = dpsi + (-(flux_psi_z - jnp.roll(flux_psi_z, 1, axis=2)) / dz)
+    dBx = flux_divergence(flux_Bx, 0, dx, geometry.bc_x)
+    dBz = flux_divergence(flux_Bz, 2, dz, geometry.bc_z)
+    dpsi = flux_divergence(flux_psi_x, 0, dx, geometry.bc_x)
+    dpsi = dpsi + flux_divergence(flux_psi_z, 2, dz, geometry.bc_z)
 
     if geometry.ny > 1:
-        By_L, By_R = reconstruct_plm(By, 1, beta)
-        psi_Ly, psi_Ry = reconstruct_plm(psi, 1, beta)
+        By_L, By_R = reconstruct_plm_bc(By, 1, beta, geometry.bc_y)
+        psi_Ly, psi_Ry = reconstruct_plm_bc(psi, 1, beta, geometry.bc_y)
         flux_By, flux_psi_y = dedner_flux(By_L, By_R, psi_Ly, psi_Ry, ch)
         dy = geometry.dy
-        dBy = -(flux_By - jnp.roll(flux_By, 1, axis=1)) / dy
-        dpsi = dpsi + (-(flux_psi_y - jnp.roll(flux_psi_y, 1, axis=1)) / dy)
+        dBy = flux_divergence(flux_By, 1, dy, geometry.bc_y)
+        dpsi = dpsi + flux_divergence(flux_psi_y, 1, dy, geometry.bc_y)
     else:
         dBy = jnp.zeros_like(By)
 

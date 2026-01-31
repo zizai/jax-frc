@@ -85,3 +85,30 @@ def fast_magnetosonic_speed(
     """
     c_fast, _, _ = mhd_wave_speeds(rho, p, Bx, By, Bz, gamma)
     return c_fast
+
+
+@jit
+def hall_signal_speed(
+    rho: jnp.ndarray,
+    p: jnp.ndarray,
+    Bx: jnp.ndarray,
+    By: jnp.ndarray,
+    Bz: jnp.ndarray,
+    cell_size: float,
+    gamma: float = 5.0 / 3.0,
+    hall_scale: float = 1.0,
+) -> jnp.ndarray:
+    """Compute Hall-MHD signal speed (fast magnetosonic + whistler).
+
+    Matches AGATE HallMHDSpeedUniform: max(fast magnetosonic, whistler).
+    """
+    c_fast = fast_magnetosonic_speed(rho, p, Bx, By, Bz, gamma)
+    rho_safe = jnp.maximum(rho, 1e-12)
+    b_mag = Bx**2 + By**2 + Bz**2
+    inv_rho = 1.0 / rho_safe
+    w_alf_sq = b_mag * inv_rho
+
+    w_whistler = jnp.pi * hall_scale * jnp.sqrt(b_mag) * inv_rho / cell_size
+    w_whistler = 0.5 * w_whistler + jnp.sqrt((0.5 * w_whistler) ** 2 + w_alf_sq)
+
+    return jnp.maximum(c_fast, w_whistler)

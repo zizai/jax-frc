@@ -18,7 +18,7 @@ References:
 """
 
 from jax_frc.solvers.riemann.hll import hll_flux_1d, hll_flux_3d
-from jax_frc.solvers.riemann.hll_full import hll_update_full
+from jax_frc.solvers.riemann.hll_full import hll_update_full, hll_update_full_with_dedner
 from jax_frc.solvers.riemann.hlld import hlld_update_full, hlld_flux_direction
 from jax_frc.solvers.riemann.reconstruction import (
     reconstruct_plm,
@@ -41,6 +41,7 @@ __all__ = [
     "hll_flux_1d",
     "hll_flux_3d",
     "hll_update_full",
+    "hll_update_full_with_dedner",
     # HLLD solver
     "hlld_update_full",
     "hlld_flux_direction",

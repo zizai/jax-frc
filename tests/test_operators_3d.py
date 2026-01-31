@@ -2,7 +2,13 @@
 
 import jax.numpy as jnp
 import pytest
-from jax_frc.operators import gradient_3d, divergence_3d, curl_3d, laplacian_3d
+from jax_frc.operators import (
+    gradient_3d,
+    divergence_3d,
+    curl_3d,
+    laplacian_3d,
+    edge_curl_3d,
+)
 from jax_frc.core.geometry import Geometry
 
 
@@ -213,6 +219,34 @@ class TestCurl3D:
         expected = (jnp.pi / L) * jnp.cos(jnp.pi * geom.x_grid / L)
         assert jnp.allclose(curl_F[0, :, :, 2], expected[0, :, :], atol=1e-2)
         assert jnp.allclose(curl_F[-1, :, :, 2], expected[-1, :, :], atol=1e-2)
+
+
+class TestEdgeCurl3D:
+    """Test edge-centered curl operator."""
+
+    def test_edge_curl_linear_field(self):
+        """Edge curl of B=(y, z, x) should be constant (-1, -1, -1) in interior."""
+        geom = Geometry(
+            nx=8,
+            ny=8,
+            nz=8,
+            x_min=0.0,
+            x_max=8.0,
+            y_min=0.0,
+            y_max=8.0,
+            z_min=0.0,
+            z_max=8.0,
+            bc_x="neumann",
+            bc_y="neumann",
+            bc_z="neumann",
+        )
+        B = jnp.stack([geom.y_grid, geom.z_grid, geom.x_grid], axis=-1)
+        J_face = edge_curl_3d(B, geom, direction=0)
+        assert J_face.shape == (8, 8, 8, 3)
+        interior = J_face[1:-1, 1:-1, 1:-1]
+        assert jnp.allclose(interior[..., 0], -1.0, atol=1e-6)
+        assert jnp.allclose(interior[..., 1], -1.0, atol=1e-6)
+        assert jnp.allclose(interior[..., 2], -1.0, atol=1e-6)
 
 
 class TestLaplacian3D:

@@ -8,9 +8,8 @@ Notes:
     shorter time horizon (t_end=2.0) to keep the Hall run tractable while
     preserving the quadrupole signature development.
 
-    Acceptance focuses on Hall-sensitive quantities (magnetic field and
-    current-related metrics), while density/momentum/pressure are reported
-    for context.
+    This case evaluates all field and aggregate metrics against the
+    AGATE Hall-MHD reference data.
 """
 
 from __future__ import annotations
@@ -23,13 +22,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import jax
+import jax.numpy as jnp
 
 # Add project root for imports
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from jax_frc.configurations.gem_reconnection import GEMReconnectionConfiguration
-from jax_frc.models.extended_mhd import ExtendedMHD
+from jax_frc.models.finite_volume_mhd import FiniteVolumeMHD
 from jax_frc.solvers import RK2Solver
 from validation.cases.regression import gem_reconnection as base
 from validation.utils.agate_data import AgateDataLoader
@@ -49,19 +50,26 @@ from validation.utils.plots import (
 NAME = "gem_reconnection_hall"
 DESCRIPTION = "GEM reconnection regression vs AGATE Hall-MHD reference data"
 
-RESOLUTIONS = ([64, 32, 1],)
+RESOLUTIONS = ([256, 128, 1],)
 
 L2_ERROR_TOL = base.L2_ERROR_TOL
 RELATIVE_ERROR_TOL = base.RELATIVE_ERROR_TOL
-FIELD_KEYS = ("magnetic_field",)
-AGGREGATE_KEYS = ("magnetic_fraction", "normalized_max_current")
+FIELD_KEYS = ("density", "momentum", "magnetic_field", "pressure")
+AGGREGATE_KEYS = (
+    "kinetic_fraction",
+    "magnetic_fraction",
+    "mean_energy_density",
+    "enstrophy_density",
+    "normalized_max_current",
+)
 
 
 def setup_configuration(resolution: list[int]) -> dict:
     cfg = base.setup_configuration(resolution)
     cfg["t_end"] = 2.0
-    cfg["dt"] = 1e-3
+    cfg["dt"] = None
     cfg["use_cfl"] = True
+    cfg["dt_scale"] = 1.0
     return cfg
 
 
@@ -81,23 +89,39 @@ def run_simulation_with_snapshots(
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
 
-    model = ExtendedMHD(
-        eta=config.eta,
+    model = FiniteVolumeMHD(
+        gamma=5.0 / 3.0,
+        riemann_solver="hll",
+        limiter_beta=1.3,
+        cfl=0.4,
+        use_divergence_cleaning=True,
         include_hall=True,
-        include_electron_pressure=False,
-        apply_divergence_cleaning=True,
-        normalized_units=True,
     )
     solver = RK2Solver()
+
+    if model.use_divergence_cleaning and state.psi is None:
+        state = state.replace(psi=jnp.zeros_like(state.n))
+
+    dt_limit = cfg.get("dt")
+    use_cfl = cfg.get("use_cfl", True)
+    dt_scale = float(cfg.get("dt_scale", 1.0))
 
     states: list = []
     history = {"times": [], "metrics": []}
 
     for target_time in snapshot_times:
         while state.time < target_time - 1e-12:
-            dt_cfl = float(model.compute_stable_dt(state, geometry))
-            dt_limit = float(cfg.get("dt", dt_cfl))
-            step_dt = min(dt_cfl, dt_limit, target_time - state.time)
+            if use_cfl:
+                dt_cfl = float(model.compute_stable_dt(state, geometry))
+                dt = dt_cfl if dt_limit is None else min(dt_cfl, float(dt_limit))
+            else:
+                if dt_limit is None:
+                    raise ValueError("dt must be provided when use_cfl is False")
+                dt = float(dt_limit)
+            dt = dt * dt_scale
+            if dt <= 0:
+                raise ValueError("dt must be positive")
+            step_dt = min(dt, target_time - state.time)
             state = solver.step_checked(state, step_dt, model, geometry)
 
         states.append(state)
@@ -207,12 +231,12 @@ def main() -> bool:
             agate_scalar_metrics = None
 
         final_field_errors = snapshot_errors[-1]["errors"]
-        field_focus = {k: final_field_errors[k] for k in FIELD_KEYS if k in final_field_errors}
+        field_focus = final_field_errors
         print()
         print_field_l2_table(final_field_errors, L2_ERROR_TOL)
         print()
 
-        agg_focus = {k: aggregate_metrics[k] for k in AGGREGATE_KEYS if k in aggregate_metrics}
+        agg_focus = aggregate_metrics
         if aggregate_metrics:
             print_aggregate_metrics_table(aggregate_metrics, RELATIVE_ERROR_TOL)
             print()

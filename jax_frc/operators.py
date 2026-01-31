@@ -267,6 +267,8 @@ def _derivative_with_bc(f: Array, dx: float, axis: int, bc: str, order: int = 4)
         Derivative array with same shape as f
     """
     n = f.shape[axis]
+    if n <= 1:
+        return jnp.zeros_like(f)
 
     if bc == "periodic":
         if order == 4 and n >= 5:
@@ -660,6 +662,121 @@ def curl_3d(F: Array, geometry: "Geometry", order: int = 4) -> Array:
     curl_z = dFy_dx - dFx_dy
 
     return jnp.stack([curl_x, curl_y, curl_z], axis=-1)
+
+
+@jit(static_argnums=(1, 2))
+def edge_curl_3d(F: Array, geometry: "Geometry", direction: int) -> Array:
+    """Compute edge-centered curl of a vector field on face interfaces.
+
+    Matches AGATE's edge-curl stencil (Toth 2008) used for Hall current at faces.
+
+    Args:
+        F: Vector field, shape (nx, ny, nz, 3)
+        geometry: 3D Cartesian geometry
+        direction: Face normal direction (0=x, 1=y, 2=z)
+
+    Returns:
+        Curl vector field at faces, shape (nx, ny, nz, 3)
+    """
+    dx, dy, dz = geometry.dx, geometry.dy, geometry.dz
+    bcs = (geometry.bc_x, geometry.bc_y, geometry.bc_z)
+    sizes = (geometry.nx, geometry.ny, geometry.nz)
+    cell_sizes = (dx, dy, dz)
+
+    if direction == 0:
+        inml, it1, it2 = 0, 1, 2
+    elif direction == 1:
+        inml, it1, it2 = 1, 0, 2
+    elif direction == 2:
+        inml, it1, it2 = 2, 0, 1
+    else:
+        raise ValueError(f"direction must be 0, 1, or 2; got {direction}")
+
+    dn = cell_sizes[inml]
+    dt1 = cell_sizes[it1]
+    dt2 = cell_sizes[it2]
+
+    n_shift = 1 if sizes[inml] > 1 else 0
+    t1_shift = 1 if sizes[it1] > 1 else 0
+    t2_shift = 1 if sizes[it2] > 1 else 0
+
+    def shift_axis(arr: Array, axis: int, offset: int, bc: str) -> Array:
+        if offset == 0:
+            return arr
+        if bc == "periodic":
+            return jnp.roll(arr, -offset, axis=axis)
+        if offset > 0:
+            pad_width = [(0, 0)] * arr.ndim
+            pad_width[axis] = (0, offset)
+            arr_pad = jnp.pad(arr, pad_width, mode="edge")
+            slicer = [slice(None)] * arr.ndim
+            slicer[axis] = slice(offset, offset + arr.shape[axis])
+            return arr_pad[tuple(slicer)]
+        pad_width = [(0, 0)] * arr.ndim
+        pad_width[axis] = (-offset, 0)
+        arr_pad = jnp.pad(arr, pad_width, mode="edge")
+        slicer = [slice(None)] * arr.ndim
+        slicer[axis] = slice(0, arr.shape[axis])
+        return arr_pad[tuple(slicer)]
+
+    def shift_multi(arr: Array, off_inml: int, off_t1: int, off_t2: int) -> Array:
+        out = arr
+        if off_inml != 0:
+            out = shift_axis(out, inml, off_inml, bcs[inml])
+        if off_t1 != 0:
+            out = shift_axis(out, it1, off_t1, bcs[it1])
+        if off_t2 != 0:
+            out = shift_axis(out, it2, off_t2, bcs[it2])
+        return out
+
+    F_inml = F[..., inml]
+    F_it1 = F[..., it1]
+    F_it2 = F[..., it2]
+
+    curl_inml = (
+        (
+            shift_multi(F_it2, n_shift, t1_shift, 0)
+            + shift_multi(F_it2, 0, t1_shift, 0)
+            - shift_multi(F_it2, n_shift, -t1_shift, 0)
+            - shift_multi(F_it2, 0, -t1_shift, 0)
+        )
+        / (4.0 * dt1)
+        - (
+            shift_multi(F_it1, n_shift, 0, t2_shift)
+            + shift_multi(F_it1, 0, 0, t2_shift)
+            - shift_multi(F_it1, n_shift, 0, -t2_shift)
+            - shift_multi(F_it1, 0, 0, -t2_shift)
+        )
+        / (4.0 * dt2)
+    )
+
+    curl_it1 = (
+        (
+            shift_multi(F_inml, n_shift, 0, t2_shift)
+            + shift_multi(F_inml, 0, 0, t2_shift)
+            - shift_multi(F_inml, n_shift, 0, -t2_shift)
+            - shift_multi(F_inml, 0, 0, -t2_shift)
+        )
+        / (4.0 * dt2)
+        - (shift_multi(F_it2, n_shift, 0, 0) - F_it2) / dn
+    )
+
+    curl_it2 = (
+        (shift_multi(F_it1, n_shift, 0, 0) - F_it1) / dn
+        - (
+            shift_multi(F_inml, n_shift, t1_shift, 0)
+            + shift_multi(F_inml, 0, t1_shift, 0)
+            - shift_multi(F_inml, n_shift, -t1_shift, 0)
+            - shift_multi(F_inml, 0, -t1_shift, 0)
+        )
+        / (4.0 * dt1)
+    )
+
+    components = [None, None, None]
+    components[inml] = curl_inml
+    components[it1] = curl_it1
+    components[it2] = curl_it2
+    return jnp.stack(components, axis=-1)
 
 
 @jit

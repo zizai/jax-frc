@@ -26,10 +26,10 @@ from jax_frc.solvers.riemann.mhd_state import (
     state_to_conserved,
     conserved_to_state,
 )
-from jax_frc.solvers.riemann.hll_full import hll_update_full
+from jax_frc.solvers.riemann.hll_full import hll_update_full, hll_update_full_with_dedner
 from jax_frc.solvers.riemann.hlld import hlld_update_full
 from jax_frc.solvers.riemann.dedner import glm_cleaning_update
-from jax_frc.solvers.riemann.wave_speeds import fast_magnetosonic_speed
+from jax_frc.solvers.riemann.wave_speeds import fast_magnetosonic_speed, hall_signal_speed
 
 
 RiemannSolver = Literal["hll", "hlld"]
@@ -63,6 +63,8 @@ class FiniteVolumeMHD(PhysicsModel):
     reconstruction: Reconstruction = "plm"
     limiter_beta: float = 1.3
     cfl: float = 0.4
+    include_hall: bool = False
+    hall_scale: float = 1.0
     evolve_density: bool = True
     evolve_velocity: bool = True
     evolve_pressure: bool = True
@@ -85,13 +87,46 @@ class FiniteVolumeMHD(PhysicsModel):
         cons = state_to_conserved(state, self.gamma)
 
         # Compute update using Riemann solver
+        dpsi_dt = None
+        cleaning_ch = None
         if self.riemann_solver == "hll":
-            dU = hll_update_full(cons, geometry, self.gamma, self.limiter_beta)
+            if self.use_divergence_cleaning:
+                psi = state.psi if state.psi is not None else jnp.zeros_like(state.n)
+                if self.cleaning_speed is None:
+                    cleaning_ch = self.compute_cleaning_speed(state, geometry)
+                else:
+                    cleaning_ch = jnp.asarray(self.cleaning_speed)
+                dU, dpsi_dt = hll_update_full_with_dedner(
+                    cons,
+                    psi,
+                    geometry,
+                    self.gamma,
+                    self.limiter_beta,
+                    include_hall=self.include_hall,
+                    hall_scale=self.hall_scale,
+                    ch=cleaning_ch,
+                )
+            else:
+                dU = hll_update_full(
+                    cons,
+                    geometry,
+                    self.gamma,
+                    self.limiter_beta,
+                    include_hall=self.include_hall,
+                    hall_scale=self.hall_scale,
+                )
         elif self.riemann_solver == "hlld":
             dU = hlld_update_full(cons, geometry, self.gamma, self.limiter_beta)
         else:
             # Default to HLL
-            dU = hll_update_full(cons, geometry, self.gamma, self.limiter_beta)
+            dU = hll_update_full(
+                cons,
+                geometry,
+                self.gamma,
+                self.limiter_beta,
+                include_hall=self.include_hall,
+                hall_scale=self.hall_scale,
+            )
 
         # Convert dU back to State format
         # dU contains d(rho)/dt, d(mom)/dt, d(E)/dt, d(B)/dt
@@ -133,24 +168,19 @@ class FiniteVolumeMHD(PhysicsModel):
         if not self.evolve_pressure:
             dp_dt = jnp.zeros_like(state.p)
 
-        dpsi_dt = None
-        if self.use_divergence_cleaning:
+        if self.use_divergence_cleaning and dpsi_dt is None:
             psi = state.psi if state.psi is not None else jnp.zeros_like(state.n)
             if self.cleaning_speed is None:
-                rho = jnp.maximum(state.n, 1e-12)
-                p = jnp.maximum(state.p, 1e-12)
-                v_mag = jnp.sqrt(jnp.sum(v**2, axis=-1))
-                cf = fast_magnetosonic_speed(
-                    rho, p, B[..., 0], B[..., 1], B[..., 2], self.gamma
-                )
-                ch = 0.95 * jnp.max(cf + v_mag)
+                cleaning_ch = self.compute_cleaning_speed(state, geometry)
             else:
-                ch = jnp.asarray(self.cleaning_speed)
+                cleaning_ch = jnp.asarray(self.cleaning_speed)
             dB_clean, dpsi_dt = glm_cleaning_update(
-                B, geometry, psi, ch, self.limiter_beta
+                B, geometry, psi, cleaning_ch, self.limiter_beta
             )
             dB_dt = dB_dt + dB_clean
-            dpsi_dt = dpsi_dt - (ch / self.cleaning_cr) * psi
+
+        if self.use_divergence_cleaning and dpsi_dt is not None and cleaning_ch is not None:
+            dpsi_dt = dpsi_dt - (cleaning_ch / self.cleaning_cr) * psi
 
         if dpsi_dt is None:
             return state.replace(n=dn_dt, v=dv_dt, p=dp_dt, B=dB_dt)
@@ -171,14 +201,7 @@ class FiniteVolumeMHD(PhysicsModel):
         B = state.B
         v = state.v
 
-        # Fast magnetosonic speed
-        Bx, By, Bz = B[..., 0], B[..., 1], B[..., 2]
-        B_mag = jnp.sqrt(Bx**2 + By**2 + Bz**2)
-        cf = fast_magnetosonic_speed(rho, p, Bx, By, Bz, self.gamma)
-
-        # Maximum wave speed including flow velocity
-        v_mag = jnp.sqrt(jnp.sum(v**2, axis=-1))
-        max_speed = jnp.max(cf + v_mag)
+        max_speed = self._max_signal_speed(state, geometry)
 
         # Minimum grid spacing
         dx_min = min(geometry.dx, geometry.dz)
@@ -187,8 +210,30 @@ class FiniteVolumeMHD(PhysicsModel):
 
         # CFL condition
         dt = self.cfl * dx_min / max(float(max_speed), 1e-10)
-
         return dt
+
+    def _max_signal_speed(self, state: State, geometry: Geometry) -> jnp.ndarray:
+        rho = jnp.maximum(state.n, 1e-12)
+        p = jnp.maximum(state.p, 1e-12)
+        B = state.B
+        v = state.v
+
+        Bx, By, Bz = B[..., 0], B[..., 1], B[..., 2]
+        v_mag = jnp.sqrt(jnp.sum(v**2, axis=-1))
+
+        dx_min = min(geometry.dx, geometry.dz)
+        if geometry.ny > 1:
+            dx_min = min(dx_min, geometry.dy)
+
+        if self.include_hall:
+            cf = hall_signal_speed(rho, p, Bx, By, Bz, dx_min, self.gamma, self.hall_scale)
+        else:
+            cf = fast_magnetosonic_speed(rho, p, Bx, By, Bz, self.gamma)
+
+        return jnp.max(cf + v_mag)
+
+    def compute_cleaning_speed(self, state: State, geometry: Geometry) -> jnp.ndarray:
+        return 0.95 * self._max_signal_speed(state, geometry)
 
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
         """Apply physical constraints.
