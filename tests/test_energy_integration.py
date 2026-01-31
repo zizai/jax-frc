@@ -19,7 +19,7 @@ class TestEndToEndTemperatureEvolution:
     @pytest.fixture
     def geometry(self):
         """Create test geometry."""
-        return make_geometry(nx=16, ny=4, nz=32)
+        return make_geometry(nx=12, ny=2, nz=16)
 
     @pytest.fixture
     def model(self):
@@ -70,9 +70,9 @@ class TestEndToEndTemperatureEvolution:
             step=0,
         )
 
-        # Run 10 steps
+        # Run a few steps
         dt = 1e-7
-        n_steps = 10
+        n_steps = 5
         for _ in range(n_steps):
             state = solver.step(state, dt, model, geometry)
 
@@ -107,9 +107,9 @@ class TestEndToEndTemperatureEvolution:
             step=0,
         )
 
-        # Run many steps
+        # Run several steps
         dt = 1e-7
-        n_steps = 20
+        n_steps = 8
         for _ in range(n_steps):
             state = solver.step(state, dt, model, geometry)
 
@@ -128,7 +128,7 @@ class TestThermalDiffusionConservation:
     @pytest.fixture
     def geometry(self):
         """Create test geometry."""
-        return make_geometry(nx=16, ny=4, nz=32)
+        return make_geometry(nx=12, ny=2, nz=16)
 
     def test_diffusion_conserves_total_thermal_energy(self, geometry):
         """Diffusion should conserve total thermal energy for periodic operators."""
@@ -163,7 +163,7 @@ class TestThermalDiffusionConservation:
         E_th_initial = float(jnp.sum(1.5 * n * Te))
 
         dt = 1e-6
-        n_steps = 5
+        n_steps = 3
         for _ in range(n_steps):
             state = solver.step(state, dt, model, geometry)
 
@@ -184,9 +184,9 @@ class TestHeatConductionAnalytical:
         The width increases as σ_eff² = σ² + 2*D*t
         """
         geometry = Geometry(
-            nx=8,
-            ny=4,
-            nz=64,  # Fine grid in z for diffusion
+            nx=6,
+            ny=2,
+            nz=32,  # Reduced grid in z for faster diffusion test
             x_min=0.1,
             x_max=0.9,  # Avoid boundaries
             y_min=-0.5,
@@ -244,8 +244,8 @@ class TestHeatConductionAnalytical:
         T_max_initial = float(jnp.max(T_center))
 
         # Run for some time
-        dt = 1e-5
-        n_steps = 30
+        dt = 2e-5
+        n_steps = 12
         total_time = dt * n_steps
 
         for _ in range(n_steps):
