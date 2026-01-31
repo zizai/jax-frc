@@ -52,7 +52,7 @@ def test_gaussian_diffusion_converges():
     n_steps = max(1, int(t_final / dt))
 
     for _ in range(n_steps):
-        state = solver.step(state, dt, model, geometry)
+        state = solver.step_with_dt(state, dt, model, geometry)
 
     # Compare to analytic solution
     B_analytic = gaussian_analytic(x - r_center, z - z_center, t_final, kappa, sigma0, A0)
@@ -93,7 +93,7 @@ def test_imex_large_timestep_stable():
 
     # Run several steps
     for _ in range(3):
-        state = solver.step(state, dt, model, geometry)
+        state = solver.step_with_dt(state, dt, model, geometry)
 
     # Should not blow up
     assert jnp.all(jnp.isfinite(state.B)), "Solution became non-finite"

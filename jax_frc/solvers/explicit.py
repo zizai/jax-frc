@@ -1,6 +1,6 @@
 """Explicit time integration schemes."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 import jax
 import jax.numpy as jnp
@@ -16,6 +16,12 @@ class EulerSolver(Solver):
 
     Updates B field based on model RHS (dB/dt).
     """
+    # Timestep control (inherited from Solver, made configurable)
+    cfl_safety: float = 0.5
+    dt_min: float = 1e-12
+    dt_max: float = 1e-3
+    use_checked_step: bool = True
+    divergence_cleaning: str = "projection"
 
     @partial(jax.jit, static_argnums=(0, 3, 4))  # self, model, geometry static
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
@@ -63,6 +69,12 @@ class RK4Solver(Solver):
 
     Updates B field and Te field based on model RHS.
     """
+    # Timestep control (inherited from Solver, made configurable)
+    cfl_safety: float = 0.5
+    dt_min: float = 1e-12
+    dt_max: float = 1e-3
+    use_checked_step: bool = True
+    divergence_cleaning: str = "projection"
 
     @partial(jax.jit, static_argnums=(0, 3, 4))  # self, model, geometry static
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
@@ -146,6 +158,12 @@ class SemiLagrangianSolver(Solver):
 
     The diffusion term (if any) is handled with standard finite differences.
     """
+    # Timestep control (inherited from Solver, made configurable)
+    cfl_safety: float = 0.5
+    dt_min: float = 1e-12
+    dt_max: float = 1e-3
+    use_checked_step: bool = True
+    divergence_cleaning: str = "projection"
 
     @partial(jax.jit, static_argnums=(0, 3, 4))
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:

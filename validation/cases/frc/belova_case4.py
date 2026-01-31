@@ -143,7 +143,7 @@ def run_simulation(cfg: dict) -> tuple:
 
     # Time integration loop
     for step_idx in range(n_steps):
-        state = solver.step(state, dt, model, geometry)
+        state = solver.step_with_dt(state, dt, model, geometry)
 
         # Check for early termination due to instability
         if not check_stability(state):

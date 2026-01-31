@@ -112,7 +112,7 @@ def run_simulation(cfg: dict) -> tuple[State, Geometry]:
     dt = cfg["dt"]
     n_steps = int(t_end / dt)
     for _ in range(n_steps):
-        state = solver.step(state, dt, model, geom)
+        state = solver.step_with_dt(state, dt, model, geom)
         # Enforce Dirichlet B=0 at boundaries (conducting walls).
         B = state.B
         for comp in range(3):

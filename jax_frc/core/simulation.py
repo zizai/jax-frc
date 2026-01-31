@@ -19,7 +19,7 @@ class Simulation:
     geometry: Geometry
     model: PhysicsModel
     solver: Solver
-    time_controller: TimeController
+    time_controller: Optional[TimeController] = None  # Deprecated, use solver's timestep control
     recipe: Optional[NumericalRecipe] = None
 
     state: Optional[State] = None
@@ -53,8 +53,13 @@ class Simulation:
         if self.recipe is not None:
             self.state = self.recipe.step(self.state, self.model, self.geometry)
             return self.state
-        dt = self.time_controller.compute_dt(self.state, self.model, self.geometry)
-        self.state = self.solver.step(self.state, dt, self.model, self.geometry)
+        # Use new API: solver.step() computes dt internally
+        # Fall back to old API if time_controller is provided
+        if self.time_controller is not None:
+            dt = self.time_controller.compute_dt(self.state, self.model, self.geometry)
+            self.state = self.solver.step_with_dt(self.state, dt, self.model, self.geometry)
+        else:
+            self.state = self.solver.step(self.state, self.model, self.geometry)
         return self.state
 
     def run(self, t_end: float, callback: Optional[Callable] = None) -> State:

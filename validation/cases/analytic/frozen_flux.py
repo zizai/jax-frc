@@ -90,7 +90,7 @@ def run_simulation(cfg: dict) -> tuple:
     n_steps = int(t_end / dt)
 
     for _ in range(n_steps):
-        state = solver.step(state, dt, model, geometry)
+        state = solver.step_with_dt(state, dt, model, geometry)
 
     return state, initial_state, geometry, config
 
@@ -128,7 +128,7 @@ def run_simulation_with_snapshots(cfg: dict, n_snapshots: int = 50) -> tuple:
     B_analytic = [np.array(config.analytic_solution(geometry, 0.0))]
 
     for step in range(n_steps):
-        state = solver.step(state, dt, model, geometry)
+        state = solver.step_with_dt(state, dt, model, geometry)
         if (step + 1) % snapshot_interval == 0 or step == n_steps - 1:
             times.append(float(state.time))
             B_numerical.append(np.array(state.B))
@@ -208,7 +208,7 @@ def run_multi_model_simulation(cfg: dict, n_snapshots: int = 50) -> tuple:
                 results["analytic"] = [np.array(config.analytic_solution(geometry, 0.0))]
 
             for step in range(n_steps):
-                state = solver.step(state, dt, model, geometry)
+                state = solver.step_with_dt(state, dt, model, geometry)
                 if (step + 1) % snapshot_interval == 0 or step == n_steps - 1:
                     snapshots.append(np.array(state.B))
                     if first_model:  # Only record times once

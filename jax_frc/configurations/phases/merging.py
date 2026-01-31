@@ -4,8 +4,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 import jax.numpy as jnp
 
-from jax_frc.core.state import State
-from jax_frc.core.geometry import Geometry
+from jax_frc.simulation import State, Geometry
 from jax_frc.configurations.phase import Phase
 from jax_frc.configurations.transitions import Transition
 from jax_frc.boundaries.time_dependent import TimeDependentMirrorBC

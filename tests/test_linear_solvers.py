@@ -455,7 +455,7 @@ class TestImexFullStep:
         model = ResistiveMHD(eta=1e-4)
 
         dt = 1e-4
-        new_state = solver.step(state, dt, model, geometry)
+        new_state = solver.step_with_dt(state, dt, model, geometry)
 
         assert float(new_state.time) == dt
         assert int(new_state.step) == 1
@@ -503,7 +503,7 @@ class TestImexFullStep:
 
         # Run a few steps
         for _ in range(5):
-            state = solver.step(state, dt, model, geometry)
+            state = solver.step_with_dt(state, dt, model, geometry)
 
         # Should remain bounded (not blow up)
         assert jnp.all(jnp.isfinite(state.B))

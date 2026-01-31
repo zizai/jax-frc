@@ -74,7 +74,7 @@ class TestEndToEndTemperatureEvolution:
         dt = 1e-7
         n_steps = 5
         for _ in range(n_steps):
-            state = solver.step(state, dt, model, geometry)
+            state = solver.step_with_dt(state, dt, model, geometry)
 
         # Check no NaN
         assert jnp.all(jnp.isfinite(state.Te)), "Temperature should remain finite"
@@ -111,7 +111,7 @@ class TestEndToEndTemperatureEvolution:
         dt = 1e-7
         n_steps = 8
         for _ in range(n_steps):
-            state = solver.step(state, dt, model, geometry)
+            state = solver.step_with_dt(state, dt, model, geometry)
 
         # Temperature should not explode or collapse
         T_max = float(jnp.max(state.Te))
@@ -165,7 +165,7 @@ class TestThermalDiffusionConservation:
         dt = 1e-6
         n_steps = 3
         for _ in range(n_steps):
-            state = solver.step(state, dt, model, geometry)
+            state = solver.step_with_dt(state, dt, model, geometry)
 
         E_th_final = float(jnp.sum(1.5 * n * state.Te))
 
@@ -249,7 +249,7 @@ class TestHeatConductionAnalytical:
         total_time = dt * n_steps
 
         for _ in range(n_steps):
-            state = solver.step(state, dt, model, geometry)
+            state = solver.step_with_dt(state, dt, model, geometry)
 
         # Final peak should be lower (profile spreading)
         T_center_final = state.Te[nx // 2, ny // 2, :]

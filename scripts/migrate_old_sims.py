@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 """Migration script to run old-style simulations using the new JAX-FRC framework.
 
+DEPRECATED: This script demonstrates the old API patterns. For new code, use:
+- Solver.step(state, model, geometry) instead of TimeController + solver.step_with_dt()
+- SimulationBuilder for creating simulations
+
 This script demonstrates how to migrate from the standalone simulation files
 (resistive_mhd.py, extended_mhd.py, hybrid_kinetic.py) to the new OOP framework.
 
@@ -11,6 +15,7 @@ Usage:
 """
 
 import argparse
+import warnings
 import jax.numpy as jnp
 import jax.random as random
 
@@ -19,8 +24,10 @@ from jax_frc.core.geometry import Geometry
 from jax_frc.core.state import State
 from jax_frc.models import ResistiveMHD, ExtendedMHD, HybridKinetic
 from jax_frc.solvers import RK4Solver, SemiImplicitSolver, HybridSolver
-from jax_frc.solvers.time_controller import TimeController
 from jax_frc.diagnostics.probes import DiagnosticSet
+
+# Suppress deprecation warnings for this migration script
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def run_resistive_mhd(steps: int = 100, nx: int = 32, nz: int = 64):
@@ -47,16 +54,14 @@ def run_resistive_mhd(steps: int = 100, nx: int = 32, nz: int = 64):
         }
     })
 
-    # Create solver and time controller
-    solver = RK4Solver()
-    time_controller = TimeController(cfl_safety=0.25, dt_max=1e-4)
+    # Create solver with timestep control (new API)
+    solver = RK4Solver(cfl_safety=0.25, dt_max=1e-4)
 
     # Create simulation
     sim = Simulation(
         geometry=geometry,
         model=model,
         solver=solver,
-        time_controller=time_controller
     )
 
     # Initialize with FRC-like flux profile (matching old default)
@@ -105,16 +110,14 @@ def run_extended_mhd(steps: int = 50, nx: int = 32, nz: int = 64):
         }
     })
 
-    # Use semi-implicit solver for Whistler stability
-    solver = SemiImplicitSolver(damping_factor=1e6)
-    time_controller = TimeController(cfl_safety=0.5, dt_max=1e-6)
+    # Use semi-implicit solver for Whistler stability (new API)
+    solver = SemiImplicitSolver(damping_factor=1e6, cfl_safety=0.5, dt_max=1e-6)
 
     # Create simulation
     sim = Simulation(
         geometry=geometry,
         model=model,
         solver=solver,
-        time_controller=time_controller
     )
 
     # Initialize state
@@ -164,16 +167,14 @@ def run_hybrid_kinetic(steps: int = 100, n_particles: int = 1000, nx: int = 32, 
         'eta': 1e-4
     })
 
-    # Use hybrid solver
-    solver = HybridSolver()
-    time_controller = TimeController(cfl_safety=0.1, dt_max=1e-8)
+    # Use hybrid solver (new API)
+    solver = HybridSolver(cfl_safety=0.1, dt_max=1e-8)
 
     # Create simulation
     sim = Simulation(
         geometry=geometry,
         model=model,
         solver=solver,
-        time_controller=time_controller
     )
 
     # Initialize state with B field

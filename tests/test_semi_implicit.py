@@ -69,7 +69,7 @@ class TestSemiImplicitSolverTemperature:
 
         # Take a single step with small dt (within stability)
         dt = 1e-6
-        new_state = solver.step(state, dt, model_with_thermal, geometry)
+        new_state = solver.step_with_dt(state, dt, model_with_thermal, geometry)
 
         # Time should advance
         assert float(new_state.time) == float(state.time) + dt
@@ -97,7 +97,7 @@ class TestSemiImplicitSolverTemperature:
         )
 
         dt = 1e-8
-        new_state = solver.step(state, dt, model_with_thermal, geometry)
+        new_state = solver.step_with_dt(state, dt, model_with_thermal, geometry)
 
         # Temperature should be at least minimum
         assert jnp.all(new_state.Te >= 1e-3), \
@@ -190,7 +190,7 @@ class TestRK4SolverAllFields:
         solver = RK4Solver()
 
         # Take one step
-        new_state = solver.step(state, dt=1e-6, model=model, geometry=geom)
+        new_state = solver.step_with_dt(state, dt=1e-6, model=model, geometry=geom)
 
         # Te should be updated (not just B)
         assert new_state.Te is not None

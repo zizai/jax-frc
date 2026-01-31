@@ -73,7 +73,7 @@ class TestResistiveDiffusionAnalytic:
         t_final = dt * n_steps
 
         for _ in range(n_steps):
-            state = solver.step(state, dt, model, geometry)
+            state = solver.step_with_dt(state, dt, model, geometry)
 
         # Analytic solution at t_final
         decay_factor = jnp.exp(-k**2 * D * t_final)
@@ -150,7 +150,7 @@ class TestResistiveDiffusionAnalytic:
         # Run a few steps
         dt = 2e-5
         for _ in range(2):
-            state = solver.step(state, dt, model, geometry)
+            state = solver.step_with_dt(state, dt, model, geometry)
 
         # The pattern should remain sinusoidal: B(z) ~ sin(k*z)
         # Check correlation with sin(k*z) at interior points
@@ -206,7 +206,7 @@ class TestResistiveDiffusionAnalytic:
         # Run several steps
         dt = 2e-4
         for _ in range(3):
-            state = solver.step(state, dt, model, geometry)
+            state = solver.step_with_dt(state, dt, model, geometry)
 
         # Guard against non-finite values from under-converged solves
         assert jnp.all(jnp.isfinite(state.B)), "Solution became non-finite"
@@ -270,7 +270,7 @@ class TestResistiveDiffusionAnalytic:
             )
 
             for _ in range(n_steps):
-                state = solver.step(state, dt, model, geometry)
+                state = solver.step_with_dt(state, dt, model, geometry)
 
             # Return peak amplitude (interior)
             return jnp.max(jnp.abs(state.B[nx//4:3*nx//4, 0, nz//4:3*nz//4, 2]))

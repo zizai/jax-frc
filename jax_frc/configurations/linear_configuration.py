@@ -13,8 +13,7 @@ import logging
 
 from jax_frc.configurations.base import AbstractConfiguration
 from jax_frc.diagnostics.progress import ProgressReporter
-from jax_frc.core.state import State
-from jax_frc.core.geometry import Geometry
+from jax_frc.simulation import State, Geometry
 from jax_frc.configurations.phase import Phase, PhaseResult, PHASE_REGISTRY
 from jax_frc.configurations.transitions import transition_from_spec
 from jax_frc.models.base import PhysicsModel
@@ -305,7 +304,7 @@ class LinearConfiguration(AbstractConfiguration):
             state = phase.step_hook(state, geometry, t)
 
             # Advance physics via solver
-            state = solver.step(state, self.dt, model, geometry)
+            state = solver.step_with_dt(state, self.dt, model, geometry)
             t = float(state.time)
 
         # Cleanup

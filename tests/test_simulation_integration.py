@@ -9,7 +9,6 @@ from jax_frc.core.state import State
 from jax_frc.core.simulation import Simulation
 from jax_frc.models import ResistiveMHD, ExtendedMHD, HybridKinetic
 from jax_frc.solvers import RK4Solver, SemiImplicitSolver, HybridSolver
-from jax_frc.solvers.time_controller import TimeController
 from tests.utils.cartesian import make_geometry
 
 
@@ -129,15 +128,13 @@ class TestResistiveMHD:
         B = B.at[:, :, :, 2].set(jnp.exp(-geom.x_grid**2 - geom.z_grid**2))
         state = state.replace(B=B)
 
-        # Run for several timesteps
-        solver = RK4Solver()
-        tc = TimeController(cfl_safety=0.25)
+        # Run for several timesteps using new API (solver computes dt internally)
+        solver = RK4Solver(cfl_safety=0.25)
 
         psi_max_initial = jnp.max(state.B[..., 2])
 
         for _ in range(100):
-            dt = tc.compute_dt(state, model, geom)
-            state = solver.step(state, dt, model, geom)
+            state = solver.step(state, model, geom)
 
         psi_max_final = jnp.max(state.B[..., 2])
 
@@ -289,8 +286,7 @@ class TestEnergyConservation:
         """Test that magnetic energy decays with resistivity."""
         geom = make_geometry(nx=32, ny=4, nz=64)
         model = ResistiveMHD(eta=1e-3)
-        solver = RK4Solver()
-        tc = TimeController(cfl_safety=0.25)
+        solver = RK4Solver(cfl_safety=0.25)
 
         # Initialize with B field
         state = State.zeros(geom.nx, geom.ny, geom.nz)
@@ -301,10 +297,9 @@ class TestEnergyConservation:
         # Compute initial magnetic energy proxy
         energy_init = jnp.sum(jnp.sum(state.B**2, axis=-1) * geom.cell_volumes)
 
-        # Run simulation
+        # Run simulation using new API (solver computes dt internally)
         for _ in range(50):
-            dt = tc.compute_dt(state, model, geom)
-            state = solver.step(state, dt, model, geom)
+            state = solver.step(state, model, geom)
 
         energy_final = jnp.sum(jnp.sum(state.B**2, axis=-1) * geom.cell_volumes)
 

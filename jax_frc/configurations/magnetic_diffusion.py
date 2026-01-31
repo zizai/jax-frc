@@ -3,8 +3,7 @@ import jax.numpy as jnp
 from dataclasses import dataclass
 from typing import Literal
 
-from jax_frc.core.geometry import Geometry
-from jax_frc.core.state import State
+from jax_frc.simulation import Geometry, State
 from jax_frc.models.resistive_mhd import ResistiveMHD
 from jax_frc.models.extended_mhd import ExtendedMHD
 from jax_frc.models.hybrid_kinetic import HybridKinetic, RigidRotorEquilibrium
