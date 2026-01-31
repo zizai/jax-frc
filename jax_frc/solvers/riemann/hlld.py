@@ -30,7 +30,7 @@ from jax_frc.solvers.riemann.mhd_state import (
     P_FLOOR,
 )
 from jax_frc.solvers.riemann.wave_speeds import fast_magnetosonic_speed
-from jax_frc.solvers.riemann.reconstruction import reconstruct_plm
+from jax_frc.solvers.riemann.reconstruction import reconstruct_plm_bc
 
 
 # Small number for numerical stability
@@ -426,14 +426,21 @@ def hlld_flux_direction(
     prim = conserved_to_primitive(cons, gamma)
 
     # Reconstruct all primitive variables at interfaces
-    rho_L, rho_R = reconstruct_plm(prim.rho, direction, beta)
-    vx_L, vx_R = reconstruct_plm(prim.vx, direction, beta)
-    vy_L, vy_R = reconstruct_plm(prim.vy, direction, beta)
-    vz_L, vz_R = reconstruct_plm(prim.vz, direction, beta)
-    p_L, p_R = reconstruct_plm(prim.p, direction, beta)
-    Bx_L, Bx_R = reconstruct_plm(prim.Bx, direction, beta)
-    By_L, By_R = reconstruct_plm(prim.By, direction, beta)
-    Bz_L, Bz_R = reconstruct_plm(prim.Bz, direction, beta)
+    if direction == 0:
+        bc = geometry.bc_x
+    elif direction == 1:
+        bc = geometry.bc_y
+    else:
+        bc = geometry.bc_z
+
+    rho_L, rho_R = reconstruct_plm_bc(prim.rho, direction, beta, bc)
+    vx_L, vx_R = reconstruct_plm_bc(prim.vx, direction, beta, bc)
+    vy_L, vy_R = reconstruct_plm_bc(prim.vy, direction, beta, bc)
+    vz_L, vz_R = reconstruct_plm_bc(prim.vz, direction, beta, bc)
+    p_L, p_R = reconstruct_plm_bc(prim.p, direction, beta, bc)
+    Bx_L, Bx_R = reconstruct_plm_bc(prim.Bx, direction, beta, bc)
+    By_L, By_R = reconstruct_plm_bc(prim.By, direction, beta, bc)
+    Bz_L, Bz_R = reconstruct_plm_bc(prim.Bz, direction, beta, bc)
 
     # Ensure positive density and pressure
     rho_L = jnp.maximum(rho_L, RHO_FLOOR)
@@ -485,34 +492,41 @@ def hlld_update_full(
     dx = geometry.dx
     dz = geometry.dz
 
-    def flux_divergence_x(flux):
-        return -(flux - jnp.roll(flux, 1, axis=0)) / dx
-
-    def flux_divergence_z(flux):
-        return -(flux - jnp.roll(flux, 1, axis=2)) / dz
+    def flux_divergence(flux, axis: int, spacing: float, bc: str):
+        if bc == "periodic":
+            return -(flux - jnp.roll(flux, 1, axis=axis)) / spacing
+        # Neumann / outflow: zero-gradient padding at boundaries.
+        pad_width = [(0, 0)] * flux.ndim
+        pad_width[axis] = (1, 1)
+        flux_pad = jnp.pad(flux, pad_width, mode="edge")
+        slicer_hi = [slice(None)] * flux.ndim
+        slicer_lo = [slice(None)] * flux.ndim
+        slicer_hi[axis] = slice(1, -1)
+        slicer_lo[axis] = slice(0, -2)
+        return -(flux_pad[tuple(slicer_hi)] - flux_pad[tuple(slicer_lo)]) / spacing
 
     # X-direction contribution
     dU_x = MHDConserved(
-        rho=flux_divergence_x(flux_x.rho),
-        mom_x=flux_divergence_x(flux_x.mom_x),
-        mom_y=flux_divergence_x(flux_x.mom_y),
-        mom_z=flux_divergence_x(flux_x.mom_z),
-        E=flux_divergence_x(flux_x.E),
-        Bx=flux_divergence_x(flux_x.Bx),
-        By=flux_divergence_x(flux_x.By),
-        Bz=flux_divergence_x(flux_x.Bz),
+        rho=flux_divergence(flux_x.rho, 0, dx, geometry.bc_x),
+        mom_x=flux_divergence(flux_x.mom_x, 0, dx, geometry.bc_x),
+        mom_y=flux_divergence(flux_x.mom_y, 0, dx, geometry.bc_x),
+        mom_z=flux_divergence(flux_x.mom_z, 0, dx, geometry.bc_x),
+        E=flux_divergence(flux_x.E, 0, dx, geometry.bc_x),
+        Bx=flux_divergence(flux_x.Bx, 0, dx, geometry.bc_x),
+        By=flux_divergence(flux_x.By, 0, dx, geometry.bc_x),
+        Bz=flux_divergence(flux_x.Bz, 0, dx, geometry.bc_x),
     )
 
     # Z-direction contribution
     dU_z = MHDConserved(
-        rho=flux_divergence_z(flux_z.rho),
-        mom_x=flux_divergence_z(flux_z.mom_x),
-        mom_y=flux_divergence_z(flux_z.mom_y),
-        mom_z=flux_divergence_z(flux_z.mom_z),
-        E=flux_divergence_z(flux_z.E),
-        Bx=flux_divergence_z(flux_z.Bx),
-        By=flux_divergence_z(flux_z.By),
-        Bz=flux_divergence_z(flux_z.Bz),
+        rho=flux_divergence(flux_z.rho, 2, dz, geometry.bc_z),
+        mom_x=flux_divergence(flux_z.mom_x, 2, dz, geometry.bc_z),
+        mom_y=flux_divergence(flux_z.mom_y, 2, dz, geometry.bc_z),
+        mom_z=flux_divergence(flux_z.mom_z, 2, dz, geometry.bc_z),
+        E=flux_divergence(flux_z.E, 2, dz, geometry.bc_z),
+        Bx=flux_divergence(flux_z.Bx, 2, dz, geometry.bc_z),
+        By=flux_divergence(flux_z.By, 2, dz, geometry.bc_z),
+        Bz=flux_divergence(flux_z.Bz, 2, dz, geometry.bc_z),
     )
 
     # Y-direction (if 3D)
@@ -521,7 +535,7 @@ def hlld_update_full(
         dy = geometry.dy
 
         def flux_divergence_y(flux):
-            return -(flux - jnp.roll(flux, 1, axis=1)) / dy
+            return flux_divergence(flux, 1, dy, geometry.bc_y)
 
         dU_y = MHDConserved(
             rho=flux_divergence_y(flux_y.rho),
