@@ -12,7 +12,16 @@ class NumericalInstabilityError(Exception):
 
 
 class Solver(ABC):
-    """Base class for time integration solvers."""
+    """Base class for time integration solvers - owns all numerics."""
+
+    # Timestep control (absorbed from TimeController)
+    cfl_safety: float = 0.5
+    dt_min: float = 1e-12
+    dt_max: float = 1e-3
+
+    # Numerical options (absorbed from NumericalRecipe)
+    use_checked_step: bool = True
+    divergence_cleaning: str = "projection"
 
     @abstractmethod
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
