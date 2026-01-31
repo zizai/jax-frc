@@ -1,6 +1,6 @@
 # Solvers
 
-Time integration methods for advancing the simulation state.
+Time integration methods for advancing the simulation state. Solvers own all numerical concerns including timestep control, divergence cleaning, and stability checks.
 
 ## Available Solvers
 
@@ -12,41 +12,73 @@ Time integration methods for advancing the simulation state.
 | IMEX | `ImexSolver` | Implicit-explicit for resistive diffusion |
 | Hybrid | `HybridSolver` | Particle + field integration |
 
-## Usage
+## Solver Base Class
+
+All solvers inherit from `Solver` and include timestep control:
 
 ```python
-from jax_frc.solvers import RK4Solver, SemiImplicitSolver, HybridSolver
+from jax_frc.solvers.explicit import RK4Solver
 
-# For resistive MHD
-solver = RK4Solver()
-
-# For extended MHD
-solver = SemiImplicitSolver()
-
-# For hybrid kinetic
-solver = HybridSolver()
-```
-
-## TimeController
-
-Adaptive timestep control based on CFL conditions.
-
-```python
-from jax_frc.solvers import TimeController
-
-time_controller = TimeController(
-    cfl_safety=0.25,
-    dt_max=1e-4
+solver = RK4Solver(
+    cfl_safety=0.5,           # CFL safety factor (0-1)
+    dt_min=1e-12,             # Minimum timestep
+    dt_max=1e-3,              # Maximum timestep
+    use_checked_step=True,    # Enable NaN/Inf checking
+    divergence_cleaning="projection"  # div(B)=0 enforcement
 )
+
+# New API: step() computes dt internally
+new_state = solver.step(state, model, geometry)
 ```
 
-### Parameters
+### Solver Attributes
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `cfl_safety` | float | CFL safety factor (0-1) |
-| `dt_max` | float | Maximum allowed timestep |
-| `dt_min` | float | Minimum allowed timestep |
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cfl_safety` | float | 0.5 | CFL safety factor (0-1) |
+| `dt_min` | float | 1e-12 | Minimum allowed timestep |
+| `dt_max` | float | 1e-3 | Maximum allowed timestep |
+| `use_checked_step` | bool | True | Check for NaN/Inf values |
+| `divergence_cleaning` | str | "projection" | Constraint method ("projection", "none") |
+
+### Solver Methods
+
+| Method | Description |
+|--------|-------------|
+| `step(state, model, geometry)` | Complete timestep (compute dt, advance, apply constraints) |
+| `advance(state, dt, model, geometry)` | Advance by explicit dt (no constraints) |
+| `_compute_dt(state, model, geometry)` | Compute stable timestep |
+| `_apply_constraints(state, geometry)` | Apply div(B)=0 cleaning |
+
+## Usage with Simulation
+
+```python
+from jax_frc.simulation import Simulation, Geometry, State
+from jax_frc.models.extended_mhd import ExtendedMHD
+from jax_frc.solvers.explicit import RK4Solver
+
+sim = Simulation.builder() \
+    .geometry(Geometry(nx=64, ny=64, nz=1)) \
+    .model(ExtendedMHD(eta=1e-4)) \
+    .solver(RK4Solver(cfl_safety=0.25)) \
+    .initial_state(State.zeros(64, 64, 1)) \
+    .build()
+
+sim.run(t_end=1.0)
+```
+
+## Deprecated: TimeController
+
+> **Note:** `TimeController` is deprecated. Use `Solver` attributes directly.
+
+```python
+# OLD (deprecated)
+from jax_frc.solvers import TimeController
+time_controller = TimeController(cfl_safety=0.25, dt_max=1e-4)
+
+# NEW
+solver = RK4Solver(cfl_safety=0.25, dt_max=1e-4)
+```
 
 ## Typical Time Steps
 
