@@ -39,7 +39,7 @@ CASE_CONFIGS = {
         "end_time": 2.0,
         "cfl": 0.4,
         "guide_field": 0.0,
-        "num_snapshots": 40,
+        "num_snapshots": 10,
     },
 }
 

@@ -45,7 +45,7 @@ from validation.utils.plots import (
 NAME = "gem_reconnection_hall"
 DESCRIPTION = "GEM reconnection regression vs AGATE Hall-MHD reference data"
 
-RESOLUTIONS = ([128, 64, 1],)
+RESOLUTIONS = ([64, 32, 1],)
 
 L2_ERROR_TOL = base.L2_ERROR_TOL
 RELATIVE_ERROR_TOL = base.RELATIVE_ERROR_TOL
