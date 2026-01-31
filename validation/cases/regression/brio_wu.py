@@ -346,7 +346,7 @@ def run_simulation_with_snapshots(cfg: dict, snapshot_times: list[float]) -> tup
     for target_time in snapshot_times:
         while state.time < target_time - 1e-12:
             step_dt = min(model.compute_stable_dt(state, geometry), target_time - state.time)
-            state = solver.step(state, step_dt, model, geometry)
+            state = solver.step_checked(state, step_dt, model, geometry)
         states.append(state)
         metrics = compute_metrics(
             state.n, state.p, state.v, state.B, geometry.dx, geometry.dy, geometry.dz
