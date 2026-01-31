@@ -29,7 +29,7 @@ Create three new configuration files with physics-based names and proper Cartesi
 
 - `jax_frc/configurations/__init__.py` - Update registry
 - `validation/cases/mhd_regression/orszag_tang.py` - Update import
-- `validation/cases/hall_reconnection/reconnection_gem.py` - Update import
+- `validation/cases/regression/gem_reconnection.py` - Update import
 
 ## Files to Delete
 

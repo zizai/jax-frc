@@ -32,7 +32,7 @@ FRC merging cases validated qualitatively (stability, conservation):
 
 ### Hall Reconnection (`cases/hall_reconnection/`)
 Hall MHD reconnection tests:
-- **reconnection_gem.py** - GEM reconnection regression vs AGATE reference data
+- **gem_reconnection.py** - GEM reconnection regression vs AGATE reference data
 
 ### MHD Regression (`cases/mhd_regression/`)
 Regression tests against reference runs:

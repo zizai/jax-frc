@@ -143,7 +143,7 @@ def load_agate_snapshot(case: str, resolution: list[int], snapshot_idx: int) -> 
     }
 
 
-NAME = "reconnection_gem"
+NAME = "gem_reconnection"
 DESCRIPTION = "GEM reconnection regression vs AGATE reference data (ideal MHD fallback)"
 
 RESOLUTIONS = ([128, 64, 1],)

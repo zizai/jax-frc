@@ -167,10 +167,10 @@ If HTML report issues:
 
 ---
 
-## Task 5: Apply Same Fixes to reconnection_gem.py
+## Task 5: Apply Same Fixes to gem_reconnection.py
 
 **Files:**
-- Modify: `validation/cases/regression/reconnection_gem.py`
+- Modify: `validation/cases/regression/gem_reconnection.py`
 
 Apply any fixes from Task 4 to the GEM reconnection validation case.
 
@@ -191,4 +191,4 @@ Remove the temporary test script after verification is complete.
 - [ ] HTML report has all required sections
 - [ ] All 4 plot types are generated and visible
 - [ ] Quick test mode still works
-- [ ] Both orszag_tang and reconnection_gem produce correct output
+- [ ] Both orszag_tang and gem_reconnection produce correct output

@@ -17,7 +17,7 @@ The implementation is **already complete** from a previous session. Key changes 
 1. **`validation/utils/reporting.py`** - Added `print_field_l2_table()` and `print_scalar_metrics_table()`
 2. **`validation/utils/plots.py`** - Created with `create_scalar_comparison_plot()`, `create_error_threshold_plot()`, `create_field_comparison_plot()`
 3. **`validation/cases/regression/orszag_tang.py`** - Restructured main(), added field L2 computation, fixed AGATE data loading
-4. **`validation/cases/regression/reconnection_gem.py`** - Same changes as orszag_tang.py
+4. **`validation/cases/regression/gem_reconnection.py`** - Same changes as orszag_tang.py
 
 **Critical Fix Applied:** AGATE data shape transformation:
 - Strip ghost cells: `[2:-2, 2:-2, :]`
@@ -55,10 +55,10 @@ Report saved to: validation/reports/YYYY-MM-DDTHH-MM-SS_orszag_tang
 OVERALL: PASS (all resolutions passed)
 ```
 
-**Step 2: Run reconnection_gem quick test**
+**Step 2: Run gem_reconnection quick test**
 
 ```bash
-py -m validation.cases.regression.reconnection_gem --quick
+py -m validation.cases.regression.gem_reconnection --quick
 ```
 
 **Expected:** Similar output with PASS status

@@ -343,7 +343,7 @@ def main(quick_test: bool = False) -> bool:
 | `validation/utils/reporting.py` | Add `print_field_l2_table()`, `print_scalar_metrics_table()` |
 | `validation/utils/plots.py` (new) | Add plot generation functions |
 | `validation/cases/regression/orszag_tang.py` | Restructure main(), add field L2 computation |
-| `validation/cases/regression/reconnection_gem.py` | Same changes as orszag_tang.py |
+| `validation/cases/regression/gem_reconnection.py` | Same changes as orszag_tang.py |
 
 ## Success Criteria
 

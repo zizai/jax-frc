@@ -690,7 +690,7 @@ git commit -m "feat(validation): add error handling and cleanup to AGATE runner"
 
 **Files:**
 - Modify: `validation/cases/regression/orszag_tang.py`
-- Modify: `validation/cases/regression/reconnection_gem.py`
+- Modify: `validation/cases/regression/gem_reconnection.py`
 
 **Step 1: Verify existing validation still works**
 
@@ -699,7 +699,7 @@ Expected: Should work (generates AGATE data if needed)
 
 **Step 2: Run full validation test**
 
-Run: `py -m pytest tests/ -v -k "not slow" --ignore=tests/test_orszag_tang_case.py --ignore=tests/test_reconnection_gem_case.py`
+Run: `py -m pytest tests/ -v -k "not slow" --ignore=tests/test_orszag_tang_case.py --ignore=tests/test_gem_reconnection_case.py`
 Expected: PASS
 
 **Step 3: Commit final integration**

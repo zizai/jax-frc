@@ -242,7 +242,7 @@ git commit -m "feat(agate): save snapshot_times in config YAML"
 
 **Files:**
 - Modify: `validation/cases/regression/orszag_tang.py`
-- Modify: `validation/cases/regression/reconnection_gem.py`
+- Modify: `validation/cases/regression/gem_reconnection.py`
 
 **Step 1: Add load_agate_config function**
 
@@ -312,7 +312,7 @@ def load_agate_snapshot(case: str, resolution: list[int], snapshot_idx: int) -> 
 **Step 3: Commit**
 
 ```bash
-git add validation/cases/regression/orszag_tang.py validation/cases/regression/reconnection_gem.py
+git add validation/cases/regression/orszag_tang.py validation/cases/regression/gem_reconnection.py
 git commit -m "feat(validation): add snapshot loading functions"
 ```
 
@@ -322,7 +322,7 @@ git commit -m "feat(validation): add snapshot loading functions"
 
 **Files:**
 - Modify: `validation/cases/regression/orszag_tang.py`
-- Modify: `validation/cases/regression/reconnection_gem.py`
+- Modify: `validation/cases/regression/gem_reconnection.py`
 
 **Step 1: Add run_simulation_with_snapshots function**
 
@@ -377,7 +377,7 @@ def run_simulation_with_snapshots(
 **Step 2: Commit**
 
 ```bash
-git add validation/cases/regression/orszag_tang.py validation/cases/regression/reconnection_gem.py
+git add validation/cases/regression/orszag_tang.py validation/cases/regression/gem_reconnection.py
 git commit -m "feat(validation): add snapshot simulation function"
 ```
 
@@ -741,7 +741,7 @@ git commit -m "feat(reporting): add aggregate metrics table and update field tab
 
 **Files:**
 - Modify: `validation/cases/regression/orszag_tang.py`
-- Modify: `validation/cases/regression/reconnection_gem.py`
+- Modify: `validation/cases/regression/gem_reconnection.py`
 
 **Step 1: Add QUICK_NUM_SNAPSHOTS constant**
 
@@ -772,18 +772,18 @@ Same thresholds apply - quick mode just uses fewer snapshots.
 **Step 4: Commit**
 
 ```bash
-git add validation/cases/regression/orszag_tang.py validation/cases/regression/reconnection_gem.py
+git add validation/cases/regression/orszag_tang.py validation/cases/regression/gem_reconnection.py
 git commit -m "feat(validation): update quick test mode to use 5 snapshots"
 ```
 
 ---
 
-## Task 12: Apply Changes to reconnection_gem.py
+## Task 12: Apply Changes to gem_reconnection.py
 
 **Files:**
-- Modify: `validation/cases/regression/reconnection_gem.py`
+- Modify: `validation/cases/regression/gem_reconnection.py`
 
-Apply all the same changes from Tasks 4-8 and 11 to reconnection_gem.py:
+Apply all the same changes from Tasks 4-8 and 11 to gem_reconnection.py:
 - Add load_agate_config, load_agate_snapshot
 - Add run_simulation_with_snapshots
 - Add compute_field_metrics, validate_all_snapshots
@@ -795,7 +795,7 @@ Apply all the same changes from Tasks 4-8 and 11 to reconnection_gem.py:
 **Commit:**
 
 ```bash
-git add validation/cases/regression/reconnection_gem.py
+git add validation/cases/regression/gem_reconnection.py
 git commit -m "feat(validation): apply snapshot validation to GEM reconnection"
 ```
 

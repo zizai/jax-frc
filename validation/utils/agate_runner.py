@@ -177,7 +177,7 @@ def _run_orszag_tang(resolution: list[int], output_dir: Path) -> None:
 
 def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
     """Run GEM reconnection simulation with multiple snapshots."""
-    from agate.framework.scenario import ReconnectionGEM
+    from agate.framework.scenario import ReconnectionGEM as GEMReconnection
     from agate.framework.roller import Roller
     from agate.framework.fileHandler import fileHandler
 
@@ -185,7 +185,7 @@ def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
     config = get_expected_config("gem_reconnection", resolution)
     snapshot_times = config["snapshot_times"]
 
-    scenario = ReconnectionGEM(divClean=True, hall=False, guide_field=0.0)
+    scenario = GEMReconnection(divClean=True, hall=False, guide_field=0.0)
     roller = Roller.autodefault(
         scenario,
         ncells=[resolution[0], resolution[1], 1],

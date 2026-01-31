@@ -53,4 +53,4 @@ for Brio-Wu. The Brio-Wu case is renamed from `brio_wu_shock` to `brio_wu`.
 
 ## Verification
 - `py -m scripts/run_validation.py --case brio_wu --quick`
-- `py -m scripts/run_validation.py --case reconnection_gem --quick`
+- `py -m scripts/run_validation.py --case gem_reconnection --quick`
