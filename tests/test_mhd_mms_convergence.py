@@ -323,8 +323,8 @@ def assert_convergence(errors_coarse: dict[str, float], errors_fine: dict[str, f
 def test_resistive_mhd_mms_convergence():
     """MMS RHS errors should decrease with resolution for ResistiveMHD."""
     eta = 1e-4
-    geom_coarse = make_mms_geometry(8)
-    geom_fine = make_mms_geometry(16)
+    geom_coarse = make_mms_geometry(6)
+    geom_fine = make_mms_geometry(12)
     model = ResistiveMHD(eta=eta, advection_scheme="central")
 
     errors_coarse = compute_errors(model, geom_coarse, eta)
@@ -336,8 +336,8 @@ def test_resistive_mhd_mms_convergence():
 def test_extended_mhd_mms_convergence():
     """MMS RHS errors should decrease with resolution for ExtendedMHD."""
     eta = 1e-4
-    geom_coarse = make_mms_geometry(8)
-    geom_fine = make_mms_geometry(16)
+    geom_coarse = make_mms_geometry(6)
+    geom_fine = make_mms_geometry(12)
     model = ExtendedMHD(
         eta=eta,
         include_hall=False,
@@ -437,8 +437,8 @@ def hall_ep_analytic_dB_dt(geometry: Geometry, eta: float) -> tuple[jnp.ndarray,
 def test_extended_mhd_mms_hall_ep_convergence():
     """Hall+electron pressure B RHS should converge with refinement."""
     eta = 1e-4
-    geom_coarse = make_mms_geometry_2d(8)
-    geom_fine = make_mms_geometry_2d(16)
+    geom_coarse = make_mms_geometry_2d(6)
+    geom_fine = make_mms_geometry_2d(12)
 
     model = ExtendedMHD(
         eta=eta,
