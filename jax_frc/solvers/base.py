@@ -56,7 +56,7 @@ class Solver(ABC):
     def step_with_dt(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state by one timestep with explicit dt (legacy API)."""
         new_state = self.advance(state, dt, model, geometry)
-        return model.apply_constraints(new_state, geometry)
+        return self._apply_constraints(new_state, geometry)
 
     def step_checked(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state by one timestep with NaN/Inf checking.
