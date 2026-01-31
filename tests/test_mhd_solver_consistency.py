@@ -28,7 +28,13 @@ def make_diffusion_state(nx: int, ny: int, nz: int, extent: float) -> tuple[Stat
 def test_imex_tiny_dt_rhs_consistency():
     """IMEX update should match RHS for small dt (B diffusion)."""
     state, geometry = make_diffusion_state(nx=16, ny=1, nz=16, extent=1.0)
-    model = ResistiveMHD(eta=1e-4, advection_scheme="central")
+    model = ResistiveMHD(
+        eta=1e-4,
+        advection_scheme="central",
+        evolve_density=False,
+        evolve_velocity=False,
+        evolve_pressure=False,
+    )
     solver = ImexSolver()
 
     dt = 1e-6
@@ -66,7 +72,13 @@ def test_semi_implicit_tiny_dt_rhs_consistency():
 def test_imex_residual_scales_with_dt():
     """IMEX residual should decrease as dt shrinks."""
     state, geometry = make_diffusion_state(nx=16, ny=1, nz=16, extent=1.0)
-    model = ResistiveMHD(eta=1e-4, advection_scheme="central")
+    model = ResistiveMHD(
+        eta=1e-4,
+        advection_scheme="central",
+        evolve_density=False,
+        evolve_velocity=False,
+        evolve_pressure=False,
+    )
     solver = ImexSolver()
     rhs = model.compute_rhs(state, geometry)
 

@@ -15,9 +15,14 @@ class Solver(ABC):
     """Base class for time integration solvers."""
 
     @abstractmethod
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        """Advance state by one timestep without applying constraints."""
+        raise NotImplementedError
+
     def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
-        """Advance state by one timestep."""
-        pass
+        """Advance state by one timestep and apply constraints."""
+        new_state = self.advance(state, dt, model, geometry)
+        return model.apply_constraints(new_state, geometry)
 
     def step_checked(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state by one timestep with NaN/Inf checking.
@@ -25,7 +30,7 @@ class Solver(ABC):
         Raises:
             NumericalInstabilityError: If NaN or Inf values are detected in the result.
         """
-        new_state = self.step(state, dt, model, geometry)
+        new_state = self.advance(state, dt, model, geometry)
         self._check_state(new_state)
         return new_state
 

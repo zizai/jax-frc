@@ -40,7 +40,7 @@ class ImexSolver(Solver):
 
     config: ImexConfig = field(default_factory=ImexConfig)
 
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry: Geometry) -> State:
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry: Geometry) -> State:
         """Advance state by dt using IMEX Strang splitting.
 
         Strang splitting for 2nd-order accuracy:

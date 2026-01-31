@@ -28,7 +28,7 @@ class SemiImplicitSolver(Solver):
     sts_stages: int = 5          # Number of STS stages for temperature
     sts_safety: float = 0.8      # Safety factor for STS timestep
 
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state using semi-implicit Hall damping and STS for temperature."""
         # Apply constraints first to ensure state is well-formed for RHS computation
         # This is critical for roll-based derivatives at boundaries
@@ -68,7 +68,7 @@ class SemiImplicitSolver(Solver):
             time=state.time + dt,
             step=state.step + 1
         )
-        return model.apply_constraints(new_state, geometry)
+        return new_state
 
     def _semi_implicit_B_update(self, state: State, rhs: State,
                                  dt: float, geometry) -> jnp.ndarray:
@@ -198,7 +198,7 @@ class HybridSolver(Solver):
     5. Update delta-f weights
     """
 
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance hybrid simulation by one timestep."""
         # Import here to avoid circular dependency
         from jax_frc.models.hybrid_kinetic import HybridKinetic
@@ -224,5 +224,4 @@ class HybridSolver(Solver):
         # Update time
         state = state.replace(time=state.time + dt, step=state.step + 1)
 
-        # Apply constraints (boundaries)
-        return model.apply_constraints(state, geometry)
+        return state

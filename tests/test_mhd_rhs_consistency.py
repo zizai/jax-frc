@@ -33,7 +33,13 @@ def make_diffusion_state(geometry: Geometry) -> State:
 def test_resistive_mhd_uniform_equilibrium_rhs_zero():
     """Uniform fields should produce a near-zero RHS in ResistiveMHD."""
     geometry = make_geometry(nx=12, ny=1, nz=12, extent=1.0)
-    model = ResistiveMHD(eta=1e-4, advection_scheme="ct")
+    model = ResistiveMHD(
+        eta=1e-4,
+        advection_scheme="ct",
+        evolve_density=False,
+        evolve_velocity=False,
+        evolve_pressure=False,
+    )
     state = make_uniform_state(geometry)
 
     rhs = model.compute_rhs(state, geometry)
@@ -67,7 +73,13 @@ def test_extended_mhd_uniform_equilibrium_rhs_zero():
 def test_resistive_mhd_rk4_tiny_dt_rhs_consistency():
     """Tiny dt RK4 update should match RHS for B evolution."""
     geometry = make_geometry(nx=16, ny=1, nz=16, extent=1.0)
-    model = ResistiveMHD(eta=1e-4, advection_scheme="ct")
+    model = ResistiveMHD(
+        eta=1e-4,
+        advection_scheme="ct",
+        evolve_density=False,
+        evolve_velocity=False,
+        evolve_pressure=False,
+    )
     solver = RK4Solver()
     state = make_diffusion_state(geometry)
 
@@ -87,6 +99,9 @@ def test_extended_mhd_rk4_tiny_dt_rhs_consistency():
         include_hall=False,
         include_electron_pressure=False,
         apply_divergence_cleaning=False,
+        evolve_density=False,
+        evolve_velocity=False,
+        evolve_pressure=False,
     )
     solver = RK4Solver()
     state = make_diffusion_state(geometry)

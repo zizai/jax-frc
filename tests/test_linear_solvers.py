@@ -492,7 +492,12 @@ class TestImexFullStep:
             step=0
         )
 
-        model = ResistiveMHD(eta=1e-3)
+        model = ResistiveMHD(
+            eta=1e-3,
+            evolve_density=False,
+            evolve_velocity=False,
+            evolve_pressure=False,
+        )
 
         dt = 1e-5
 
