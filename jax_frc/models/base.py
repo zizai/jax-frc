@@ -1,5 +1,5 @@
 """Abstract base class for physics models."""
-
+import warnings
 from abc import ABC, abstractmethod
 from jax_frc.core.state import State
 from jax_frc.core.geometry import Geometry
@@ -17,10 +17,19 @@ class PhysicsModel(ABC):
         """Return CFL-stable timestep for this model."""
         pass
 
-    @abstractmethod
     def apply_constraints(self, state: State, geometry: Geometry) -> State:
-        """Enforce physical constraints (e.g., div(B)=0)."""
-        pass
+        """Enforce physical constraints (e.g., div(B)=0).
+        
+        DEPRECATED: Constraint enforcement has moved to Solver._apply_constraints().
+        This method is kept for backward compatibility but will be removed in a future version.
+        """
+        warnings.warn(
+            "Model.apply_constraints() is deprecated. "
+            "Use Solver._apply_constraints() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return state
 
     @classmethod
     def create(cls, config: dict) -> "PhysicsModel":

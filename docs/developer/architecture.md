@@ -4,28 +4,49 @@ This document explains the jax-frc system architecture for developers who want t
 
 ## High-Level Design
 
+The codebase follows a **three-pillar architecture**:
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Simulation                              │
-│  Orchestrates: Model + Solver + Geometry + TimeController   │
+│     Orchestrates: Model + Solver + Geometry (Builder API)   │
 └─────────────────────────────────────────────────────────────┘
         │              │              │              │
         ▼              ▼              ▼              ▼
    ┌─────────┐   ┌─────────┐   ┌──────────┐   ┌────────────┐
    │ Model   │   │ Solver  │   │ Geometry │   │ Diagnostics│
-   │         │   │         │   │          │   │            │
-   │compute_ │   │ step()  │   │ grids    │   │ probes     │
-   │  rhs()  │   │         │   │ coords   │   │ output     │
+   │ (pure   │   │ (pure   │   │          │   │            │
+   │ physics)│   │numerics)│   │ grids    │   │ probes     │
+   │compute_ │   │ step()  │   │ coords   │   │ output     │
+   │  rhs()  │   │_compute │   │          │   │            │
+   │         │   │  _dt()  │   │          │   │            │
    └─────────┘   └─────────┘   └──────────┘   └────────────┘
 ```
 
+### Three Pillars
+
+1. **Model** (pure physics): Only physics equations
+   - `compute_rhs(state, geometry)` - time derivatives
+   - `compute_stable_dt(state, geometry)` - CFL condition
+
+2. **Solver** (pure numerics): All numerical concerns
+   - Timestep control: `cfl_safety`, `dt_min`, `dt_max`
+   - Constraint enforcement: `divergence_cleaning`
+   - Stability checks: `use_checked_step`
+   - `step(state, model, geometry)` - complete timestep
+
+3. **Simulation** (orchestration): Builder pattern API
+   - Fluent builder: `.geometry().model().solver().initial_state().build()`
+   - Phases and callbacks
+   - `run(t_end)` - main loop
+
 ## Data Flow
 
-1. **Initialization**: `Simulation` creates `State` from initial conditions
+1. **Initialization**: `Simulation.builder()` creates configured simulation
 2. **Time Loop**: For each step:
-   - `Model.compute_rhs(state, geometry)` → derivatives
-   - `Solver.step(state, rhs, dt)` → new state
-   - `TimeController` adjusts dt based on CFL/stability
+   - `Solver._compute_dt(state, model, geometry)` → timestep
+   - `Solver.advance(state, dt, model, geometry)` → new state
+   - `Solver._apply_constraints(state, geometry)` → cleaned state
    - `Diagnostics` record measurements
 3. **Output**: Final state + history returned
 
@@ -33,50 +54,94 @@ This document explains the jax-frc system architecture for developers who want t
 
 ```
 jax_frc/
-├── core/               # Geometry, State, Simulation orchestrator
-│   ├── geometry.py     # Grid definitions, coordinate systems
-│   ├── state.py        # Simulation state container
-│   └── simulation.py   # Main orchestrator
-├── models/             # Physics models
+├── simulation/         # Orchestration layer (NEW)
+│   ├── simulation.py   # Simulation, SimulationBuilder
+│   ├── state.py        # State container
+│   ├── geometry.py     # Grid definitions
+│   └── presets/        # Factory functions (create_magnetic_diffusion, etc.)
+├── models/             # Physics models (pure physics)
 │   ├── base.py         # PhysicsModel protocol
 │   ├── resistive_mhd.py
 │   ├── extended_mhd.py
 │   ├── hybrid_kinetic.py
 │   ├── neutral_fluid.py
 │   └── burning_plasma.py
-├── solvers/            # Time integration
+├── solvers/            # Time integration (pure numerics)
+│   ├── base.py         # Solver base with timestep control
 │   ├── explicit.py     # RK4, Euler
 │   ├── semi_implicit.py
-│   └── imex.py         # Implicit-explicit
+│   ├── imex.py         # Implicit-explicit
+│   └── divergence_cleaning.py
+├── core/               # Legacy (use simulation/ instead)
 ├── burn/               # Fusion burn physics
-│   ├── physics.py      # Reaction rates (Bosch-Hale)
-│   ├── species.py      # Fuel tracking
-│   └── conversion.py   # Direct energy conversion
 ├── transport/          # Transport models
-│   └── anomalous.py    # Anomalous diffusion
 ├── comparisons/        # Literature validation
-│   └── belova_merging.py
 ├── validation/         # Validation infrastructure
 ├── diagnostics/        # Output and probes
 ├── boundaries/         # Boundary conditions
-└── configurations/     # Pre-built setups
+└── configurations/     # Pre-built setups (legacy)
 ```
 
 ## Key Abstractions
 
 ### PhysicsModel Protocol
 
-All physics models implement this interface:
+All physics models implement this interface (pure physics only):
 
 ```python
-class PhysicsModel(Protocol):
+class PhysicsModel(ABC):
+    @abstractmethod
     def compute_rhs(self, state: State, geometry: Geometry) -> State:
         """Compute time derivatives for all state variables."""
         ...
 
+    @abstractmethod
     def compute_stable_dt(self, state: State, geometry: Geometry) -> float:
-        """Return maximum stable timestep."""
+        """Return maximum stable timestep (CFL condition)."""
         ...
+```
+
+### Solver Base Class
+
+Solvers own all numerical concerns:
+
+```python
+class Solver(ABC):
+    # Timestep control
+    cfl_safety: float = 0.5
+    dt_min: float = 1e-12
+    dt_max: float = 1e-3
+    
+    # Numerical options
+    use_checked_step: bool = True
+    divergence_cleaning: str = "projection"
+    
+    def step(self, state: State, model: PhysicsModel, geometry) -> State:
+        """Complete step: compute dt, advance, apply constraints."""
+        dt = self._compute_dt(state, model, geometry)
+        new_state = self.advance(state, dt, model, geometry)
+        new_state = self._apply_constraints(new_state, geometry)
+        return new_state
+    
+    @abstractmethod
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        """Advance state by dt (implemented by subclasses)."""
+        ...
+```
+
+### SimulationBuilder
+
+Fluent builder pattern for creating simulations:
+
+```python
+sim = Simulation.builder() \
+    .geometry(Geometry(nx=64, ny=64, nz=1)) \
+    .model(ExtendedMHD(eta=1e-4)) \
+    .solver(RK4Solver()) \
+    .initial_state(State.zeros(64, 64, 1)) \
+    .build()
+
+sim.run(t_end=1.0)
 ```
 
 ### State Container
@@ -86,20 +151,13 @@ Immutable dataclass holding all simulation variables:
 ```python
 @dataclass(frozen=True)
 class State:
-    psi: Array      # Flux function
-    v: Array        # Velocity field
+    B: Array        # Magnetic field
+    E: Array        # Electric field
+    n: Array        # Density
     p: Array        # Pressure
-    rho: Array      # Density
-    t: float        # Current time
-```
-
-### Solver Interface
-
-```python
-class Solver(Protocol):
-    def step(self, state: State, rhs_fn: Callable, dt: float) -> State:
-        """Advance state by dt."""
-        ...
+    v: Array        # Velocity
+    time: float     # Current time
+    step: int       # Step counter
 ```
 
 ## Extension Points

@@ -23,15 +23,40 @@ class Solver(ABC):
     use_checked_step: bool = True
     divergence_cleaning: str = "projection"
 
+    def _compute_dt(self, state: State, model: PhysicsModel, geometry) -> float:
+        """Compute timestep from model CFL and config bounds."""
+        dt_cfl = model.compute_stable_dt(state, geometry) * self.cfl_safety
+        return float(jnp.clip(dt_cfl, self.dt_min, self.dt_max))
+
+    def _apply_constraints(self, state: State, geometry) -> State:
+        """Apply div(B)=0 cleaning based on divergence_cleaning setting."""
+        if self.divergence_cleaning == "none":
+            return state
+        elif self.divergence_cleaning == "projection":
+            from jax_frc.solvers.divergence_cleaning import clean_divergence
+            B_clean = clean_divergence(state.B, geometry)
+            return state.replace(B=B_clean)
+        # Add more cleaning methods as needed
+        return state
+
     @abstractmethod
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state by one timestep without applying constraints."""
         raise NotImplementedError
 
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
-        """Advance state by one timestep and apply constraints."""
+    def step(self, state: State, model: PhysicsModel, geometry) -> State:
+        """Complete step: compute dt, advance, apply constraints."""
+        dt = self._compute_dt(state, model, geometry)
         new_state = self.advance(state, dt, model, geometry)
-        return model.apply_constraints(new_state, geometry)
+        new_state = self._apply_constraints(new_state, geometry)
+        if self.use_checked_step:
+            self._check_state(new_state)
+        return new_state
+
+    def step_with_dt(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        """Advance state by one timestep with explicit dt (legacy API)."""
+        new_state = self.advance(state, dt, model, geometry)
+        return self._apply_constraints(new_state, geometry)
 
     def step_checked(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state by one timestep with NaN/Inf checking.

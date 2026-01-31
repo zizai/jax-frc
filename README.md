@@ -37,18 +37,36 @@ python scripts/run.py examples/merging.yaml
 ```
 
 ```python
-from jax_frc import Simulation, Geometry, ResistiveMHD, RK4Solver, TimeController
-import jax.numpy as jnp
+from jax_frc.simulation import Simulation, Geometry, State
+from jax_frc.models.extended_mhd import ExtendedMHD
+from jax_frc.solvers.explicit import RK4Solver
 
-geometry = Geometry(coord_system='cylindrical', nr=32, nz=64,
-                    r_min=0.01, r_max=1.0, z_min=-1.0, z_max=1.0)
-model = ResistiveMHD.from_config({'resistivity': {'type': 'chodura', 'eta_0': 1e-6}})
-solver = RK4Solver()
-time_controller = TimeController(cfl_safety=0.25, dt_max=1e-4)
+# Build simulation with fluent API
+geometry = Geometry(nx=64, ny=64, nz=1,
+                    x_min=-1.0, x_max=1.0,
+                    y_min=-1.0, y_max=1.0)
+model = ExtendedMHD(eta=1e-4)
+solver = RK4Solver(cfl_safety=0.25, dt_max=1e-4)
+state = State.zeros(64, 64, 1)
 
-sim = Simulation(geometry=geometry, model=model, solver=solver, time_controller=time_controller)
-sim.initialize(psi_init=lambda r, z: (1 - r**2) * jnp.exp(-z**2))
-final_state = sim.run_steps(100)
+sim = Simulation.builder() \
+    .geometry(geometry) \
+    .model(model) \
+    .solver(solver) \
+    .initial_state(state) \
+    .build()
+
+# Run simulation
+final_state = sim.run(t_end=1.0)
+```
+
+Or use a preset configuration:
+
+```python
+from jax_frc.simulation.presets import create_magnetic_diffusion
+
+sim = create_magnetic_diffusion(nx=64, ny=64)
+sim.run(t_end=0.1)
 ```
 
 ## Documentation
@@ -80,8 +98,10 @@ py -m pytest tests/ -k "not slow"
 ```
 jax-frc/
 ├── jax_frc/           # Main package
-│   ├── models/        # Physics models
-│   ├── solvers/       # Time integration
+│   ├── simulation/    # Orchestration layer (Simulation, State, Geometry)
+│   │   └── presets/   # Pre-configured simulations
+│   ├── models/        # Physics models (compute_rhs, compute_stable_dt)
+│   ├── solvers/       # Time integration (step, _compute_dt, _apply_constraints)
 │   ├── burn/          # Fusion burn physics
 │   ├── transport/     # Anomalous transport
 │   ├── comparisons/   # Literature validation
@@ -90,6 +110,33 @@ jax-frc/
 ├── examples/          # Example configurations
 ├── docs/              # Documentation
 └── CONTRIBUTING.md    # Contribution guidelines
+```
+
+## Architecture
+
+The codebase follows a **three-pillar architecture**:
+
+- **Model** (pure physics): `compute_rhs()`, `compute_stable_dt()` - physics equations only
+- **Solver** (pure numerics): timestep control, divergence cleaning, stability checks
+- **Simulation** (orchestration): builder pattern, phases, callbacks
+
+```python
+# Solver owns all numerical concerns
+solver = RK4Solver(
+    cfl_safety=0.5,      # Timestep control
+    dt_min=1e-12,
+    dt_max=1e-3,
+    divergence_cleaning="projection",  # Constraint enforcement
+    use_checked_step=True              # NaN/Inf checking
+)
+
+# Simulation orchestrates everything
+sim = Simulation.builder() \
+    .geometry(geometry) \
+    .model(model) \
+    .solver(solver) \
+    .initial_state(state) \
+    .build()
 ```
 
 ## Contributing

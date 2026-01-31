@@ -1,13 +1,63 @@
 # Core API
 
-The core module provides the fundamental classes for building simulations.
+The simulation module provides the fundamental classes for building simulations.
+
+## Simulation
+
+Main orchestrator class using the builder pattern.
+
+```python
+from jax_frc.simulation import Simulation, Geometry, State
+from jax_frc.models.extended_mhd import ExtendedMHD
+from jax_frc.solvers.explicit import RK4Solver
+
+sim = Simulation.builder() \
+    .geometry(Geometry(nx=64, ny=64, nz=1)) \
+    .model(ExtendedMHD(eta=1e-4)) \
+    .solver(RK4Solver(cfl_safety=0.25)) \
+    .initial_state(State.zeros(64, 64, 1)) \
+    .build()
+
+# Run simulation
+final_state = sim.run(t_end=1.0)
+```
+
+### SimulationBuilder Methods
+
+| Method | Description |
+|--------|-------------|
+| `geometry(g)` | Set computational geometry |
+| `model(m)` | Set physics model |
+| `solver(s)` | Set time integration solver |
+| `initial_state(s)` | Set initial state |
+| `phases(p)` | Set simulation phases (optional) |
+| `callbacks(c)` | Set callbacks (optional) |
+| `build()` | Create Simulation instance |
+
+### Simulation Methods
+
+| Method | Description |
+|--------|-------------|
+| `step()` | Advance one timestep |
+| `run(t_end)` | Run until t_end |
+
+### Presets
+
+Pre-configured simulations for common test cases:
+
+```python
+from jax_frc.simulation.presets import create_magnetic_diffusion
+
+sim = create_magnetic_diffusion(nx=64, ny=64, eta=1e-10)
+sim.run(t_end=0.1)
+```
 
 ## Geometry
 
 Defines the 3D Cartesian computational domain.
 
 ```python
-from jax_frc import Geometry
+from jax_frc.simulation import Geometry
 
 geometry = Geometry(
     nx=32, ny=32, nz=64,
@@ -50,7 +100,7 @@ For 2D-like simulations, use a thin dimension (e.g., `ny=4`) with periodic bound
 Container for simulation state variables.
 
 ```python
-from jax_frc.core import State, ParticleState
+from jax_frc.simulation import State
 
 # Create zero-initialized state
 state = State.zeros(nx=32, ny=32, nz=64)
