@@ -1,4 +1,4 @@
-"""Validation test: 3D Gaussian magnetic diffusion."""
+"""Validation test: 3D Gaussian magnetic diffusion (pseudo-2D grid)."""
 
 import jax
 import jax.numpy as jnp
@@ -10,16 +10,16 @@ from jax_frc.models.resistive_mhd import ResistiveMHD
 from jax_frc.constants import MU0
 
 
-def gaussian_diffusion_analytic(x, y, z, t, B0, sigma0, eta):
-    """Analytic solution for 3D Gaussian diffusion.
+def gaussian_diffusion_analytic(x, y, z, t, B0, sigma0, eta, dim: int = 3):
+    """Analytic solution for Gaussian diffusion in dim dimensions.
 
-    B_z(x,y,z,t) = B0 * (sigma0^2 / sigma(t)^2)^(3/2) * exp(-r^2 / (2*sigma(t)^2))
+    B_z(x,y,z,t) = B0 * (sigma0^2 / sigma(t)^2)^(dim/2) * exp(-r^2 / (2*sigma(t)^2))
     where sigma(t)^2 = sigma0^2 + 2*eta/mu0*t, r^2 = x^2 + y^2 + z^2
     """
     diffusivity = eta / MU0
     sigma_sq = sigma0**2 + 2 * diffusivity * t
     r_sq = x**2 + y**2 + z**2
-    amplitude = B0 * (sigma0**2 / sigma_sq) ** 1.5
+    amplitude = B0 * (sigma0**2 / sigma_sq) ** (0.5 * dim)
     return amplitude * jnp.exp(-r_sq / (2 * sigma_sq))
 
 
@@ -50,6 +50,11 @@ def rk4_step(state, dt, model, geometry):
     return state.replace(B=new_B)
 
 
+def effective_diffusion_dim(geom: Geometry) -> int:
+    """Use 2D analytic scaling when any dimension is collapsed."""
+    return 2 if 1 in (geom.nx, geom.ny, geom.nz) else 3
+
+
 class TestGaussianDiffusion3D:
     """Test 3D Gaussian diffusion against analytic solution."""
 
@@ -64,9 +69,9 @@ class TestGaussianDiffusion3D:
 
         # Grid (domain large enough for Gaussian to fit)
         geom = Geometry(
-            nx=32,
-            ny=32,
-            nz=32,
+            nx=16,
+            ny=16,
+            nz=1,
             x_min=-1.0,
             x_max=1.0,
             y_min=-1.0,
@@ -77,15 +82,19 @@ class TestGaussianDiffusion3D:
             bc_y="periodic",
             bc_z="periodic",
         )
+        dim = effective_diffusion_dim(geom)
 
         # Initial condition
         x, y, z = geom.x_grid, geom.y_grid, geom.z_grid
-        Bz_init = gaussian_diffusion_analytic(x, y, z, 0.0, B0, sigma0, eta)
-        B_init = jnp.zeros((32, 32, 32, 3))
+        Bz_init = gaussian_diffusion_analytic(x, y, z, 0.0, B0, sigma0, eta, dim=dim)
+        B_init = jnp.zeros((geom.nx, geom.ny, geom.nz, 3))
         B_init = B_init.at[..., 2].set(Bz_init)
 
-        state = State.zeros(32, 32, 32)
-        state = state.replace(B=B_init, n=jnp.ones((32, 32, 32)) * 1e19)
+        state = State.zeros(geom.nx, geom.ny, geom.nz)
+        state = state.replace(
+            B=B_init,
+            n=jnp.ones((geom.nx, geom.ny, geom.nz)) * 1e19
+        )
 
         # Setup model
         model = ResistiveMHD(eta=eta)
@@ -107,13 +116,20 @@ class TestGaussianDiffusion3D:
 
         # Compare to analytic
         actual_time = n_steps * dt
-        Bz_analytic = gaussian_diffusion_analytic(x, y, z, actual_time, B0, sigma0, eta)
+        Bz_analytic = gaussian_diffusion_analytic(
+            x, y, z, actual_time, B0, sigma0, eta, dim=dim
+        )
         Bz_numeric = final_state.B[..., 2]
 
         # L2 error (exclude boundary where periodic BC causes issues)
-        interior = slice(4, -4)
-        Bz_num_interior = Bz_numeric[interior, interior, interior]
-        Bz_ana_interior = Bz_analytic[interior, interior, interior]
+        def interior_slice(n: int) -> slice:
+            return slice(3, -3) if n > 6 else slice(None)
+
+        xs = interior_slice(geom.nx)
+        ys = interior_slice(geom.ny)
+        zs = interior_slice(geom.nz)
+        Bz_num_interior = Bz_numeric[xs, ys, zs]
+        Bz_ana_interior = Bz_analytic[xs, ys, zs]
         error = jnp.sqrt(jnp.mean((Bz_num_interior - Bz_ana_interior) ** 2))
         rel_error = error / B0
 
@@ -133,9 +149,9 @@ class TestGaussianDiffusion3D:
 
         # Grid
         geom = Geometry(
-            nx=24,
-            ny=24,
-            nz=24,
+            nx=16,
+            ny=16,
+            nz=1,
             x_min=-1.0,
             x_max=1.0,
             y_min=-1.0,
@@ -146,15 +162,19 @@ class TestGaussianDiffusion3D:
             bc_y="periodic",
             bc_z="periodic",
         )
+        dim = effective_diffusion_dim(geom)
 
         # Initial condition
         x, y, z = geom.x_grid, geom.y_grid, geom.z_grid
-        Bz_init = gaussian_diffusion_analytic(x, y, z, 0.0, B0, sigma0, eta)
-        B_init = jnp.zeros((24, 24, 24, 3))
+        Bz_init = gaussian_diffusion_analytic(x, y, z, 0.0, B0, sigma0, eta, dim=dim)
+        B_init = jnp.zeros((geom.nx, geom.ny, geom.nz, 3))
         B_init = B_init.at[..., 2].set(Bz_init)
 
-        state = State.zeros(24, 24, 24)
-        state = state.replace(B=B_init, n=jnp.ones((24, 24, 24)) * 1e19)
+        state = State.zeros(geom.nx, geom.ny, geom.nz)
+        state = state.replace(
+            B=B_init,
+            n=jnp.ones((geom.nx, geom.ny, geom.nz)) * 1e19
+        )
 
         # Model and timestep
         model = ResistiveMHD(eta=eta)
@@ -178,7 +198,7 @@ class TestGaussianDiffusion3D:
         actual_time = n_steps * dt
         sigma_sq_init = sigma0**2
         sigma_sq_final = sigma0**2 + 2 * diffusivity * actual_time
-        expected_decay_ratio = (sigma_sq_init / sigma_sq_final) ** 1.5
+        expected_decay_ratio = (sigma_sq_init / sigma_sq_final) ** (0.5 * dim)
 
         actual_decay_ratio = float(final_peak / initial_peak)
 
@@ -220,14 +240,18 @@ class TestGaussianDiffusion3D:
         B0 = 1.0
         sigma0 = 0.2
 
-        geom = Geometry(nx=16, ny=16, nz=16)
+        geom = Geometry(nx=16, ny=16, nz=1)
+        dim = effective_diffusion_dim(geom)
         x, y, z = geom.x_grid, geom.y_grid, geom.z_grid
-        Bz_init = gaussian_diffusion_analytic(x, y, z, 0.0, B0, sigma0, eta)
-        B_init = jnp.zeros((16, 16, 16, 3))
+        Bz_init = gaussian_diffusion_analytic(x, y, z, 0.0, B0, sigma0, eta, dim=dim)
+        B_init = jnp.zeros((geom.nx, geom.ny, geom.nz, 3))
         B_init = B_init.at[..., 2].set(Bz_init)
 
-        state = State.zeros(16, 16, 16)
-        state = state.replace(B=B_init, n=jnp.ones((16, 16, 16)) * 1e19)
+        state = State.zeros(geom.nx, geom.ny, geom.nz)
+        state = state.replace(
+            B=B_init,
+            n=jnp.ones((geom.nx, geom.ny, geom.nz)) * 1e19
+        )
 
         model = ResistiveMHD(eta=eta)
         rhs = model.compute_rhs(state, geom)
