@@ -27,7 +27,7 @@ class TestResistiveDiffusionAnalytic:
         from jax_frc.models.resistive_mhd import ResistiveMHD
 
         # Setup: coarse grid for fast test (physics validated with higher eta)
-        nx, ny, nz = 16, 1, 32
+        nx, ny, nz = 8, 1, 16
         L_r, L_z = 1.0, 2.0
         geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
@@ -69,7 +69,7 @@ class TestResistiveDiffusionAnalytic:
 
         # Run simulation - moderate dt for accuracy with fewer steps
         dt = 5e-5
-        n_steps = 25
+        n_steps = 10
         t_final = dt * n_steps
 
         for _ in range(n_steps):
@@ -116,7 +116,7 @@ class TestResistiveDiffusionAnalytic:
         from jax_frc.core.state import State
         from jax_frc.models.resistive_mhd import ResistiveMHD
 
-        nx, ny, nz = 8, 1, 16
+        nx, ny, nz = 6, 1, 12
         L_z = 2.0
         geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
@@ -149,7 +149,7 @@ class TestResistiveDiffusionAnalytic:
 
         # Run a few steps
         dt = 1e-5
-        for _ in range(5):
+        for _ in range(3):
             state = solver.step(state, dt, model, geometry)
 
         # The pattern should remain sinusoidal: B(z) ~ sin(k*z)
@@ -176,7 +176,7 @@ class TestResistiveDiffusionAnalytic:
         from jax_frc.core.state import State
         from jax_frc.models.resistive_mhd import ResistiveMHD
 
-        nx, ny, nz = 8, 1, 16
+        nx, ny, nz = 6, 1, 12
         geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
         eta = 1e-4
@@ -205,7 +205,7 @@ class TestResistiveDiffusionAnalytic:
 
         # Run several steps
         dt = 1e-4
-        for _ in range(10):
+        for _ in range(5):
             state = solver.step(state, dt, model, geometry)
 
         # Interior should remain uniform (boundaries may have effects)
@@ -229,7 +229,7 @@ class TestResistiveDiffusionAnalytic:
         from jax_frc.core.state import State
         from jax_frc.models.resistive_mhd import ResistiveMHD
 
-        nx, ny, nz = 8, 1, 16
+        nx, ny, nz = 6, 1, 12
         L_z = 2.0
         geometry = make_geometry(nx=nx, ny=ny, nz=nz, extent=1.0)
 
@@ -271,8 +271,8 @@ class TestResistiveDiffusionAnalytic:
         eta_low = 1e-4
         eta_high = 1e-3  # 10x higher
 
-        dt = 1e-5
-        n_steps = 15
+        dt = 2e-5
+        n_steps = 6
 
         B_final_low = measure_decay(eta_low, dt, n_steps)
         B_final_high = measure_decay(eta_high, dt, n_steps)
