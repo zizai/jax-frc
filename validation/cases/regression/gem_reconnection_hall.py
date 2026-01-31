@@ -109,6 +109,13 @@ def run_simulation_with_snapshots(
     states: list = []
     history = {"times": [], "metrics": []}
 
+    # Pre-compile by running one step (warmup)
+    if use_cfl:
+        warmup_dt = float(model.compute_stable_dt(state, geometry)) * dt_scale
+    else:
+        warmup_dt = float(dt_limit) * dt_scale if dt_limit else 1e-4
+    _ = solver.advance(state, warmup_dt * 0.01, model, geometry)
+
     for target_time in snapshot_times:
         while state.time < target_time - 1e-12:
             if use_cfl:
@@ -122,8 +129,11 @@ def run_simulation_with_snapshots(
             if dt <= 0:
                 raise ValueError("dt must be positive")
             step_dt = min(dt, target_time - state.time)
-            state = solver.step_checked(state, step_dt, model, geometry)
+            # Use advance() for speed; check NaN/Inf at snapshot boundaries
+            state = solver.advance(state, step_dt, model, geometry)
 
+        # Check for numerical instability at snapshot boundaries
+        solver._check_state(state)
         states.append(state)
         metrics = base.compute_metrics(
             state.n, state.p, state.v, state.B, geometry.dx, geometry.dy, geometry.dz
