@@ -28,6 +28,17 @@ class Solver(ABC):
         dt_cfl = model.compute_stable_dt(state, geometry) * self.cfl_safety
         return float(jnp.clip(dt_cfl, self.dt_min, self.dt_max))
 
+    def _apply_constraints(self, state: State, geometry) -> State:
+        """Apply div(B)=0 cleaning based on divergence_cleaning setting."""
+        if self.divergence_cleaning == "none":
+            return state
+        elif self.divergence_cleaning == "projection":
+            from jax_frc.solvers.divergence_cleaning import clean_divergence
+            B_clean = clean_divergence(state.B, geometry)
+            return state.replace(B=B_clean)
+        # Add more cleaning methods as needed
+        return state
+
     @abstractmethod
     def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         """Advance state by one timestep without applying constraints."""

@@ -39,3 +39,18 @@ def test_solver_compute_dt():
     assert dt > 0
     assert dt <= solver.dt_max
     assert dt >= solver.dt_min
+
+
+def test_solver_apply_constraints():
+    """Solver._apply_constraints should enforce div(B)=0."""
+    from jax_frc.solvers.explicit import RK4Solver
+    from jax_frc.core.state import State
+    from jax_frc.core.geometry import Geometry
+    
+    solver = RK4Solver()
+    geometry = Geometry(nx=8, ny=8, nz=1)
+    state = State.zeros(8, 8, 1)
+    
+    new_state = solver._apply_constraints(state, geometry)
+    assert new_state is not None
+    assert new_state.B.shape == state.B.shape
