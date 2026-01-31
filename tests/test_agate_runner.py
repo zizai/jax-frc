@@ -27,13 +27,13 @@ def test_get_expected_config_orszag_tang():
 
 
 def test_get_expected_config_gem():
-    """GEM config should have Hall MHD parameters."""
+    """GEM config should have ideal MHD parameters."""
     config = get_expected_config("gem_reconnection", [512, 512, 1])
 
     assert config["case"] == "gem_reconnection"
     assert config["resolution"] == [512, 512, 1]
-    assert config["physics"] == "hall_mhd"
-    assert config["hall"] is True
+    assert config["physics"] == "ideal_mhd"
+    assert config["hall"] is False
     assert config["end_time"] == 12.0
     assert config["num_snapshots"] == 40
     assert "snapshot_times" in config

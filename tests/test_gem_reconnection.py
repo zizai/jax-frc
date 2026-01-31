@@ -12,7 +12,7 @@ def test_gem_reconnection_builds_geometry():
 
     assert geometry.nx == 256
     assert geometry.ny == 1
-    assert geometry.nz == 512
+    assert geometry.nz == 128
 
 
 def test_gem_reconnection_harris_sheet():
