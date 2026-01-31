@@ -9,6 +9,13 @@ import yaml
 
 # Case configurations
 CASE_CONFIGS = {
+    "brio_wu": {
+        "physics": "ideal_mhd",
+        "hall": False,
+        "end_time": 0.1,
+        "cfl": 0.4,
+        "num_snapshots": 40,
+    },
     "orszag_tang": {
         "physics": "ideal_mhd",
         "hall": False,
@@ -209,8 +216,49 @@ def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
         handler.outputState(roller.grid, roller.state, time_value, newCount=i)
 
 
+def _run_brio_wu(resolution: list[int], output_dir: Path) -> None:
+    """Run Brio-Wu shock tube with multiple snapshots."""
+    from agate.framework.scenario import BrioWu
+    from agate.framework.roller import Roller
+    from agate.framework.fileHandler import fileHandler
+
+    resolution = _normalize_resolution(resolution)
+    config = get_expected_config("brio_wu", resolution)
+    snapshot_times = config["snapshot_times"]
+
+    scenario = BrioWu()
+    roller = Roller.autodefault(
+        scenario,
+        ncells=resolution[0],
+        options={"cfl": 0.4},
+    )
+    roller.orient("numpy")
+    roller.time = 0.0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    res_str = f"{resolution[0]}"
+    handler = fileHandler(directory=str(output_dir), prefix=f"brio_wu_{res_str}")
+    handler.outputGrid(roller.grid)
+
+    def _safe_time(value: object) -> float:
+        return float(value) if value is not None else 0.0
+
+    print(f"Running Brio-Wu at resolution {resolution}...")
+    for i, target_time in enumerate(snapshot_times):
+        time_value = _safe_time(roller.time)
+        if i == 0:
+            handler.outputState(roller.grid, roller.state, time_value, newCount=i)
+            continue
+        try:
+            roller.roll(start_time=roller.time, end_time=target_time, add_stopWatch=False)
+        except Exception as e:
+            raise RuntimeError(f"Brio-Wu simulation failed at t={target_time}: {e}") from e
+        time_value = _safe_time(roller.time)
+        handler.outputState(roller.grid, roller.state, time_value, newCount=i)
+
+
 def run_agate_simulation(
-    case: Literal["orszag_tang", "gem_reconnection"],
+    case: Literal["brio_wu", "orszag_tang", "gem_reconnection"],
     resolution: list[int] | tuple[int, ...] | int,
     output_dir: Path,
     overwrite: bool = False
@@ -255,7 +303,9 @@ def run_agate_simulation(
 
     try:
         # Run simulation
-        if case == "orszag_tang":
+        if case == "brio_wu":
+            _run_brio_wu(resolution, output_dir)
+        elif case == "orszag_tang":
             _run_orszag_tang(resolution, output_dir)
         elif case == "gem_reconnection":
             _run_gem_reconnection(resolution, output_dir)

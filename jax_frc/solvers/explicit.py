@@ -58,6 +58,64 @@ class EulerSolver(Solver):
 
 
 @dataclass(frozen=True)
+class RK2Solver(Solver):
+    """2nd-order Runge-Kutta (Heun/SSPRK2) integration."""
+
+    @partial(jax.jit, static_argnums=(0, 3, 4))
+    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        def add_scaled_rhs(base: State, rhs: State, scale: float) -> State:
+            new_n = base.n + scale * rhs.n if base.n is not None and rhs.n is not None else base.n
+            new_v = base.v + scale * rhs.v if base.v is not None and rhs.v is not None else base.v
+            new_p = base.p + scale * rhs.p if base.p is not None and rhs.p is not None else base.p
+            new_B = base.B + scale * rhs.B
+            psi_base = base.psi if base.psi is not None else (
+                jnp.zeros_like(rhs.psi) if rhs.psi is not None else None
+            )
+            new_psi = psi_base + scale * rhs.psi if rhs.psi is not None else base.psi
+            new_E = base.E + scale * rhs.E if rhs.E is not None else base.E
+            new_Te = None
+            if base.Te is not None and rhs.Te is not None:
+                new_Te = base.Te + scale * rhs.Te
+            return base.replace(n=new_n, v=new_v, p=new_p, B=new_B, psi=new_psi, E=new_E, Te=new_Te)
+
+        k1 = model.compute_rhs(state, geometry)
+        state_k2 = add_scaled_rhs(state, k1, dt)
+        k2 = model.compute_rhs(state_k2, geometry)
+
+        new_n = state.n + 0.5 * dt * (k1.n + k2.n) if state.n is not None and k1.n is not None else state.n
+        new_v = state.v + 0.5 * dt * (k1.v + k2.v) if state.v is not None and k1.v is not None else state.v
+        new_p = state.p + 0.5 * dt * (k1.p + k2.p) if state.p is not None and k1.p is not None else state.p
+        new_B = state.B + 0.5 * dt * (k1.B + k2.B)
+        psi_base = state.psi if state.psi is not None else (
+            jnp.zeros_like(k1.psi) if k1.psi is not None else None
+        )
+        new_psi = psi_base
+        if k1.psi is not None:
+            new_psi = psi_base + 0.5 * dt * (k1.psi + k2.psi)
+
+        new_E = state.E
+        if k1.E is not None:
+            new_E = state.E + 0.5 * dt * (k1.E + k2.E)
+
+        new_Te = None
+        if state.Te is not None and k1.Te is not None:
+            new_Te = state.Te + 0.5 * dt * (k1.Te + k2.Te)
+
+        new_state = state.replace(
+            n=new_n,
+            v=new_v,
+            p=new_p,
+            B=new_B,
+            psi=new_psi,
+            E=new_E,
+            Te=new_Te,
+            time=state.time + dt,
+            step=state.step + 1,
+        )
+        return model.apply_constraints(new_state, geometry)
+
+
+@dataclass(frozen=True)
 class RK4Solver(Solver):
     """4th-order Runge-Kutta integration.
 

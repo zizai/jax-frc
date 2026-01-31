@@ -16,7 +16,7 @@ Create three new configuration files with physics-based names and proper Cartesi
 
 1. `jax_frc/configurations/orszag_tang.py` - OrszagTangConfiguration
 2. `jax_frc/configurations/gem_reconnection.py` - GEMReconnectionConfiguration
-3. `jax_frc/configurations/brio_wu_shock.py` - BrioWuShockConfiguration
+3. `jax_frc/configurations/brio_wu.py` - BrioWuConfiguration
 
 ## Key Changes
 

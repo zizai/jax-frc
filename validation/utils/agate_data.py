@@ -29,6 +29,12 @@ class AgateDataLoader:
         files = record.get("files", [])
         case = case.lower()
         res_token = str(resolution)
+        if case in ("bw", "brio_wu", "brio"):
+            return [
+                f
+                for f in files
+                if "brio" in f["key"].lower() and res_token in f["key"]
+            ]
         if case == "gem":
             return [
                 f
@@ -78,7 +84,7 @@ class AgateDataLoader:
         3. Return paths to data files
         """
         # Map short names to full names
-        case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
+        case_map = {"ot": "orszag_tang", "gem": "gem_reconnection", "bw": "brio_wu", "brio_wu": "brio_wu", "brio": "brio_wu"}
         full_case = case_map.get(case.lower(), case.lower())
 
         if isinstance(resolution, (list, tuple)):
@@ -109,7 +115,7 @@ class AgateDataLoader:
     def _ensure_files_zenodo(self, case: str, resolution: int) -> list[Path]:
         """Original Zenodo download logic (fallback)."""
         # Map to full case name for consistent directory structure
-        case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
+        case_map = {"ot": "orszag_tang", "gem": "gem_reconnection", "bw": "brio_wu", "brio_wu": "brio_wu", "brio": "brio_wu"}
         full_case = case_map.get(case.lower(), case.lower())
 
         files = self._select_files(case, resolution)  # Keep original for API

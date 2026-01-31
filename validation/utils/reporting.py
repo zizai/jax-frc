@@ -345,7 +345,7 @@ def print_field_l2_table(field_errors: dict, threshold: float) -> None:
             print(f"    {name:<16} {error:>8.4f}   {threshold:>9.2f}  {status}")
 
 
-def print_aggregate_metrics_table(aggregate_metrics: dict, threshold: float) -> None:
+def print_aggregate_metrics_table(aggregate_metrics: dict, threshold: float | dict) -> None:
     """Print aggregate time-series metrics table.
 
     Args:
@@ -356,11 +356,13 @@ def print_aggregate_metrics_table(aggregate_metrics: dict, threshold: float) -> 
     print("    Metric                Mean Resid   Std Resid   Rel Error   Status")
     print("    " + "-" * 68)
 
+    default_threshold = threshold.get("_default") if isinstance(threshold, dict) else threshold
     for name, stats in aggregate_metrics.items():
         mean_r = stats["mean_residual"]
         std_r = stats["std_residual"]
         rel_e = stats["relative_error"]
-        passed = rel_e <= threshold
+        metric_threshold = threshold.get(name, default_threshold) if isinstance(threshold, dict) else threshold
+        passed = rel_e <= metric_threshold
         status = "PASS" if passed else "FAIL"
         print(f"    {name:<20} {mean_r:>10.4f}   {std_r:>9.4f}   {rel_e:>9.3f}   {status}")
 

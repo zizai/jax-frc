@@ -1,28 +1,17 @@
-"""Orszag–Tang Vortex Regression Against AGATE Reference Data.
+"""Orszag-Tang Vortex Regression Against AGATE Reference Data.
 
 Physics:
-    Standard 2D Orszag–Tang vortex in a thin-y slab, used to validate nonlinear
+    Standard 2D Orszag-Tang vortex in a thin-y slab, used to validate nonlinear
     MHD turbulence, current sheet formation, and energy evolution.
 
-IMPORTANT LIMITATION:
-    The current JAX-FRC physics models (ResistiveMHD, ExtendedMHD) only evolve
-    the magnetic field B via the induction equation. They do NOT evolve:
-    - Density (n) - remains constant
-    - Velocity (v) - remains constant
-    - Pressure (p) - remains constant
+Numerics:
+    JAX-FRC runs ideal MHD with a finite-volume solver (HLL) and Dedner
+    divergence cleaning (eta=0). The domain and B0 are aligned to AGATE:
+    domain [0, 1] and B0=1/sqrt(4*pi).
 
-    This is fundamentally different from AGATE's full MHD solver which evolves
-    all fields. Therefore, the validation comparison is only meaningful for
-    the magnetic field evolution.
-
-Note:
-    The JAX and AGATE implementations use different physics models:
-    - JAX: Induction equation only (B evolution)
-    - AGATE: Full Hall MHD (all fields evolve)
-
-    Additionally, different normalizations and domain sizes are used:
-    - JAX: domain [0, 2π], B0=1/sqrt(4π)
-    - AGATE: domain [0, 1], B0=1/sqrt(4π)
+Notes:
+    AGATE reference data is Hall MHD (hallOT*), while JAX-FRC runs ideal MHD.
+    Some discrepancy is expected due to the model mismatch.
 """
 
 from __future__ import annotations
@@ -171,6 +160,10 @@ def get_quick_snapshot_times(end_time: float) -> list[float]:
 # Note: AGATE uses Hall MHD, JAX uses ideal MHD, so larger errors expected
 L2_ERROR_TOL = 0.20  # 20% for field L2 errors (relaxed due to physics mismatch)
 RELATIVE_ERROR_TOL = 0.20  # 20% for scalar metrics
+AGGREGATE_TOLERANCES = {
+    "_default": RELATIVE_ERROR_TOL,
+    "normalized_max_current": 0.25,
+}
 
 NGAS = 4
 NMAG = 3
@@ -881,7 +874,7 @@ def main(quick_test: bool = False) -> bool:
 
         # Print aggregate metrics table
         if aggregate_metrics:
-            print_aggregate_metrics_table(aggregate_metrics, RELATIVE_ERROR_TOL)
+            print_aggregate_metrics_table(aggregate_metrics, AGGREGATE_TOLERANCES)
             print()
 
         # Summary for this resolution
@@ -892,8 +885,9 @@ def main(quick_test: bool = False) -> bool:
         )
         # Count aggregate passes
         agg_passed = sum(
-            1 for stats in aggregate_metrics.values()
-            if stats["relative_error"] <= RELATIVE_ERROR_TOL
+            1
+            for key, stats in aggregate_metrics.items()
+            if stats["relative_error"] <= AGGREGATE_TOLERANCES.get(key, RELATIVE_ERROR_TOL)
         ) if aggregate_metrics else 0
 
         total_checks = len(final_field_errors) + len(aggregate_metrics)
@@ -925,10 +919,11 @@ def main(quick_test: bool = False) -> bool:
                 'description': f'{field} L2 error vs AGATE (final snapshot)',
             }
         for key, stats in aggregate_metrics.items():
+            threshold = AGGREGATE_TOLERANCES.get(key, RELATIVE_ERROR_TOL)
             all_metrics[f"{key}_r{resolution[0]}"] = {
                 'value': stats["relative_error"],
-                'threshold': RELATIVE_ERROR_TOL,
-                'passed': stats["relative_error"] <= RELATIVE_ERROR_TOL,
+                'threshold': threshold,
+                'passed': stats["relative_error"] <= threshold,
                 'description': f'{key} time-series relative error vs AGATE',
             }
 

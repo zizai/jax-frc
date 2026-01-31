@@ -1,14 +1,14 @@
 """GEM Reconnection Regression Against AGATE Reference Data.
 
 Physics:
-    Ideal MHD GEM reconnection in a thin-y slab (cylindrical-style geometry).
+    Ideal MHD GEM reconnection in a thin-y slab (xz plane).
 
-Note:
-    This case matches the AGATE GEM Hall-MHD setup (domain, boundaries, and
-    initial condition) using normalized units with Hall physics enabled.
+Status:
+    Hall MHD is disabled in JAX-FRC to align with the ideal-MHD fallback
+    reference data from AGATE.
 
-Note:
-    AGATE reference data is at t=12.0.
+Notes:
+    AGATE reference data is at t=12.0 and provides snapshot times.
     This validation uses a fixed resolution of 128x64x1.
 """
 

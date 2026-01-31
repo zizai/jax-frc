@@ -40,7 +40,7 @@ from jax_frc.configurations.magnetic_diffusion import MagneticDiffusionConfigura
 from jax_frc.configurations.frozen_flux import FrozenFluxConfiguration
 from jax_frc.configurations.orszag_tang import OrszagTangConfiguration
 from jax_frc.configurations.gem_reconnection import GEMReconnectionConfiguration
-from jax_frc.configurations.brio_wu_shock import BrioWuShockConfiguration
+from jax_frc.configurations.brio_wu import BrioWuConfiguration
 
 # Import phases submodule to trigger registration
 from jax_frc.configurations import phases
@@ -50,7 +50,7 @@ CONFIGURATION_REGISTRY = {
     'FrozenFluxConfiguration': FrozenFluxConfiguration,
     'OrszagTangConfiguration': OrszagTangConfiguration,
     'GEMReconnectionConfiguration': GEMReconnectionConfiguration,
-    'BrioWuShockConfiguration': BrioWuShockConfiguration,
+    'BrioWuConfiguration': BrioWuConfiguration,
     'LinearConfiguration': LinearConfiguration,
     'BelovaMergingConfiguration': BelovaMergingConfiguration,
     'BelovaCase1Configuration': BelovaCase1Configuration,
@@ -81,7 +81,7 @@ __all__ = [
     'FrozenFluxConfiguration',
     'OrszagTangConfiguration',
     'GEMReconnectionConfiguration',
-    'BrioWuShockConfiguration',
+    'BrioWuConfiguration',
     'LinearConfiguration',
     'ConfigurationResult',
     'TransitionSpec',

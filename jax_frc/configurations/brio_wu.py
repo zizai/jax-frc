@@ -9,7 +9,7 @@ from .base import AbstractConfiguration
 
 
 @dataclass
-class BrioWuShockConfiguration(AbstractConfiguration):
+class BrioWuConfiguration(AbstractConfiguration):
     """Brio-Wu MHD shock tube in Cartesian slab geometry.
 
     Z-directed shock tube for testing shock-capturing numerics.
@@ -17,18 +17,18 @@ class BrioWuShockConfiguration(AbstractConfiguration):
     Uses pseudo-1D domain (nx=1, ny=1).
     """
 
-    name: str = "brio_wu_shock"
+    name: str = "brio_wu"
     description: str = "Brio-Wu MHD shock tube"
 
     # Grid parameters (Cartesian naming)
     nx: int = 1  # Pseudo-1D
     ny: int = 1  # Pseudo-1D
     nz: int = 512
-    x_min: float = 0.01
-    x_max: float = 0.5
+    x_min: float = 0.0
+    x_max: float = 1.0
     y_min: float = 0.0
-    y_max: float = 2 * jnp.pi
-    z_min: float = -1.0
+    y_max: float = 1.0
+    z_min: float = 0.0
     z_max: float = 1.0
 
     # Left state (z < 0)
@@ -42,7 +42,7 @@ class BrioWuShockConfiguration(AbstractConfiguration):
     Bx_R: float = -1.0
 
     # Common
-    Bz: float = 0.75  # Guide field
+    Bz: float = 0.75  # Constant normal component (mapped to z-direction)
     gamma: float = 2.0
     eta: float = 1e-8
 
@@ -65,14 +65,15 @@ class BrioWuShockConfiguration(AbstractConfiguration):
     def build_initial_state(self, geometry: Geometry) -> State:
         z = geometry.z_grid
 
-        # Left/right states based on z
-        rho = jnp.where(z < 0, self.rho_L, self.rho_R)
-        p = jnp.where(z < 0, self.p_L, self.p_R)
+        z_mid = 0.5 * (geometry.z_min + geometry.z_max)
+        rho = jnp.where(z < z_mid, self.rho_L, self.rho_R)
+        p = jnp.where(z < z_mid, self.p_L, self.p_R)
 
-        # Magnetic field: Bx reverses, Bz constant
-        Bx = jnp.where(z < 0, self.Bx_L, self.Bx_R)
+        # Magnetic field: tangential component varies across z, normal component constant.
+        # Map Brio-Wu x-directed normal field to z-directed setup.
+        By = jnp.where(z < z_mid, self.Bx_L, self.Bx_R)
         B = jnp.zeros((geometry.nx, geometry.ny, geometry.nz, 3))
-        B = B.at[:, :, :, 0].set(Bx)
+        B = B.at[:, :, :, 1].set(By)
         B = B.at[:, :, :, 2].set(self.Bz)
 
         return State(

@@ -28,8 +28,7 @@ for Brio-Wu. The Brio-Wu case is renamed from `brio_wu_shock` to `brio_wu`.
   and map to `brio_wu`.
 
 ### Case rename
-- Rename `validation/cases/regression/brio_wu_shock.py` to
-  `validation/cases/regression/brio_wu.py`.
+- Rename `validation/cases/regression/brio_wu_shock.py` to `validation/cases/regression/brio_wu.py`.
 - Update case name constants, report name, and any case registry/imports.
 
 ### Brio-Wu metrics/plots
@@ -55,4 +54,3 @@ for Brio-Wu. The Brio-Wu case is renamed from `brio_wu_shock` to `brio_wu`.
 ## Verification
 - `py -m scripts/run_validation.py --case brio_wu --quick`
 - `py -m scripts/run_validation.py --case reconnection_gem --quick`
-
