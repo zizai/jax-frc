@@ -27,7 +27,7 @@ class TestSnapshotTimesComputation:
         """Verify snapshot times are evenly distributed for GEM."""
         from validation.utils.agate_runner import get_expected_config
 
-        config = get_expected_config("gem_reconnection", [512, 512, 1])
+        config = get_expected_config("gem_reconnection", [128, 64, 1])
         times = config["snapshot_times"]
 
         assert len(times) == 40
@@ -60,16 +60,6 @@ class TestQuickSnapshotTimes:
         assert times[0] == 0.0
         assert times[-1] == 0.48
         assert abs(times[2] - 0.24) < 1e-10  # midpoint
-
-    def test_quick_snapshot_times_gem(self):
-        """Verify quick mode uses 5 snapshots for GEM."""
-        from validation.cases.regression.reconnection_gem import get_quick_snapshot_times
-
-        times = get_quick_snapshot_times(12.0)
-        assert len(times) == 5
-        assert times[0] == 0.0
-        assert times[-1] == 12.0
-        assert abs(times[2] - 6.0) < 1e-10  # midpoint
 
 
 class TestFieldMetrics:

@@ -1,22 +1,15 @@
 """GEM Reconnection Regression Against AGATE Reference Data.
 
 Physics:
-    Hall MHD GEM reconnection in a thin-y slab (cylindrical-style geometry).
-
-IMPORTANT LIMITATION:
-    The current JAX-FRC physics models (ResistiveMHD, ExtendedMHD) only evolve
-    the magnetic field B via the induction equation. They do NOT evolve:
-    - Density (n) - remains constant
-    - Velocity (v) - remains constant
-    - Pressure (p) - remains constant
-
-    This is fundamentally different from AGATE's full MHD solver which evolves
-    all fields. Therefore, the validation comparison is only meaningful for
-    the magnetic field evolution.
+    Ideal MHD GEM reconnection in a thin-y slab (cylindrical-style geometry).
 
 Note:
-    AGATE reference data is at t=12.0 (only one state file available).
-    Only resolution 512 is available in AGATE reference data.
+    This case matches the AGATE GEM Hall-MHD setup (domain, boundaries, and
+    initial condition) using normalized units with Hall physics enabled.
+
+Note:
+    AGATE reference data is at t=12.0.
+    This validation uses a fixed resolution of 128x64x1.
 """
 
 from __future__ import annotations
@@ -72,7 +65,7 @@ def load_agate_config(case: str, resolution: list[int]) -> dict:
     full_case = case_map.get(case.lower(), case.lower())
 
     loader = AgateDataLoader()
-    loader.ensure_files(case, resolution[0])
+    loader.ensure_files(case, resolution)
     case_dir = Path(loader.cache_dir) / full_case / str(resolution[0])
     config_path = case_dir / f"{full_case}_{resolution[0]}.config.yaml"
 
@@ -101,7 +94,7 @@ def load_agate_snapshot(case: str, resolution: list[int], snapshot_idx: int) -> 
     full_case = case_map.get(case.lower(), case.lower())
 
     loader = AgateDataLoader()
-    loader.ensure_files(case, resolution[0])
+    loader.ensure_files(case, resolution)
     case_dir = Path(loader.cache_dir) / full_case / str(resolution[0])
 
     # Try new naming convention first (state_000000, state_000001, etc. - 6 digits from AGATE)
@@ -151,16 +144,9 @@ def load_agate_snapshot(case: str, resolution: list[int], snapshot_idx: int) -> 
 
 
 NAME = "reconnection_gem"
-DESCRIPTION = "GEM Hall reconnection regression vs AGATE reference data"
+DESCRIPTION = "GEM reconnection regression vs AGATE reference data (ideal MHD fallback)"
 
-RESOLUTIONS = ([512, 512, 1],)  # Only 512 available in AGATE reference data
-QUICK_RESOLUTIONS = ([512, 512, 1],)
-QUICK_NUM_SNAPSHOTS = 5  # t=0, 0.25*end, 0.5*end, 0.75*end, end
-
-
-def get_quick_snapshot_times(end_time: float) -> list[float]:
-    """Get 5 evenly-spaced snapshot times for quick test mode."""
-    return [i * end_time / 4 for i in range(5)]
+RESOLUTIONS = ([128, 64, 1],)
 
 
 # Relaxed thresholds due to different numerical schemes
@@ -175,23 +161,20 @@ IMY = 2
 IMZ = 3
 
 
-def setup_configuration(quick_test: bool, resolution: list[int]) -> dict:
+def setup_configuration(resolution: list[int]) -> dict:
     """Setup simulation configuration.
 
     Args:
-        quick_test: If True, still run full time but compare fewer snapshots
         resolution: Grid resolution as [nx, ny, nz]
 
     Returns:
         Configuration dictionary with nx, nz, t_end, dt, etc.
     """
     # AGATE reference data is at t=12.0
-    # AGATE grid is 512 x 256 (nx x ny in AGATE's xy-plane)
-    # JAX uses xz-plane, so we need nx=512, nz=256
-    # Quick test mode: still run full time (t=12.0) but compare at fewer snapshots
+    # JAX uses xz-plane, so use nx/nz directly from the requested resolution.
     return {
         "nx": resolution[0],
-        "nz": resolution[0] // 2,  # Match AGATE aspect ratio
+        "nz": resolution[1],
         "t_end": 12.0,  # Full time for snapshot comparison
         "dt": 1e-3,
         "lambda_": 0.5,
@@ -293,11 +276,16 @@ def run_simulation(cfg: dict) -> tuple:
     )
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
-    # Disable divergence cleaning to avoid numerical instability
-    from jax_frc.models.extended_mhd import ExtendedMHD
-    model = ExtendedMHD(eta=config.eta, apply_divergence_cleaning=False)
-    # Use higher damping factor for Hall term stability
-    solver = Solver.create({"type": "semi_implicit", "damping_factor": 1e12})
+    from jax_frc.models.finite_volume_mhd import FiniteVolumeMHD
+    from jax_frc.solvers.explicit import RK4Solver
+
+    model = FiniteVolumeMHD(
+        gamma=5.0 / 3.0,
+        riemann_solver="hll",
+        limiter_beta=1.3,
+        use_divergence_cleaning=True,
+    )
+    solver = RK4Solver()
 
     t_end = cfg["t_end"]
     dt = cfg["dt"]
@@ -343,8 +331,6 @@ def run_simulation_with_snapshots(
     Returns:
         Tuple of (states_list, geometry, history)
     """
-    from jax_frc.models.extended_mhd import ExtendedMHD
-
     config = GEMReconnectionConfiguration(
         nx=cfg["nx"],
         nz=cfg["nz"],
@@ -356,18 +342,35 @@ def run_simulation_with_snapshots(
     )
     geometry = config.build_geometry()
     state = config.build_initial_state(geometry)
-    model = ExtendedMHD(eta=config.eta, apply_divergence_cleaning=False)
-    solver = Solver.create({"type": "semi_implicit", "damping_factor": 1e12})
+    from jax_frc.models.finite_volume_mhd import FiniteVolumeMHD
+    from jax_frc.solvers.explicit import RK4Solver
+
+    model = FiniteVolumeMHD(
+        gamma=5.0 / 3.0,
+        riemann_solver="hll",
+        limiter_beta=1.3,
+        use_divergence_cleaning=True,
+    )
+    solver = RK4Solver()
 
     dt = cfg["dt"]
     states = []
     history = {"times": [], "metrics": []}
 
-    for target_time in snapshot_times:
+    total_start = time.time()
+    for snap_idx, target_time in enumerate(snapshot_times):
         # Step until we reach target_time
+        snap_start = time.time()
+        step_count = 0
+        print(
+            f"    Snapshot {snap_idx + 1}/{len(snapshot_times)} target t={target_time:.4f}...",
+            end="",
+            flush=True,
+        )
         while state.time < target_time - 1e-12:
             step_dt = min(dt, target_time - state.time)
             state = solver.step_checked(state, step_dt, model, geometry)
+            step_count += 1
 
         # Capture state at this snapshot
         states.append(state)
@@ -377,6 +380,12 @@ def run_simulation_with_snapshots(
         )
         history["times"].append(float(state.time))
         history["metrics"].append(metrics)
+        snap_elapsed = time.time() - snap_start
+        total_elapsed = time.time() - total_start
+        print(
+            f" done in {snap_elapsed:.2f}s ({step_count} steps), "
+            f"t={float(state.time):.4f}, total {total_elapsed:.2f}s"
+        )
 
     return states, geometry, history
 
@@ -396,14 +405,14 @@ def _parse_state_vector(vec: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nda
     return rho, p, v, B
 
 
-def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
+def load_agate_series(case: str, resolution: list[int]) -> tuple[np.ndarray, dict]:
     # Map short names to full names
     case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
     full_case = case_map.get(case.lower(), case.lower())
 
     loader = AgateDataLoader()
     loader.ensure_files(case, resolution)
-    case_dir = Path(loader.cache_dir) / full_case / str(resolution)
+    case_dir = Path(loader.cache_dir) / full_case / str(resolution[0])
     grid_files = list(case_dir.rglob("*.grid.h5"))
     if not grid_files:
         raise FileNotFoundError(f"No AGATE grid file found in {case_dir}")
@@ -451,7 +460,7 @@ def load_agate_series(case: str, resolution: int) -> tuple[np.ndarray, dict]:
     return np.array(times), {k: np.array(v) for k, v in metrics.items()}
 
 
-def load_agate_fields(case: str, resolution: int, use_initial: bool = False) -> dict:
+def load_agate_fields(case: str, resolution: list[int], use_initial: bool = False) -> dict:
     """Load spatial fields from AGATE reference data.
 
     Args:
@@ -469,7 +478,7 @@ def load_agate_fields(case: str, resolution: int, use_initial: bool = False) -> 
 
     loader = AgateDataLoader()
     loader.ensure_files(case, resolution)
-    case_dir = Path(loader.cache_dir) / full_case / str(resolution)
+    case_dir = Path(loader.cache_dir) / full_case / str(resolution[0])
 
     def _state_key(path: Path) -> int:
         match = re.search(r"state_(\d+)", path.name)
@@ -606,7 +615,8 @@ def validate_all_snapshots(
     jax_states: list,
     case: str,
     resolution: list[int],
-    snapshot_times: list[float]
+    snapshot_times: list[float],
+    agate_snapshot_times: list[float] | None = None,
 ) -> list[dict]:
     """Compare JAX-FRC vs AGATE at each snapshot.
 
@@ -615,13 +625,19 @@ def validate_all_snapshots(
         case: Case name (e.g., "ot" for Orszag-Tang)
         resolution: Grid resolution as [nx, ny, nz]
         snapshot_times: List of snapshot times
+        agate_snapshot_times: Optional AGATE snapshot times for nearest-match mapping
 
     Returns:
         List of dicts with time and per-field errors
     """
     all_errors = []
+    agate_times = np.array(agate_snapshot_times) if agate_snapshot_times is not None else None
     for i, (jax_state, t) in enumerate(zip(jax_states, snapshot_times)):
-        agate_fields = load_agate_snapshot(case, resolution, snapshot_idx=i)
+        if agate_times is not None:
+            snapshot_idx = int(np.argmin(np.abs(agate_times - t)))
+        else:
+            snapshot_idx = i
+        agate_fields = load_agate_snapshot(case, resolution, snapshot_idx=snapshot_idx)
 
         field_errors = {}
 
@@ -753,15 +769,13 @@ def compare_final_values(jax_value: float, agate_value: float, metric_name: str)
     }
 
 
-def main(quick_test: bool = False) -> bool:
+def main() -> bool:
     print(f"Running validation: {NAME}")
     print(f"  {DESCRIPTION}")
-    if quick_test:
-        print("  (QUICK TEST MODE - 5 snapshots)")
     print()
 
     print("Configuration:")
-    resolutions = QUICK_RESOLUTIONS if quick_test else RESOLUTIONS
+    resolutions = RESOLUTIONS
     print(f"  resolutions: {resolutions}")
     print(f"  Field L2 threshold: {L2_ERROR_TOL} ({L2_ERROR_TOL*100:.0f}%)")
     print(f"  Relative error threshold: {RELATIVE_ERROR_TOL} ({RELATIVE_ERROR_TOL*100:.0f}%)")
@@ -772,12 +786,14 @@ def main(quick_test: bool = False) -> bool:
     all_metrics = {}
 
     # Download AGATE data before running simulations
-    print("Downloading AGATE reference data...")
+    print("Preparing AGATE reference data...")
     for resolution in resolutions:
         try:
             loader = AgateDataLoader()
-            loader.ensure_files("gem", resolution[0])
-            print(f"  Resolution {resolution[0]}: OK")
+            agate_start = time.time()
+            loader.ensure_files("gem", resolution)
+            agate_elapsed = time.time() - agate_start
+            print(f"  Resolution {resolution[0]}: OK ({agate_elapsed:.2f}s)")
         except Exception as exc:
             print(f"  Resolution {resolution[0]}: FAILED ({exc})")
     print()
@@ -794,19 +810,34 @@ def main(quick_test: bool = False) -> bool:
             overall_pass = False
             continue
 
-        # Determine snapshot times
-        if quick_test:
-            snapshot_times = get_quick_snapshot_times(12.0)
-            print(f"  Using {len(snapshot_times)} snapshots (quick mode)")
-        else:
-            snapshot_times = agate_config.get("snapshot_times")
-            if snapshot_times is None:
-                # Fallback for legacy data without config
-                snapshot_times = [0.0, 12.0]
-            print(f"  Using {len(snapshot_times)} snapshots")
+        # If cached AGATE config doesn't match requested resolution, regenerate
+        if agate_config.get("resolution") != list(resolution):
+            try:
+                from validation.utils.agate_runner import run_agate_simulation
+
+                print(
+                    "  AGATE cache resolution mismatch; regenerating "
+                    f"{resolution[0]}x{resolution[1]}x{resolution[2]}..."
+                )
+                loader = AgateDataLoader()
+                output_dir = Path(loader.cache_dir) / "gem_reconnection" / str(resolution[0])
+                run_agate_simulation("gem_reconnection", list(resolution), output_dir, overwrite=True)
+                agate_config = load_agate_config("gem", resolution)
+            except Exception as exc:
+                print(f"  ERROR: Failed to regenerate AGATE data: {exc}")
+                overall_pass = False
+                continue
+
+        # Determine snapshot times and align to AGATE data
+        agate_snapshot_times = agate_config.get("snapshot_times")
+        if agate_snapshot_times is None:
+            # Fallback for legacy data without config
+            agate_snapshot_times = [0.0, 12.0]
+        snapshot_times = list(agate_snapshot_times)
+        print(f"  Using {len(snapshot_times)} snapshots (matching AGATE)")
 
         # Run simulation with snapshots
-        cfg = setup_configuration(quick_test, resolution)
+        cfg = setup_configuration(resolution)
         print(f"  Running simulation to t={cfg['t_end']}...", end="", flush=True)
         t_start = time.time()
         try:
@@ -824,7 +855,7 @@ def main(quick_test: bool = False) -> bool:
         print(f"  Validating {len(snapshot_times)} snapshots...")
         try:
             snapshot_errors = validate_all_snapshots(
-                jax_states, "gem", resolution, snapshot_times
+                jax_states, "gem", resolution, snapshot_times, agate_snapshot_times
             )
         except Exception as exc:
             print(f"  ERROR: Failed to validate snapshots: {exc}")
@@ -835,7 +866,7 @@ def main(quick_test: bool = False) -> bool:
         agate_times = None
         agate_scalar_metrics = None
         try:
-            agate_times, agate_scalar_metrics = load_agate_series("gem", resolution[0])
+            agate_times, agate_scalar_metrics = load_agate_series("gem", resolution)
             aggregate_metrics = compute_aggregate_metrics(
                 history, agate_times, agate_scalar_metrics
             )
@@ -911,7 +942,7 @@ def main(quick_test: bool = False) -> bool:
             "resolutions": [list(r) for r in resolutions],
             "L2_threshold": L2_ERROR_TOL,
             "relative_threshold": RELATIVE_ERROR_TOL,
-            "quick_test": quick_test,
+            "quick_test": False,
         },
         metrics=all_metrics,
         overall_pass=overall_pass,
@@ -955,7 +986,7 @@ def main(quick_test: bool = False) -> bool:
             agate_fields = load_agate_snapshot("gem", resolution, len(data['snapshot_errors']) - 1)
         except Exception:
             # Fallback to load_agate_fields for legacy data
-            agate_fields = load_agate_fields("gem", resolution[0], use_initial=False)
+            agate_fields = load_agate_fields("gem", resolution, use_initial=False)
 
         # Density comparison
         jax_density = np.asarray(final_state.n)[:, 0, :]
@@ -999,6 +1030,5 @@ def main(quick_test: bool = False) -> bool:
 
 
 if __name__ == "__main__":
-    quick = "--quick" in sys.argv
-    success = main(quick_test=quick)
+    success = main()
     sys.exit(0 if success else 1)

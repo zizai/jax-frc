@@ -131,3 +131,53 @@ def reconstruct_plm_component(
         Tuple of (q_L, q_R) at interfaces
     """
     return reconstruct_plm(q, axis, beta)
+
+
+@partial(jit, static_argnums=(1, 3))
+def reconstruct_plm_bc(
+    q: jnp.ndarray,
+    axis: int,
+    beta: float = 1.3,
+    bc: str = "periodic",
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """PLM reconstruction with boundary handling.
+
+    Args:
+        q: Cell-centered values
+        axis: Direction of reconstruction
+        beta: MC limiter parameter
+        bc: Boundary type ("periodic" or zero-gradient for others)
+
+    Returns:
+        Tuple of (q_L, q_R) at interfaces
+    """
+    if bc == "periodic":
+        return reconstruct_plm(q, axis, beta)
+
+    pad_width = [(0, 0)] * q.ndim
+    pad_width[axis] = (1, 1)
+    q_pad = jnp.pad(q, pad_width, mode="edge")
+
+    slicer_mid = [slice(None)] * q.ndim
+    slicer_lo = [slice(None)] * q.ndim
+    slicer_hi = [slice(None)] * q.ndim
+    slicer_mid[axis] = slice(1, -1)
+    slicer_lo[axis] = slice(0, -2)
+    slicer_hi[axis] = slice(2, None)
+
+    q_mid = q_pad[tuple(slicer_mid)]
+    dq_minus = q_mid - q_pad[tuple(slicer_lo)]
+    dq_plus = q_pad[tuple(slicer_hi)] - q_mid
+
+    dq = mc_limiter(dq_minus, dq_plus, beta)
+
+    q_L = q_mid + 0.5 * dq
+    q_R = q_mid - 0.5 * dq
+
+    # Shift right state to the i+1/2 interface with edge padding
+    q_R_pad = jnp.pad(q_R, pad_width, mode="edge")
+    slicer_r = [slice(None)] * q.ndim
+    slicer_r[axis] = slice(2, None)
+    q_R = q_R_pad[tuple(slicer_r)]
+
+    return q_L, q_R

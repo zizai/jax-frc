@@ -69,7 +69,7 @@ class AgateDataLoader:
                 extracted = [dest_dir / name for name in tf.getnames()]
         return extracted
 
-    def ensure_files(self, case: str, resolution: int) -> list[Path]:
+    def ensure_files(self, case: str, resolution: int | list[int] | tuple[int, ...]) -> list[Path]:
         """Ensure required files are present locally; generate if missing.
 
         Priority:
@@ -81,15 +81,22 @@ class AgateDataLoader:
         case_map = {"ot": "orszag_tang", "gem": "gem_reconnection"}
         full_case = case_map.get(case.lower(), case.lower())
 
-        output_dir = Path(self.cache_dir) / full_case / str(resolution)
+        if isinstance(resolution, (list, tuple)):
+            res_list = list(resolution)
+            res_key = res_list[0]
+        else:
+            res_list = resolution
+            res_key = resolution
+
+        output_dir = Path(self.cache_dir) / full_case / str(res_key)
 
         # Try local generation first
         try:
             from validation.utils.agate_runner import is_cache_valid, run_agate_simulation
 
-            if not is_cache_valid(full_case, resolution, output_dir):
+            if not is_cache_valid(full_case, res_list, output_dir):
                 print(f"Generating AGATE reference data for {full_case} at {resolution}...")
-                run_agate_simulation(full_case, resolution, output_dir, overwrite=True)
+                run_agate_simulation(full_case, res_list, output_dir, overwrite=True)
 
             # Return all HDF5 files in the directory
             return list(output_dir.glob("*.h5"))
@@ -97,7 +104,7 @@ class AgateDataLoader:
         except (ImportError, RuntimeError):
             # Fall back to Zenodo download if AGATE not available
             print("AGATE not installed, falling back to Zenodo download...")
-            return self._ensure_files_zenodo(case, resolution)
+            return self._ensure_files_zenodo(case, res_key)
 
     def _ensure_files_zenodo(self, case: str, resolution: int) -> list[Path]:
         """Original Zenodo download logic (fallback)."""

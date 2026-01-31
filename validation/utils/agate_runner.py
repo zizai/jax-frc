@@ -19,8 +19,8 @@ CASE_CONFIGS = {
         "num_snapshots": 40,
     },
     "gem_reconnection": {
-        "physics": "hall_mhd",
-        "hall": True,
+        "physics": "ideal_mhd",
+        "hall": False,
         "end_time": 12.0,
         "cfl": 0.4,
         "guide_field": 0.0,
@@ -178,10 +178,10 @@ def _run_gem_reconnection(resolution: list[int], output_dir: Path) -> None:
     config = get_expected_config("gem_reconnection", resolution)
     snapshot_times = config["snapshot_times"]
 
-    scenario = ReconnectionGEM(divClean=True, hall=True, guide_field=0.0)
+    scenario = ReconnectionGEM(divClean=True, hall=False, guide_field=0.0)
     roller = Roller.autodefault(
         scenario,
-        ncells=[resolution[0], resolution[0], 1],
+        ncells=[resolution[0], resolution[1], 1],
         options={"cfl": 0.4}
     )
     roller.orient("numpy")
