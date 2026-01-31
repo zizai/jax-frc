@@ -44,8 +44,17 @@ class Solver(ABC):
         """Advance state by one timestep without applying constraints."""
         raise NotImplementedError
 
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
-        """Advance state by one timestep and apply constraints."""
+    def step(self, state: State, model: PhysicsModel, geometry) -> State:
+        """Complete step: compute dt, advance, apply constraints."""
+        dt = self._compute_dt(state, model, geometry)
+        new_state = self.advance(state, dt, model, geometry)
+        new_state = self._apply_constraints(new_state, geometry)
+        if self.use_checked_step:
+            self._check_state(new_state)
+        return new_state
+
+    def step_with_dt(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        """Advance state by one timestep with explicit dt (legacy API)."""
         new_state = self.advance(state, dt, model, geometry)
         return model.apply_constraints(new_state, geometry)
 

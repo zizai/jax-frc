@@ -54,3 +54,20 @@ def test_solver_apply_constraints():
     new_state = solver._apply_constraints(state, geometry)
     assert new_state is not None
     assert new_state.B.shape == state.B.shape
+
+
+def test_solver_step_computes_dt_internally():
+    """Solver.step() should compute dt internally, not require it as param."""
+    from jax_frc.solvers.explicit import RK4Solver
+    from jax_frc.models.extended_mhd import ExtendedMHD
+    from jax_frc.core.state import State
+    from jax_frc.core.geometry import Geometry
+    
+    solver = RK4Solver()
+    model = ExtendedMHD(eta=1e-4)
+    geometry = Geometry(nx=8, ny=8, nz=1)
+    state = State.zeros(8, 8, 1)
+    
+    # New signature: step(state, model, geometry) - no dt parameter
+    new_state = solver.step(state, model, geometry)
+    assert new_state.time > state.time
