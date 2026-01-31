@@ -36,10 +36,10 @@ CASE_CONFIGS = {
     "gem_reconnection_hall": {
         "physics": "hall_mhd",
         "hall": True,
-        "end_time": 2.0,
+        "end_time": 12.0,
         "cfl": 0.4,
         "guide_field": 0.0,
-        "num_snapshots": 10,
+        "num_snapshots": 40,
     },
 }
 

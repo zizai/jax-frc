@@ -66,7 +66,7 @@ AGGREGATE_KEYS = (
 
 def setup_configuration(resolution: list[int]) -> dict:
     cfg = base.setup_configuration(resolution)
-    cfg["t_end"] = 2.0
+    cfg["t_end"] = 12.0
     cfg["dt"] = None
     cfg["use_cfl"] = True
     cfg["dt_scale"] = 1.0
@@ -201,7 +201,7 @@ def main() -> bool:
 
         agate_snapshot_times = agate_config.get("snapshot_times")
         if agate_snapshot_times is None:
-            agate_snapshot_times = [0.0, 2.0]
+            agate_snapshot_times = [0.0, 12.0]
         snapshot_times = list(agate_snapshot_times)
         print(f"  Using {len(snapshot_times)} snapshots (matching AGATE)")
 
