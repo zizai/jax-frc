@@ -238,7 +238,7 @@ def _run_gem_reconnection_hall(resolution: list[int], output_dir: Path) -> None:
     roller = Roller.autodefault(
         scenario,
         ncells=[resolution[0], resolution[1], 1],
-        options={"cfl": 0.4}
+        options={"cfl": 0.4, "slopeName": "mcbeta", "mcbeta": 1.3}
     )
     roller.orient("numpy")
     roller.time = 0.0

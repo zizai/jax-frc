@@ -62,7 +62,7 @@ class RK2Solver(Solver):
     """2nd-order Runge-Kutta (Heun/SSPRK2) integration."""
 
     @partial(jax.jit, static_argnums=(0, 3, 4))
-    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+    def advance(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
         def add_scaled_rhs(base: State, rhs: State, scale: float) -> State:
             new_n = base.n + scale * rhs.n if base.n is not None and rhs.n is not None else base.n
             new_v = base.v + scale * rhs.v if base.v is not None and rhs.v is not None else base.v
@@ -112,7 +112,17 @@ class RK2Solver(Solver):
             time=state.time + dt,
             step=state.step + 1,
         )
+        return new_state
+
+    @partial(jax.jit, static_argnums=(0, 3, 4))
+    def step(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        new_state = self.advance(state, dt, model, geometry)
         return model.apply_constraints(new_state, geometry)
+
+    def step_checked(self, state: State, dt: float, model: PhysicsModel, geometry) -> State:
+        new_state = self.step(state, dt, model, geometry)
+        self._check_state(new_state)
+        return new_state
 
 
 @dataclass(frozen=True)
